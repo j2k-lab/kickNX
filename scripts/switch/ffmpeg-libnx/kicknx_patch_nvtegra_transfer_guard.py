@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 
-MARKER = "twiNX NVTEGRA transfer guard"
+MARKER = "kickNX NVTEGRA transfer guard"
 
 
 def find_function_end(text, start):
@@ -66,8 +66,8 @@ def replace_function(text, signature, replacement):
 
 
 HELPERS = r'''
-/* twiNX NVTEGRA transfer guard:
- * Twitch HLS discontinuities can leave a hardware frame in a state that is
+/* kickNX NVTEGRA transfer guard:
+ * Kick HLS discontinuities can leave a hardware frame in a state that is
  * still structurally present but unsafe to download. Validate maps, planes and
  * backing buffers before VIC or CPU transfer code dereferences them.
  */
@@ -545,12 +545,12 @@ static int nvtegra_transfer_data(AVHWFramesContext *ctx, AVFrame *dst, const AVF
 
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit("usage: twinx_patch_nvtegra_transfer_guard.py <hwcontext_nvtegra.c>")
+        raise SystemExit("usage: kicknx_patch_nvtegra_transfer_guard.py <hwcontext_nvtegra.c>")
 
     path = Path(sys.argv[1])
     text = path.read_text()
     if MARKER in text:
-        print("twiNX NVTEGRA transfer guard already applied")
+        print("kickNX NVTEGRA transfer guard already applied")
         return
 
     text = text.replace("#include <stdbool.h>\n", "#include <stdbool.h>\n#include <stdint.h>\n")
@@ -567,7 +567,7 @@ def main():
     text = replace_function(text, "static int nvtegra_transfer_data(", TRANSFER_DATA)
 
     path.write_text(text)
-    print("Applied twiNX NVTEGRA transfer guard")
+    print("Applied kickNX NVTEGRA transfer guard")
 
 
 if __name__ == "__main__":

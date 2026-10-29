@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 
-MARKER = "twiNX H264 reference/frame guard"
+MARKER = "kickNX H264 reference/frame guard"
 
 
 def find_function_end(text, start):
@@ -70,8 +70,8 @@ def replace_function(text, signature, replacement):
 
 
 HELPERS = r'''
-/* twiNX H264 reference/frame guard:
- * Twitch commercial boundaries can leave the H.264 reference lists with
+/* kickNX H264 reference/frame guard:
+ * Kick commercial boundaries can leave the H.264 reference lists with
  * incomplete or stale hardware frames. Validate every picture before it
  * reaches the NVDEC command buffer; dropping one damaged frame is safer than
  * submitting a bad reference and corrupting the hardware-frame copy path.
@@ -672,12 +672,12 @@ static int nvtegra_h264_end_frame(AVCodecContext *avctx) {
 
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit("usage: twinx_patch_nvtegra_h264_refs.py <nvtegra_h264.c>")
+        raise SystemExit("usage: kicknx_patch_nvtegra_h264_refs.py <nvtegra_h264.c>")
 
     path = Path(sys.argv[1])
     text = path.read_text()
     if MARKER in text:
-        print("twiNX H264 reference/frame guard already applied")
+        print("kickNX H264 reference/frame guard already applied")
         return
 
     text = text.replace("#include <stdbool.h>\n", "#include <stdbool.h>\n#include <stdint.h>\n")
@@ -695,7 +695,7 @@ def main():
     text = replace_function(text, "static int nvtegra_h264_end_frame(", END_FRAME)
 
     path.write_text(text)
-    print("Applied twiNX H264 NVTEGRA reference/frame guard")
+    print("Applied kickNX H264 NVTEGRA reference/frame guard")
 
 
 if __name__ == "__main__":

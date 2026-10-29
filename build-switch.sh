@@ -4,7 +4,9 @@ set -euo pipefail
 : "${DEVKITPRO:=/opt/devkitpro}"
 export DEVKITA64="${DEVKITA64:-$DEVKITPRO/devkitA64}"
 export PATH="$DEVKITA64/bin:$DEVKITPRO/tools/bin:$PATH"
-JOBS="${JOBS:-1}"
+JOBS="${JOBS:-8}"
+
+git config --global --add safe.directory /workspace || true
 
 cmake_args=(
   -S .
@@ -16,9 +18,9 @@ cmake_args=(
   "-DPKG_CONFIG_EXECUTABLE=$DEVKITPRO/portlibs/switch/bin/aarch64-none-elf-pkg-config"
 )
 
-if [[ -n "${TWINX_FFMPEG_ROOT:-}" ]]; then
-  cmake_args+=("-DTWINX_FFMPEG_ROOT=$TWINX_FFMPEG_ROOT")
+if [[ -n "${KICKNX_FFMPEG_ROOT:-}" ]]; then
+  cmake_args+=("-DKICKNX_FFMPEG_ROOT=$KICKNX_FFMPEG_ROOT")
 fi
 
 cmake "${cmake_args[@]}"
-ninja -C build_switch -j"$JOBS" TwiNX.nro
+ninja -C build_switch -j"$JOBS" KickNX.nro

@@ -1,8 +1,8 @@
 # Nintendo Switch FFmpeg 7.1 libnx TLS recipe
 
 This directory contains the reproducible `switch-ffmpeg` package recipe used
-for the twiNX 0.9.0 release build. It adds Nintendo Switch/libnx TLS support so
-FFmpeg can open HTTPS Twitch playlists directly, plus the validated twiNX
+for the kickNX 0.9.0 release build. It adds Nintendo Switch/libnx TLS support so
+FFmpeg can open HTTPS Kick playlists directly, plus the validated kickNX
 H.264-reference and NVTEGRA hardware-frame transfer guards.
 
 The recipe downloads the official FFmpeg 7.1 source archive and verifies its
@@ -17,14 +17,14 @@ From this directory:
 makepkg -Csf --noconfirm
 ```
 
-Extract the generated package into twiNX's local dependency root:
+Extract the generated package into kickNX's local dependency root:
 
 ```bash
-mkdir -p ../../../.twinx-build/ffmpeg-local-root
+mkdir -p ../../../.kicknx-build/ffmpeg-local-root
 bsdtar -xf switch-ffmpeg-7.1-12-any.pkg.tar.zst \
-  -C ../../../.twinx-build/ffmpeg-local-root
+  -C ../../../.kicknx-build/ffmpeg-local-root
 ```
 
-The normal twiNX build scripts automatically detect that local root. A custom
-location can instead be supplied through `TWINX_FFMPEG_ROOT`; it must point to
+The normal kickNX build scripts automatically detect that local root. A custom
+location can instead be supplied through `KICKNX_FFMPEG_ROOT`; it must point to
 the directory containing `include/` and `lib/`.

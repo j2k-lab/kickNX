@@ -1,7 +1,7 @@
 param(
     [int]$Jobs = 1,
     [string]$DevkitPro = $env:DEVKITPRO,
-    [string]$FfmpegRoot = $env:TWINX_FFMPEG_ROOT
+    [string]$FfmpegRoot = $env:KICKNX_FFMPEG_ROOT
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,11 +59,11 @@ $cmakeArgs = @(
 if (-not [string]::IsNullOrWhiteSpace($FfmpegRoot)) {
     $cmakeFfmpegRoot = Convert-ToCMakePath -Path $FfmpegRoot
     Write-Host "Using custom FFmpeg root: $cmakeFfmpegRoot"
-    $cmakeArgs += "-DTWINX_FFMPEG_ROOT=$cmakeFfmpegRoot"
+    $cmakeArgs += "-DKICKNX_FFMPEG_ROOT=$cmakeFfmpegRoot"
 }
 
 & cmake @cmakeArgs
 if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed with exit code $LASTEXITCODE." }
 
-& ninja -C build_switch "-j$Jobs" TwiNX.nro
+& ninja -C build_switch "-j$Jobs" KickNX.nro
 if ($LASTEXITCODE -ne 0) { throw "Nintendo Switch build failed with exit code $LASTEXITCODE." }

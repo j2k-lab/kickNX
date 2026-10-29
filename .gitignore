@@ -1,7 +1,7 @@
-# twiNX local development and build output
+# kickNX local development and build output
 /build*/
-/.twinx-build/
-/.twinx-backups/
+/.kicknx-build/
+/.kicknx-backups/
 /.vscode/
 /.idea/
 /cmake-*/
@@ -22,8 +22,8 @@
 *.p12
 *.pfx
 *.pem
-/twinx.txt
-/twinx.example.txt
+/kicknx.txt
+/kicknx.example.txt
 /.env
 *.token
 

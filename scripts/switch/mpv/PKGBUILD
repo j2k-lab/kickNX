@@ -15,12 +15,12 @@ options=(!strip libtool staticlibs)
 source=(
   "${pkgbasename}-${pkgver}.tar.gz::https://github.com/mpv-player/mpv/archive/v${pkgver}.tar.gz"
   "deko3d.patch"
-  "twinx_patch_mp_image.py"
+  "kicknx_patch_mp_image.py"
 )
 sha256sums=(
   '29abc44f8ebee013bb2f9fe14d80b30db19b534c679056e4851ceadf5a5e8bf6'
   'SKIP'
-  'e3f9074b7fad826d636d086d79391e78aa87da8bb57f754f510744d62849d8e9'
+  'cbc1401d7ec00dc0cab4e29a1ed9af25aa80585ffba4c0f0c53d11eaf5681c1e'
 )
 makedepends=("dkp-toolchain-vars" "dkp-meson-scripts" "python" "meson")
 depends=('switch-ffmpeg' 'switch-mesa')
@@ -29,7 +29,7 @@ groups=('switch-portlibs')
 prepare() {
   cd "mpv-$pkgver"
   patch -Np1 -i "$srcdir/deko3d.patch"
-  python "$srcdir/twinx_patch_mp_image.py" video/mp_image.c
+  python "$srcdir/kicknx_patch_mp_image.py" video/mp_image.c
 }
 
 build() {

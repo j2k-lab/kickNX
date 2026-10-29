@@ -153,7 +153,7 @@ def replace_function(source: str, signature: str, replacement: str) -> str:
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("Usage: twinx_patch_mp_image.py <video/mp_image.c>", file=sys.stderr)
+        print("Usage: kicknx_patch_mp_image.py <video/mp_image.c>", file=sys.stderr)
         return 2
 
     path = Path(sys.argv[1])
@@ -188,7 +188,7 @@ def main() -> int:
         return 1
 
     path.write_text(text, encoding="utf-8", newline="\n")
-    print("Applied twiNX MPV hardware-frame side-data guard")
+    print("Applied kickNX MPV hardware-frame side-data guard")
     return 0
 
 
