@@ -43,6 +43,10 @@ public:
     View* getNextFocus(brls::FocusDirection direction, View* currentView) override { return this; }
 
     void setTitie(const std::string& title);
+    void setTitle(const std::string& title) { this->setTitie(title); }
+    void setLoadingNote(const std::string& note);
+    void showLoading();
+    void hideLoading(bool dimming = true);
 
     void setList(const std::vector<std::string>& values, int index = -1);
 
@@ -79,6 +83,13 @@ public:
     using PlaybackRecoveryHandler = std::function<bool(MpvEventEnum)>;
     void setPlaybackRecoveryHandler(PlaybackRecoveryHandler handler);
 
+    void setLiveMode(bool live, int64_t uptimeSeconds = 0);
+    void setStreamUptime(int64_t uptimeSeconds);
+    int64_t getCurrentStreamUptime() const;
+    void updateLiveProgressUI();
+
+    using CloseHandler = std::function<void()>;
+    static void setGlobalCloseHandler(CloseHandler handler);
     static bool close(bool quit = false);
 
 private:
@@ -96,11 +107,9 @@ private:
     BRLS_BIND(brls::Box, btnEpisode, "show/episode/box");
     BRLS_BIND(brls::Box, btnVolume, "video/osd/volume");
     BRLS_BIND(brls::Box, btnClose, "video/close/box");
-    BRLS_BIND(brls::Box, osdLockBox, "video/osd/lock/box");
     BRLS_BIND(brls::Box, iconBox, "video/osd/icon/box");
     BRLS_BIND(brls::Label, iconVideoQuality, "video/quality/label");
     BRLS_BIND(brls::Label, iconVideoSpeed, "video/speed/label");
-    BRLS_BIND(SVGImage, osdLockIcon, "video/osd/lock/icon");
     BRLS_BIND(SVGImage, toggleIcon, "video/osd/toggle/icon");
     BRLS_BIND(SVGImage, volumeIcon, "video/osd/volume/icon");
     BRLS_BIND(SVGImage, danmakuIcon, "video/osd/danmaku/icon");
@@ -113,7 +122,7 @@ private:
     // 用于显示缓冲组件
     BRLS_BIND(brls::Box, osdCenterBox, "video/osd/center/box");
     BRLS_BIND(brls::Label, centerLabel, "video/osd/center/label");
-    BRLS_BIND(brls::ProgressSpinner, osdSpinner, "video/osd/loading");
+    BRLS_BIND(brls::View, osdSpinner, "video/osd/loading");
     // 用于通用的提示信息
     BRLS_BIND(brls::Box, osdInfoBox, "video/osd/info/box");
     BRLS_BIND(brls::Label, infoLabel, "video/osd/info/label");
@@ -121,6 +130,7 @@ private:
     // 用于显示和控制视频时长
     BRLS_BIND(VideoProgressSlider, osdSlider, "video/osd/bottom/progress");
     BRLS_BIND(brls::Label, leftStatusLabel, "video/left/status");
+    BRLS_BIND(brls::Label, centerStatusLabel, "video/center/status");
     BRLS_BIND(brls::Label, rightStatusLabel, "video/right/status");
     BRLS_BIND(brls::Label, videoSpeedLabel, "video/speed/label");
     BRLS_BIND(brls::Label, showEpisodeLabel, "show/episode/label");
@@ -135,13 +145,10 @@ private:
     void registerMpvEvent();
     void unRegisterMpvEvent();
 
-    void showLoading();
-    void hideLoading(bool dimming = true);
     bool toggleProfile();
     /// OSD
     void toggleOSD();
     void hideOSD();
-    bool toggleOSDLock();
     bool toggleSpeed();
     bool toggleVolume(brls::View* view);
     void showHint(const std::string& value);
@@ -157,6 +164,7 @@ private:
 
     int playIndex = -1;
     bool enableDanmaku = true;
+    std::string customLoadingNote;
     brls::Event<int> playIndexEvent;
     brls::VoidEvent settingEvent;
     brls::VoidEvent channelEvent;
@@ -164,7 +172,6 @@ private:
 
     // OSD
     bool isOsdShown = false;
-    bool isOsdLock = false;
     brls::Time osdLastShowTime = 0;
     brls::Time hintLastShowTime = 0;
     brls::Time profileLastShowTime = 0;
@@ -186,4 +193,10 @@ private:
     size_t volumeIter = 0;  // 音量UI关闭的延迟函数 handle
     int volumeInit = 0;
     float brightnessInit = 0;
+
+    bool isLiveMode = false;
+    int64_t streamUptimeBaseline = 0;
+    std::chrono::steady_clock::time_point streamUptimeBaselineTime;
+    int64_t liveRewindSeconds = 0;
+    brls::Time lastLiveProgressTick = 0;
 };

@@ -47,7 +47,7 @@ static const uint64_t SWITCH_BUTTONS_FULL_MAPPING[_BUTTON_MAX] = {
     HidNpadButton_R, // BUTTON_RB
     HidNpadButton_ZR, // BUTTON_RT
 
-    // TwiNX controller convention:
+    // kickNX controller convention:
     // - D-pad and left stick move UI focus.
     // - Right stick is reserved for independent page scrolling.
     HidNpadButton_Up | HidNpadButton_StickLUp, // BUTTON_NAV_UP

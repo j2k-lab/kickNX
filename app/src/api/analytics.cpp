@@ -31,7 +31,7 @@ public:
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Package, client_id, user_id, user_properties, events, timestamp_micros);
 
 Analytics::Analytics() {
-    // twiNX does not enable upstream analytics. Keep this implementation inert
+    // kickNX does not enable upstream analytics. Keep this implementation inert
     // unless a downstream build explicitly provides both values.
     if (GA_ID.empty() || GA_KEY.empty()) return;
 

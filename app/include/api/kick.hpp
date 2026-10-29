@@ -1,24 +1,17 @@
 #pragma once
 
-#include "api/twitch_playlist.hpp"
+#include "api/kick_playlist.hpp"
 
 #include <functional>
 #include <string>
 #include <vector>
 
-namespace twitch {
+namespace kick {
 
 struct Config {
     std::string channel;
-    std::string preferredQuality = "source";
-    std::string playerType = "embed";
-
-    // Public Twitch application ID used by OAuth Device Code Flow and Helix.
-    std::string oauthClientId = "1a0hyv0sxnwpkvde7pjyo4gpwcnwj9";
-    std::string oauthScopes = "user:read:follows user:read:chat user:write:chat user:read:emotes user:read:subscriptions";
-
-    // Twitch GraphQL client identifier used by the native playback resolver.
-    std::string gqlClientId = "kd1unb4b3q4t58fwlpcbzcbnm76a8fp";
+    std::string preferredQuality = "1080p60";
+    std::string oauthClientId = "kicknx-switch-client";
 };
 
 struct Resolution {
@@ -26,6 +19,7 @@ struct Resolution {
     std::string masterUrl;
     std::vector<Quality> qualities;
     Quality selected;
+    std::vector<SubtitleTrack> subtitles;
 };
 
 using ResolveCallback = std::function<void(Resolution)>;
@@ -43,15 +37,12 @@ enum class DecoderMode {
 
 // Software decoding remains the safest mode. Hardware is the original
 // experimental path. Hybrid starts in hardware, falls back to software for a
-// Twitch presentation transition, and only restores hardware after a second
+// Kick presentation transition, and only restores hardware after a second
 // transition has completed and playback has remained stable.
 DecoderMode loadDecoderMode();
 bool saveDecoderMode(DecoderMode mode);
 bool decoderUsesHardware(DecoderMode mode);
 
-// Backwards-compatible wrappers for older call sites and settings files.
-bool loadHardwareDecodeEnabled();
-bool saveHardwareDecodeEnabled(bool enabled);
 Resolution resolveLive(const Config& config);
 void resolveLiveAsync(
     const Config& config,
@@ -59,6 +50,5 @@ void resolveLiveAsync(
     ErrorCallback failure);
 
 std::string mpvExtra();
-std::string describeQualities(const std::vector<Quality>& qualities);
 
-}  // namespace twitch
+}  // namespace kick

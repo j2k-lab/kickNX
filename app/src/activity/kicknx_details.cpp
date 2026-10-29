@@ -1,6 +1,6 @@
-#include "activity/twinx_details.hpp"
+#include "activity/kicknx_details.hpp"
 
-#include "api/twitch.hpp"
+#include "api/kick.hpp"
 #include "tab/remote_view.hpp"
 #include "utils/image.hpp"
 #include "view/mpv_core.hpp"
@@ -18,7 +18,7 @@ brls::Box* makeDetailsButton(const std::string& text, brls::Label** outLabel = n
     button->setAxis(brls::Axis::ROW);
     button->setPadding(14, 24, 14, 24);
     button->setCornerRadius(8);
-    button->setBackgroundColor(nvgRGB(91, 46, 145));
+    button->setBackgroundColor(nvgRGB(24, 115, 36));
     button->setMarginBottom(14);
     button->addGestureRecognizer(new brls::TapGestureRecognizer(button));
 
@@ -39,32 +39,38 @@ std::string viewersText(int viewers) {
 
 const std::vector<std::string>& qualityLabels() {
     static const std::vector<std::string> labels = {
-        "Auto", "Source", "1080p60", "720p60", "720p",
-        "480p", "360p", "Audio only",
+        "1080p60 (Recommended)", "720p60", "480p", "360p", "160p", "Auto",
     };
     return labels;
 }
 
 const std::vector<std::string>& qualityValues() {
     static const std::vector<std::string> values = {
-        "auto", "source", "1080p60", "720p60", "720p",
-        "480p", "360p", "audio_only",
+        "1080p60", "720p60", "480p", "360p", "160p", "auto",
     };
     return values;
 }
 
 int qualityIndex(const std::string& value) {
     const auto& values = qualityValues();
+    if (value == "source") {
+        const auto found = std::find(values.begin(), values.end(), "1080p60");
+        if (found != values.end()) return static_cast<int>(std::distance(values.begin(), found));
+    }
+    if (value == "720p") {
+        const auto found = std::find(values.begin(), values.end(), "720p60");
+        if (found != values.end()) return static_cast<int>(std::distance(values.begin(), found));
+    }
     const auto found = std::find(values.begin(), values.end(), value);
-    return found == values.end() ? 1 : static_cast<int>(std::distance(values.begin(), found));
+    return found == values.end() ? 0 : static_cast<int>(std::distance(values.begin(), found));
 }
 
 }  // namespace
 
-TwiNXDetails::TwiNXDetails(twitch::Stream stream)
-    : stream(std::move(stream)), preferredQuality(twitch::loadPreferredQuality()) {
-    if (preferredQuality.empty()) preferredQuality = twitch::loadConfig().preferredQuality;
-    if (preferredQuality.empty()) preferredQuality = "source";
+KickNXDetails::KickNXDetails(kick::Stream stream)
+    : stream(std::move(stream)), preferredQuality(kick::loadPreferredQuality()) {
+    if (preferredQuality.empty()) preferredQuality = kick::loadConfig().preferredQuality;
+    if (preferredQuality.empty()) preferredQuality = "1080p60";
 
     this->setAxis(brls::Axis::COLUMN);
     this->setDimensions(brls::Application::contentWidth, brls::Application::contentHeight);
@@ -97,7 +103,7 @@ TwiNXDetails::TwiNXDetails(twitch::Stream stream)
     preview->setMarginRight(34);
     body->addView(preview);
     if (!stream.thumbnailUrl.empty())
-        Image::with(preview, twitch::streamThumbnail(stream.thumbnailUrl, 690, 388));
+        Image::with(preview, kick::streamThumbnail(stream.thumbnailUrl, 690, 388));
 
     auto* info = new brls::Box();
     info->setAxis(brls::Axis::COLUMN);
@@ -147,68 +153,52 @@ TwiNXDetails::TwiNXDetails(twitch::Stream stream)
     brls::sync([this]() { brls::Application::giveFocus(watchButton); });
 }
 
-TwiNXDetails::~TwiNXDetails() {
+KickNXDetails::~KickNXDetails() {
     Image::cancel(preview);
 }
 
-void TwiNXDetails::setBusy(bool value, const std::string& message) {
+void KickNXDetails::setBusy(bool value, const std::string& message) {
     busy = value;
     if (!message.empty()) statusLabel->setText(message);
 }
 
-void TwiNXDetails::updateQualityLabel() {
+void KickNXDetails::updateQualityLabel() {
     const int index = qualityIndex(preferredQuality);
     qualityLabel->setText("Quality · " + qualityLabels().at(index));
 }
 
-void TwiNXDetails::chooseQuality() {
+void KickNXDetails::chooseQuality() {
     if (busy) return;
     auto* dropdown = new brls::Dropdown(
-        "Preferred Twitch quality",
+        "Preferred Kick quality",
         qualityLabels(),
         [this](int selected) {
             if (selected < 0 || static_cast<size_t>(selected) >= qualityValues().size())
                 return true;
             preferredQuality = qualityValues().at(selected);
             updateQualityLabel();
-            if (!twitch::savePreferredQuality(preferredQuality))
-                brls::Application::notify("twiNX: could not save quality preference");
+            if (!kick::savePreferredQuality(preferredQuality))
+                brls::Application::notify("kickNX: could not save quality preference");
             return true;
         },
         qualityIndex(preferredQuality));
     brls::Application::pushActivity(new brls::Activity(dropdown));
 }
 
-void TwiNXDetails::watchLive() {
+void KickNXDetails::watchLive() {
     if (busy) return;
     if (!stream.isLive) {
         statusLabel->setText("This channel is currently offline.");
         return;
     }
 
-    auto config = twitch::loadConfig();
+    auto config = kick::loadConfig();
     config.channel = stream.userLogin;
     config.preferredQuality = preferredQuality;
     if (config.channel.empty()) {
-        statusLabel->setText("This result did not contain a Twitch channel login.");
+        statusLabel->setText("This result did not contain a Kick channel slug.");
         return;
     }
 
-    setBusy(true, "Resolving " + config.channel + "…");
-    this->ptrLock();
-    twitch::resolveLiveAsync(
-        config,
-        [this](twitch::Resolution result) {
-            setBusy(false, "Playing " + result.channel + " · " + result.selected.name);
-            const std::string channel = result.channel;
-            const std::string url = result.selected.url;
-            this->ptrUnlock();
-            MPVCore::BOTTOM_BAR = false;
-            RemoteView::play(url, "Twitch - " + channel, twitch::mpvExtra());
-        },
-        [this](const std::string& error) {
-            setBusy(false, "Playback error: " + error);
-            brls::Application::notify("twiNX: " + error);
-            this->ptrUnlock();
-        });
+    RemoteView::playLive(config, this->stream.uptimeSeconds);
 }

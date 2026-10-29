@@ -7,7 +7,6 @@
 #include <borealis.hpp>
 #include <view/presenter.hpp>
 #include <api/jellyfin/media.hpp>
-#include <utils/download.hpp>
 
 class HRecyclerFrame;
 class TextBox;
@@ -42,12 +41,8 @@ private:
     void doRequest() override;
     void doMovie();
     void doSimilar();
-    void updateDownloadButton();
 
     int64_t playTicks = 0;
     std::string itemId;
     std::string sourceId;
-
-    DownloadManager::ProgressEvent::Subscription progressSub;
-    DownloadManager::StatusEvent::Subscription statusSub;
 };

@@ -1,7 +1,6 @@
 #include <borealis.hpp>
 
 #include "utils/config.hpp"
-#include "utils/download.hpp"
 #include "utils/thread.hpp"
 #include "utils/debug_log.hpp"
 #include "utils/orientation.hpp"
@@ -22,6 +21,7 @@
 #include "view/button_close.hpp"
 #include "view/text_box.hpp"
 #include "view/icon_button.hpp"
+#include "view/kick_loading_view.hpp"
 #include "view/mpv_core.hpp"
 
 #include "activity/main_activity.hpp"
@@ -33,7 +33,7 @@
 #include "tab/search_tab.hpp"
 #include "tab/remote_tab.hpp"
 #include "tab/remote_view.hpp"
-#include "activity/twinx_home.hpp"
+#include "activity/kicknx_home.hpp"
 #include "tab/setting_tab.hpp"
 
 #if defined(__SDL2__)
@@ -42,8 +42,22 @@
 
 using namespace brls::literals;  // for _i18n
 
+namespace {
+
+void cleanWatchLaterCache(const std::string& directory) {
+    std::error_code ec;
+    if (!std::filesystem::exists(directory, ec)) return;
+    for (const auto& entry : std::filesystem::directory_iterator(directory, ec)) {
+        if (entry.is_regular_file(ec)) {
+            std::filesystem::remove(entry.path(), ec);
+        }
+    }
+}
+
+} // namespace
+
 int main(int argc, char* argv[]) {
-#if defined(TWINX_PLAYBACK_DEBUG)
+#if defined(KICKNX_PLAYBACK_DEBUG)
     // switch_wrapper.c has already connected stdio to nxlink before main().
     // Disable buffering so the last record before a fatal crash reaches the PC.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -75,16 +89,22 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-#if defined(TWINX_PLAYBACK_DEBUG)
-    twinx::debug::init(
-        conf.configDir() + "/twinx-playback-debug.log");
-    twinx::debug::log(
+#if defined(KICKNX_PLAYBACK_DEBUG)
+    static FILE* logFp = nullptr;
+    kicknx::debug::cleanStaleLogs(conf.configDir());
+    kicknx::debug::init(
+        conf.configDir() + "/kicknx-playback-debug.log");
+    kicknx::debug::log(
         "APP",
         "boot version=%s platform=%s commit=%s argc=%d",
         AppVersion::getVersion().c_str(),
         AppVersion::getPlatform().c_str(),
         AppVersion::getCommit().c_str(),
         argc);
+    logFp = std::fopen((conf.configDir() + "/kicknx.log").c_str(), "w");
+    if (logFp) {
+        brls::Logger::setLogOutput(logFp);
+    }
 #endif
 
     // Init the app and i18n
@@ -94,7 +114,9 @@ int main(int argc, char* argv[]) {
     }
 
     conf.initThemes();
-    DownloadManager::instance().init();
+
+    // Clean watch-later cache on startup
+    cleanWatchLaterCache(conf.configDir() + "/watch-later");
 
     // Return directly to the desktop when closing the application (only for NX)
     brls::Application::getPlatform()->exitToHomeMode(true);
@@ -103,7 +125,7 @@ int main(int argc, char* argv[]) {
 
     // SwitchPlatform creates its InputManager inside createWindow(). Sensor
     // subscriptions are invalid before this point.
-    twinx::portrait::OrientationController::instance().init();
+    kicknx::portrait::OrientationController::instance().init();
 
     // Have the application register an action on every activity that will quit when you press BUTTON_START
     brls::Application::setGlobalQuit(false);
@@ -123,6 +145,7 @@ int main(int argc, char* argv[]) {
     brls::Application::registerXMLView("GalleryView", GalleryView::create);
     brls::Application::registerXMLView("SearchList", SearchList::create);
     brls::Application::registerXMLView("VideoProgressSlider", VideoProgressSlider::create);
+    brls::Application::registerXMLView("KickLoadingView", kick::KickLoadingView::create);
 
     brls::Application::registerXMLView("HomeTab", HomeTab::create);
     brls::Application::registerXMLView("MediaFolders", MediaFolders::create);
@@ -133,20 +156,25 @@ int main(int argc, char* argv[]) {
     if (!brls::Application::getPlatform()->isApplicationMode()) {
         brls::Application::pushActivity(new HintActivity());
     } else {
-        brls::Application::pushActivity(new brls::Activity(new TwiNXHome()));
+        brls::Application::pushActivity(new brls::Activity(new KickNXHome()));
     }
-    // TwiNX: analytics disabled.
-    // TwiNX: Switchfin update checks disabled.
+    // KickNX: analytics disabled.
+    // KickNX: Switchfin update checks disabled.
 // Run the app
     while (brls::Application::mainLoop());
 
-    twinx::portrait::OrientationController::instance().shutdown();
+    kicknx::portrait::OrientationController::instance().shutdown();
     ThreadPool::instance().stop();
+    cleanWatchLaterCache(conf.configDir() + "/watch-later");
 
     conf.checkRestart(argv);
-#if defined(TWINX_PLAYBACK_DEBUG)
-    twinx::debug::log("APP", "main loop exited normally");
-    twinx::debug::shutdown();
+#if defined(KICKNX_PLAYBACK_DEBUG)
+    kicknx::debug::log("APP", "main loop exited normally");
+    kicknx::debug::shutdown();
+    if (logFp) {
+        std::fclose(logFp);
+        logFp = nullptr;
+    }
 #endif
     // Exit
     return EXIT_SUCCESS;

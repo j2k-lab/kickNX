@@ -73,18 +73,15 @@ public:
         WINDOW_STATE,
         TRANSCODEC,
         FORCE_DIRECTPLAY,
-        OSD_ON_TOGGLE,
         TOUCH_GESTURE,
         CLIP_POINT,
         SYNC_SETTING,
         MPV_VO,
-        PLAYER_BOTTOM_BAR,
         PLAYER_LOW_QUALITY,
         PLAYER_INMEMORY_CACHE,
         PLAYER_SPEED,
         PLAYER_HWDEC,
         PLAYER_HWDEC_CUSTOM,
-        PLAYER_ASPECT,
         PLAYER_SUBS_FALLBACK,
         PLAYER_TV_MODE,
         DANMAKU,
@@ -106,8 +103,6 @@ public:
         REQUEST_TIMEOUT,
         HTTP_PROXY_STATUS,
         HTTP_PROXY,
-
-        DOWNLOAD_QUALITY,
 
         KEY_REFRESH,        // 刷新快捷键
         KEY_LAST,           // 上一个Tab快捷键

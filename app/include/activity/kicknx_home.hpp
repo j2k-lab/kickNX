@@ -8,18 +8,23 @@
 #include <functional>
 #include <string>
 
-namespace twitch {
+namespace kick {
 struct Stream;
 struct Category;
 struct HomeData;
 }
 
-class TwitchRow;
+class KickRow;
 
-class TwiNXHome : public brls::Box {
+class KickNXHome : public brls::Box {
 public:
-    TwiNXHome();
-    ~TwiNXHome() override;
+    KickNXHome();
+    ~KickNXHome() override;
+
+    static KickNXHome* getInstance() { return instance; }
+    void openCategoryByName(const kick::Category& category) { openCategory(category); }
+
+    void willAppear(bool resetState = false) override;
 
 private:
     void setBusy(bool value, const std::string& message = "");
@@ -31,13 +36,13 @@ private:
     void search();
     void showAbout();
     void searchFor(const std::string& query);
-    void openCategory(const twitch::Category& category);
-    void openChannelPage(const twitch::Stream& stream);
-    void playChannel(const twitch::Stream& stream);
-    void updateHero(const twitch::Stream& stream);
+    void openCategory(const kick::Category& category);
+    void openChannelPage(const kick::Stream& stream);
+    void playChannel(const kick::Stream& stream);
+    void updateHero(const kick::Stream& stream);
     void clearHero();
     void playConfiguredChannel();
-    void showHomeData(twitch::HomeData data);
+    void showHomeData(kick::HomeData data);
     void clearRows();
 
     uint64_t beginBrowsingRequest(const std::string& message);
@@ -49,9 +54,9 @@ private:
     void rememberFocus(const std::string& row, const std::string& key);
     void restoreContentFocus();
     void focusFirstContentRow();
+    bool isActiveActivity();
 
     void loadMoreFollowed();
-    void loadMoreOfflineFollowed();
     void loadMorePopular();
     void loadMoreCategories();
     void loadMoreSearch();
@@ -80,18 +85,17 @@ private:
     brls::Label* heroMetaLabel = nullptr;
     std::function<void()> retryAction;
 
-    TwitchRow* followedRow = nullptr;
-    TwitchRow* offlineFollowedRow = nullptr;
-    TwitchRow* popularRow = nullptr;
-    TwitchRow* categoryStreamsRow = nullptr;
-    TwitchRow* categoriesRow = nullptr;
-    TwitchRow* searchRow = nullptr;
+    KickRow* followedRow = nullptr;
+    KickRow* offlineFollowedRow = nullptr;
+    KickRow* popularRow = nullptr;
+    KickRow* categoryStreamsRow = nullptr;
+    KickRow* categoriesRow = nullptr;
+    KickRow* searchRow = nullptr;
 
     HTTP::Cancel activeRequest;
     uint64_t requestGeneration = 0;
 
     std::string followedCursor;
-    std::string offlineFollowedCursor;
     std::string popularCursor;
     std::string categoriesCursor;
     std::string searchCursor;
@@ -104,4 +108,6 @@ private:
     std::string lastFocusedKey;
 
     bool busy = false;
+
+    inline static KickNXHome* instance = nullptr;
 };

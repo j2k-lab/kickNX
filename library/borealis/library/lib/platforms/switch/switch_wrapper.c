@@ -48,6 +48,7 @@ void userAppInit()
 #endif
 
     romfsInit();
+    sslInitialize(4);
     plInitialize(PlServiceType_User);
     setsysInitialize();
     setInitialize();
@@ -74,6 +75,7 @@ void userAppExit()
     plExit();
 
     romfsExit();
+    sslExit();
 
     if (nxlink_sock != -1)
         close(nxlink_sock);

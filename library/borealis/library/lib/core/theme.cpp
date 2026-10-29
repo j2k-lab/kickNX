@@ -29,13 +29,13 @@ static ThemeValues lightThemeValues = {
     { "brls/text", nvgRGB(45, 45, 45) },
     { "brls/text_disabled", nvgRGB(140, 140, 140) },
     { "brls/backdrop", nvgRGBA(0, 0, 0, 178) },
-    { "brls/click_pulse", nvgRGBA(13, 182, 213, 38) }, // same as highlight color1 with different opacity
-    { "brls/accent", nvgRGB(49, 79, 235) },
+    { "brls/click_pulse", nvgRGBA(83, 252, 24, 45) }, // same as highlight color1 with different opacity
+    { "brls/accent", nvgRGB(83, 252, 24) },
 
     // Highlight
     { "brls/highlight/background", nvgRGB(252, 255, 248) },
-    { "brls/highlight/color1", nvgRGB(13, 182, 213) },
-    { "brls/highlight/color2", nvgRGB(80, 239, 217) },
+    { "brls/highlight/color1", nvgRGB(83, 252, 24) },
+    { "brls/highlight/color2", nvgRGB(105, 255, 55) },
 
     // AppletFrame
     { "brls/applet_frame/separator", nvgRGB(45, 45, 45) },
@@ -46,8 +46,8 @@ static ThemeValues lightThemeValues = {
     { "brls/sidebar/separator", nvgRGB(208, 208, 208) },
 
     // Header
-    { "brls/header/border", nvgRGB(207, 207, 207) },
-    { "brls/header/rectangle", nvgRGB(127, 127, 127) },
+    { "brls/header/border", nvgRGB(83, 252, 24) },
+    { "brls/header/rectangle", nvgRGB(83, 252, 24) },
     { "brls/header/subtitle", nvgRGB(140, 140, 140) },
 
     // Button
@@ -77,7 +77,7 @@ static ThemeValues lightThemeValues = {
     { "brls/slider/line_empty", nvgRGB(140, 140, 140) },
 
     // Spinner
-    { "brls/spinner/bar_color", nvgRGBA(131, 131, 131, 80) },
+    { "brls/spinner/bar_color", nvgRGBA(83, 252, 24, 80) },
 
 };
 
@@ -88,13 +88,13 @@ static ThemeValues darkThemeValues = {
     { "brls/text", nvgRGB(255, 255, 255) },
     { "brls/text_disabled", nvgRGB(80, 80, 80) },
     { "brls/backdrop", nvgRGBA(0, 0, 0, 178) },
-    { "brls/click_pulse", nvgRGBA(25, 138, 198, 38) }, // same as highlight color1 with different opacity
-    { "brls/accent", nvgRGB(0, 255, 204) },
+    { "brls/click_pulse", nvgRGBA(83, 252, 24, 45) }, // same as highlight color1 with different opacity
+    { "brls/accent", nvgRGB(83, 252, 24) },
 
     // Highlight
     { "brls/highlight/background", nvgRGB(31, 34, 39) },
-    { "brls/highlight/color1", nvgRGB(25, 138, 198) },
-    { "brls/highlight/color2", nvgRGB(137, 241, 242) },
+    { "brls/highlight/color1", nvgRGB(83, 252, 24) },
+    { "brls/highlight/color2", nvgRGB(105, 255, 55) },
 
     // AppletFrame
     { "brls/applet_frame/separator", nvgRGB(255, 255, 255) },
@@ -105,8 +105,8 @@ static ThemeValues darkThemeValues = {
     { "brls/sidebar/separator", nvgRGB(81, 81, 81) },
 
     // Header
-    { "brls/header/border", nvgRGB(78, 78, 78) },
-    { "brls/header/rectangle", nvgRGB(160, 160, 160) },
+    { "brls/header/border", nvgRGB(83, 252, 24) },
+    { "brls/header/rectangle", nvgRGB(83, 252, 24) },
     { "brls/header/subtitle", nvgRGB(163, 163, 163) },
 
     // Button
@@ -136,7 +136,7 @@ static ThemeValues darkThemeValues = {
     { "brls/slider/line_empty", nvgRGB(140, 140, 140) },
 
     // Spinner
-    { "brls/spinner/bar_color", nvgRGBA(192, 192, 192, 80) }, // TODO: get this right
+    { "brls/spinner/bar_color", nvgRGBA(83, 252, 24, 80) },
 };
 
 ThemeValues::ThemeValues(std::initializer_list<std::pair<std::string, NVGcolor>> list)

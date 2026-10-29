@@ -6,12 +6,12 @@
 #include "view/video_profile.hpp"
 #include "view/mpv_core.hpp"
 #include "view/music_view.hpp"
-#include "activity/twitch_channel.hpp"
-#include "api/twitch_helix.hpp"
+#include "activity/kick_channel.hpp"
+#include "api/kick_helix.hpp"
 #include "view/player_setting.hpp"
-#include "view/twitch_chat_composer.hpp"
-#include "api/twitch_chat.hpp"
-#include "api/twitch.hpp"
+#include "view/kick_chat_composer.hpp"
+#include "api/kick_chat.hpp"
+#include "api/kick.hpp"
 #include "utils/thread.hpp"
 #include "client/local.hpp"
 #include "utils/misc.hpp"
@@ -54,10 +54,10 @@ NVGcolor chatColor(const std::string& value) {
     }
 }
 
-class TwitchEmoteTexturePool {
+class KickEmoteTexturePool {
 public:
-    static TwitchEmoteTexturePool& instance() {
-        static auto* pool = new TwitchEmoteTexturePool();
+    static KickEmoteTexturePool& instance() {
+        static auto* pool = new KickEmoteTexturePool();
         return *pool;
     }
 
@@ -69,7 +69,7 @@ public:
             if (!capacityWarningShown) {
                 capacityWarningShown = true;
                 brls::Logger::warning(
-                    "twiNX: emote texture pool reached {} entries; new emotes use text fallback",
+                    "kickNX: emote texture pool reached {} entries; new emotes use text fallback",
                     MAX_ENTRIES);
             }
             return nullptr;
@@ -87,7 +87,7 @@ private:
     bool capacityWarningShown = false;
 };
 
-class TwitchAnimatedEmoteTexturePool {
+class KickAnimatedEmoteTexturePool {
 public:
     struct Entry {
         std::vector<int> textures;
@@ -98,8 +98,8 @@ public:
         std::chrono::steady_clock::time_point startedAt{};
     };
 
-    static TwitchAnimatedEmoteTexturePool& instance() {
-        static auto* pool = new TwitchAnimatedEmoteTexturePool();
+    static KickAnimatedEmoteTexturePool& instance() {
+        static auto* pool = new KickAnimatedEmoteTexturePool();
         return *pool;
     }
 
@@ -114,7 +114,7 @@ public:
             if (!capacityWarningShown) {
                 capacityWarningShown = true;
                 brls::Logger::warning(
-                    "twiNX: animated emote pool reached {} entries; "
+                    "kickNX: animated emote pool reached {} entries; "
                     "additional emotes use their static image",
                     MAX_ENTRIES);
             }
@@ -183,7 +183,7 @@ public:
                         if (sourceDelays)
                             stbi_image_free(sourceDelays);
                         throw std::runtime_error(
-                            "animated emote exceeds TwiNX safety limits");
+                            "animated emote exceeds KickNX safety limits");
                     }
 
                     auto pixels =
@@ -257,12 +257,12 @@ public:
                                 entry->totalDurationMs > 0;
 
                             brls::Logger::verbose(
-                                "twiNX: animated emote loaded: {} frames",
+                                "kickNX: animated emote loaded: {} frames",
                                 entry->textures.size());
                         });
                 } catch (const std::exception& exception) {
                     brls::Logger::warning(
-                        "twiNX: animated emote fallback to static: {}",
+                        "kickNX: animated emote fallback to static: {}",
                         exception.what());
                     brls::sync([entry]() {
                         entry->failed = true;
@@ -315,62 +315,17 @@ private:
     bool capacityWarningShown = false;
 };
 
-class TwitchBadgeTexturePool {
-public:
-    static TwitchBadgeTexturePool& instance() {
-        // Matches the stable emote architecture: loader
-        // views live for the application lifetime, so
-        // asynchronous completions never target deleted rows.
-        static auto* pool =
-            new TwitchBadgeTexturePool();
-        return *pool;
-    }
-
-    brls::Image* get(const std::string& url) {
-        if (url.empty()) return nullptr;
-
-        auto found = entries.find(url);
-        if (found != entries.end())
-            return found->second;
-
-        if (entries.size() >= MAX_ENTRIES) {
-            if (!capacityWarningShown) {
-                capacityWarningShown = true;
-                brls::Logger::warning(
-                    "twiNX: badge texture pool reached "
-                    "{} entries; additional badges are "
-                    "hidden",
-                    MAX_ENTRIES);
-            }
-            return nullptr;
-        }
-
-        auto* image = new brls::Image();
-        image->setFreeTexture(false);
-        entries.emplace(url, image);
-        Image::with(image, url);
-        return image;
-    }
-
-private:
-    static constexpr size_t MAX_ENTRIES = 96;
-    std::unordered_map<
-        std::string,
-        brls::Image*> entries;
-    bool capacityWarningShown = false;
-};
-
-class TwitchChatMessageView : public brls::View {
+class KickChatMessageView : public brls::View {
 private:
     struct EmoteVisual {
         brls::Image* staticImage = nullptr;
-        TwitchAnimatedEmoteTexturePool::Entry* animation = nullptr;
+        KickAnimatedEmoteTexturePool::Entry* animation = nullptr;
     };
 
 public:
     void configure(
-        const twitch::ChatMessage& value,
-        const twitch::ChatPreferences& preferences,
+        const kick::ChatMessage& value,
+        const kick::ChatPreferences& preferences,
         float availableWidth,
         float availableHeight) {
         clearEmotes();
@@ -383,28 +338,21 @@ public:
             fontSize * 1.28f + 7.0f,
             availableHeight);
 
-        badgeImages.clear();
-        for (const auto& badge : message.badges) {
-            badgeImages.push_back(
-                TwitchBadgeTexturePool::instance().get(
-                    badge.imageUrl));
-        }
-
         for (const auto& fragment : message.fragments) {
-            if (fragment.type != twitch::ChatFragmentType::Emote)
+            if (fragment.type != kick::ChatFragmentType::Emote)
                 continue;
 
             EmoteVisual visual;
             if (!fragment.emoteUrl.empty())
                 visual.staticImage =
-                    TwitchEmoteTexturePool::instance().get(
+                    KickEmoteTexturePool::instance().get(
                         fragment.emoteUrl);
 
             if (preferences.emoteMode ==
-                    twitch::ChatEmoteMode::Animated &&
+                    kick::ChatEmoteMode::Animated &&
                 !fragment.animatedEmoteUrl.empty())
                 visual.animation =
-                    TwitchAnimatedEmoteTexturePool::instance().get(
+                    KickAnimatedEmoteTexturePool::instance().get(
                         fragment.animatedEmoteUrl);
 
             emoteImages.push_back(visual);
@@ -429,8 +377,8 @@ public:
     }
 
     static float estimateHeightFor(
-        const twitch::ChatMessage& message,
-        const twitch::ChatPreferences& preferences,
+        const kick::ChatMessage& message,
+        const kick::ChatPreferences& preferences,
         float availableWidth,
         float availableHeight) {
         const float fontSize = preferences.fontSize;
@@ -443,8 +391,6 @@ public:
         const float lineHeight = fontSize * 1.28f;
         const float emoteSize =
             std::max(18.0f, fontSize * 1.35f);
-        const float badgeSize =
-            std::max(15.0f, fontSize * 1.05f);
         const int maxLines =
             maxLineCountFor(fontSize, contentHeightLimit);
 
@@ -535,28 +481,13 @@ public:
                 "[" + message.timestamp + "] ");
         }
 
-        const size_t displayedBadges =
-            std::min<size_t>(
-                message.badges.size(),
-                6);
-
-        for (size_t badgeIndex = 0;
-             badgeIndex < displayedBadges;
-             ++badgeIndex) {
-            if (cursor > 0.0f &&
-                cursor + badgeSize > contentWidth)
-                nextLine();
-
-            cursor += badgeSize + 3.0f;
-        }
-
         consumeWord(message.userName + ": ");
 
         for (const auto& fragment : message.fragments) {
             if (lineCount >= maxLines) break;
 
             if (fragment.type ==
-                twitch::ChatFragmentType::Emote) {
+                kick::ChatFragmentType::Emote) {
                 if (cursor > 0.0f &&
                     cursor + emoteSize > contentWidth)
                     nextLine();
@@ -595,8 +526,6 @@ public:
         const float lineHeight = fontSize * 1.28f;
         const float emoteSize =
             std::max(18.0f, fontSize * 1.35f);
-        const float badgeSize =
-            std::max(15.0f, fontSize * 1.05f);
         const float right = x + width;
         float cursorX = x;
         float cursorY = y + fontSize;
@@ -664,53 +593,6 @@ public:
                 nvgRGB(145, 154, 174));
         }
 
-        const size_t displayedBadges =
-            std::min<size_t>(
-                message.badges.size(),
-                6);
-
-        for (size_t badgeIndex = 0;
-             badgeIndex < displayedBadges;
-             ++badgeIndex) {
-            if (cursorX > x &&
-                cursorX + badgeSize > right)
-                nextLine();
-            if (line >= maxLines) break;
-
-            brls::Image* image =
-                badgeIndex < badgeImages.size()
-                    ? badgeImages[badgeIndex]
-                    : nullptr;
-
-            if (image && image->getTexture() > 0) {
-                const float imageY =
-                    cursorY - fontSize -
-                    (badgeSize - fontSize) * 0.4f;
-                NVGpaint paint = nvgImagePattern(
-                    vg,
-                    cursorX,
-                    imageY,
-                    badgeSize,
-                    badgeSize,
-                    0,
-                    image->getTexture(),
-                    1.0f);
-                nvgBeginPath(vg);
-                nvgRect(
-                    vg,
-                    cursorX,
-                    imageY,
-                    badgeSize,
-                    badgeSize);
-                nvgFillPaint(vg, paint);
-                nvgFill(vg);
-            }
-
-            // Reserve the same space while an image is
-            // still downloading to avoid text jumping.
-            cursorX += badgeSize + 3.0f;
-        }
-
         drawWord(
             message.userName + ": ",
             chatColor(message.color));
@@ -719,7 +601,7 @@ public:
         for (const auto& fragment : message.fragments) {
             if (line >= maxLines) break;
 
-            if (fragment.type == twitch::ChatFragmentType::Emote) {
+            if (fragment.type == kick::ChatFragmentType::Emote) {
                 if (cursorX > x && cursorX + emoteSize > right)
                     nextLine();
                 if (line >= maxLines) break;
@@ -733,7 +615,7 @@ public:
                 int texture = 0;
                 if (visual && visual->animation)
                     texture =
-                        TwitchAnimatedEmoteTexturePool::instance().texture(
+                        KickAnimatedEmoteTexturePool::instance().texture(
                             visual->animation);
                 if (texture <= 0 && visual &&
                     visual->staticImage)
@@ -796,7 +678,7 @@ private:
     }
 
     float estimateHeight() const {
-        twitch::ChatPreferences preferences;
+        kick::ChatPreferences preferences;
         preferences.fontSize = fontSize;
         preferences.timestamps = showTimestamp;
         return estimateHeightFor(
@@ -811,8 +693,7 @@ private:
         emoteImages.clear();
     }
 
-    twitch::ChatMessage message;
-    std::vector<brls::Image*> badgeImages;
+    kick::ChatMessage message;
     std::vector<EmoteVisual> emoteImages;
     float fontSize = 16.0f;
     float contentWidth = 300.0f;
@@ -825,11 +706,11 @@ class PortraitDraftPreview : public brls::View {
 public:
     void configure(
         const std::string& value,
-        const std::vector<twitch::UserEmote>& emotes) {
+        const std::vector<kick::UserEmote>& emotes) {
         draft = value;
         segments.clear();
 
-        std::unordered_map<std::string, const twitch::UserEmote*> byName;
+        std::unordered_map<std::string, const kick::UserEmote*> byName;
         byName.reserve(emotes.size());
         for (const auto& emote : emotes) {
             if (!emote.name.empty()) byName.emplace(emote.name, &emote);
@@ -851,7 +732,7 @@ public:
                 const auto found = byName.find(segment.text);
                 if (found != byName.end()) {
                     segment.emote = true;
-                    segment.image = TwitchEmoteTexturePool::instance().get(
+                    segment.image = KickEmoteTexturePool::instance().get(
                         found->second->imageUrl);
                 }
             }
@@ -991,7 +872,7 @@ public:
 
     void cacheForReuse() override { Image::cancel(picture); }
 
-    void configure(const twitch::UserEmote& emote) {
+    void configure(const kick::UserEmote& emote) {
         name->setText(emote.name);
         if (!emote.imageUrl.empty()) Image::with(picture, emote.imageUrl);
     }
@@ -1004,8 +885,8 @@ private:
 class PortraitEmoteDataSource : public RecyclingGridDataSource {
 public:
     PortraitEmoteDataSource(
-        std::vector<twitch::UserEmote> emotes,
-        std::function<void(const twitch::UserEmote&)> selected)
+        std::vector<kick::UserEmote> emotes,
+        std::function<void(const kick::UserEmote&)> selected)
         : emotes(std::move(emotes)), selected(std::move(selected)) {}
 
     size_t getItemCount() override { return emotes.size(); }
@@ -1014,7 +895,7 @@ public:
         RecyclingView* recycler,
         size_t index) override {
         auto* cell = dynamic_cast<PortraitEmoteCell*>(
-            recycler->dequeueReusableCell("PortraitTwitchEmote"));
+            recycler->dequeueReusableCell("PortraitKickEmote"));
         cell->configure(emotes.at(index));
         return cell;
     }
@@ -1026,8 +907,8 @@ public:
     void clearData() override { emotes.clear(); }
 
 private:
-    std::vector<twitch::UserEmote> emotes;
-    std::function<void(const twitch::UserEmote&)> selected;
+    std::vector<kick::UserEmote> emotes;
+    std::function<void(const kick::UserEmote&)> selected;
 };
 
 class PortraitChatComposer : public brls::Box {
@@ -1037,7 +918,8 @@ public:
     PortraitChatComposer(std::string channel, SendCallback sendRequested)
         : channel(std::move(channel)),
           sendRequested(std::move(sendRequested)),
-          emotes(twitch::loadRecentEmotes()) {
+          emotes(kick::loadRecentEmotes()),
+          recentEmotes(kick::loadRecentEmotes()) {
         this->setAxis(brls::Axis::COLUMN);
         this->setWidthPercentage(100.0f);
         this->setHeight(485.0f);
@@ -1130,6 +1012,7 @@ private:
         Symbols,
         Backspace,
         Space,
+        Emotes,
         Send,
     };
 
@@ -1145,7 +1028,7 @@ private:
             {"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
             {"a", "s", "d", "f", "g", "h", "j", "k", "l", "'"},
             {"Shift", "z", "x", "c", "v", "b", "n", "m", "Back"},
-            {"#+=", "Space", ",", ".", "Send"},
+            {"#+=", "Emotes", "Space", ".", "Send"},
         };
         return layout;
     }
@@ -1156,7 +1039,7 @@ private:
             {"!", "@", "#", "$", "%", "^", "&", "*", "(", ")"},
             {"-", "_", "=", "+", "[", "]", "{", "}", "\\", "/"},
             {"ABC", ":", ";", "\"", "'", "<", ">", "?", "Back"},
-            {"ABC", "Space", ",", ".", "Send"},
+            {"ABC", "Emotes", "Space", ".", "Send"},
         };
         return layout;
     }
@@ -1179,7 +1062,8 @@ private:
                 auto* key = new brls::Button();
                 key->setHeight(68.0f);
                 key->setGrow(
-                    rowIndex == 4 && column == 1 ? 4.0f :
+                    rowIndex == 4 && column == 1 ? 1.4f :
+                    rowIndex == 4 && column == 2 ? 3.8f :
                     rowIndex == 4 && column == 4 ? 2.0f : 1.0f);
                 key->setMarginRight(
                     column + 1 == layout[rowIndex].size() ? 0.0f : 5.0f);
@@ -1212,16 +1096,20 @@ private:
     }
 
     void pressKey(size_t row, size_t column) {
-        twinx::haptics::keyboardPulse();
+        kicknx::haptics::keyboardPulse();
         const std::string key = currentLayout()[row][column];
         KeyAction action = KeyAction::Character;
         if (key == "Shift") action = KeyAction::Shift;
         else if (key == "#+=" || key == "ABC") action = KeyAction::Symbols;
         else if (key == "Back") action = KeyAction::Backspace;
         else if (key == "Space") action = KeyAction::Space;
+        else if (key == "Emotes") action = KeyAction::Emotes;
         else if (key == "Send") action = KeyAction::Send;
 
         switch (action) {
+            case KeyAction::Emotes:
+                setEmotePanelVisible(true);
+                return;
             case KeyAction::Shift:
                 shifted = !shifted;
                 refreshKeys();
@@ -1260,7 +1148,7 @@ private:
         refreshDraft();
     }
 
-    void insertEmote(const twitch::UserEmote& emote) {
+    void insertEmote(const kick::UserEmote& emote) {
         if (emote.name.empty()) return;
         std::string addition;
         if (!draft.empty() &&
@@ -1270,11 +1158,12 @@ private:
         addition += ' ';
         if (draft.size() + addition.size() > MAX_MESSAGE_BYTES) {
             brls::Application::notify(
-                "The Twitch message limit is 500 characters");
+                "The Kick message limit is 500 characters");
             return;
         }
         draft += addition;
-        twitch::rememberRecentEmote(emote);
+        kick::rememberRecentEmote(emote);
+        recentEmotes = kick::loadRecentEmotes();
         refreshDraft();
     }
 
@@ -1286,23 +1175,79 @@ private:
         emotePanel->setVisibility(brls::Visibility::GONE);
         this->addView(emotePanel);
 
+        auto* headerBar = new brls::Box();
+        headerBar->setAxis(brls::Axis::ROW);
+        headerBar->setWidthPercentage(100.0f);
+        headerBar->setHeight(38.0f);
+        headerBar->setAlignItems(brls::AlignItems::CENTER);
+        headerBar->setMarginBottom(8.0f);
+        emotePanel->addView(headerBar);
+
+        auto* backToKeyboard = new brls::Button();
+        backToKeyboard->setText("< Keyboard");
+        backToKeyboard->setFontSize(14.0f);
+        backToKeyboard->setHeight(36.0f);
+        backToKeyboard->setPadding(4, 12, 4, 12);
+        backToKeyboard->setStyle(&brls::BUTTONSTYLE_DEFAULT);
+        backToKeyboard->registerClickAction([this](brls::View*) {
+            setEmotePanelVisible(false);
+            return true;
+        });
+        backToKeyboard->addGestureRecognizer(new brls::TapGestureRecognizer(backToKeyboard));
+        headerBar->addView(backToKeyboard);
+
+        btnRecentTab = new brls::Button();
+        btnRecentTab->setText("Recent");
+        btnRecentTab->setFontSize(14.0f);
+        btnRecentTab->setHeight(36.0f);
+        btnRecentTab->setPadding(4, 12, 4, 12);
+        btnRecentTab->setMarginLeft(8.0f);
+        btnRecentTab->setStyle(&brls::BUTTONSTYLE_PRIMARY);
+        headerBar->addView(btnRecentTab);
+
+        btnAllTab = new brls::Button();
+        btnAllTab->setText("All");
+        btnAllTab->setFontSize(14.0f);
+        btnAllTab->setHeight(36.0f);
+        btnAllTab->setPadding(4, 12, 4, 12);
+        btnAllTab->setMarginLeft(4.0f);
+        btnAllTab->setStyle(&brls::BUTTONSTYLE_DEFAULT);
+        headerBar->addView(btnAllTab);
+
+        btnRecentTab->registerClickAction([this](brls::View*) {
+            emoteTab = EmoteTab::Recent;
+            btnRecentTab->setStyle(&brls::BUTTONSTYLE_PRIMARY);
+            btnAllTab->setStyle(&brls::BUTTONSTYLE_DEFAULT);
+            refreshEmoteGrid();
+            return true;
+        });
+        btnAllTab->registerClickAction([this](brls::View*) {
+            emoteTab = EmoteTab::All;
+            btnAllTab->setStyle(&brls::BUTTONSTYLE_PRIMARY);
+            btnRecentTab->setStyle(&brls::BUTTONSTYLE_DEFAULT);
+            refreshEmoteGrid();
+            return true;
+        });
+        btnRecentTab->addGestureRecognizer(new brls::TapGestureRecognizer(btnRecentTab));
+        btnAllTab->addGestureRecognizer(new brls::TapGestureRecognizer(btnAllTab));
+
         emoteStatus = new brls::Label();
         emoteStatus->setText("Loading emotes...");
-        emoteStatus->setFontSize(15.0f);
+        emoteStatus->setFontSize(13.0f);
         emoteStatus->setTextColor(nvgRGB(168, 178, 197));
-        emoteStatus->setHeight(24.0f);
-        emoteStatus->setMarginBottom(6.0f);
-        emotePanel->addView(emoteStatus);
+        emoteStatus->setHorizontalAlign(brls::HorizontalAlign::RIGHT);
+        emoteStatus->setGrow(1.0f);
+        headerBar->addView(emoteStatus);
 
         emoteGrid = new RecyclingGrid();
         emoteGrid->setGrow(1.0f);
-        emoteGrid->spanCount = 8;
-        emoteGrid->estimatedRowHeight = 82.0f;
-        emoteGrid->estimatedRowSpace = 5.0f;
+        emoteGrid->spanCount = 6;
+        emoteGrid->estimatedRowHeight = 78.0f;
+        emoteGrid->estimatedRowSpace = 6.0f;
         emoteGrid->preFetchLine = 2;
         emoteGrid->setPadding(2, 2, 2, 2);
         emoteGrid->registerCell(
-            "PortraitTwitchEmote",
+            "PortraitKickEmote",
             []() { return new PortraitEmoteCell(); });
         emoteGrid->setIndexNavigationEnabled(true);
         emotePanel->addView(emoteGrid);
@@ -1310,32 +1255,38 @@ private:
     }
 
     void refreshEmoteGrid() {
-        emoteStatus->setText(
-            loading
-                ? "Loading emotes..."
-                : emotes.empty()
-                    ? "No emotes available"
-                    : fmt::format("{} emotes", emotes.size()));
+        const auto displayList = (emoteTab == EmoteTab::Recent && !recentEmotes.empty())
+            ? recentEmotes
+            : emotes;
+
+        if (emoteStatus) {
+            emoteStatus->setText(
+                loading
+                    ? "Loading emotes..."
+                    : displayList.empty()
+                        ? (emoteTab == EmoteTab::Recent ? "No recent emotes" : "No emotes available")
+                        : fmt::format("{} emotes", displayList.size()));
+        }
         emoteGrid->setVisibility(brls::Visibility::GONE);
         emoteGrid->setDataSource(new PortraitEmoteDataSource(
-            emotes,
-            [this](const twitch::UserEmote& emote) { insertEmote(emote); }));
+            displayList,
+            [this](const kick::UserEmote& emote) { insertEmote(emote); }));
         emoteGrid->setVisibility(brls::Visibility::VISIBLE);
         emoteGrid->invalidate();
     }
 
     void loadEmotes() {
         emoteLoadStarted = true;
-        if (!twitch::hasUserEmotesScope()) {
+        if (!kick::hasUserEmotesScope()) {
             loading = false;
             refreshEmoteGrid();
             return;
         }
 
         this->ptrLock();
-        twitch::loadUserEmotesAsync(
+        kick::loadUserEmotesAsync(
             channel,
-            [this](twitch::UserEmoteCatalogue catalogue) {
+            [this](kick::UserEmoteCatalogue catalogue) {
                 emotes = std::move(catalogue.emotes);
                 loading = false;
                 refreshEmoteGrid();
@@ -1361,7 +1312,33 @@ private:
 
     void send() {
         if (draft.empty() || !sendRequested) return;
-        if (sendRequested(draft)) {
+        std::unordered_map<std::string, const kick::UserEmote*> byName;
+        for (const auto& emote : emotes) {
+            if (!emote.name.empty() && !emote.id.empty())
+                byName.emplace(emote.name, &emote);
+        }
+        std::string wireMessage;
+        size_t pos = 0;
+        while (pos < draft.size()) {
+            const bool ws = std::isspace(static_cast<unsigned char>(draft[pos]));
+            size_t end = pos + 1;
+            while (end < draft.size() &&
+                   static_cast<bool>(std::isspace(static_cast<unsigned char>(draft[end]))) == ws)
+                ++end;
+            const std::string token = draft.substr(pos, end - pos);
+            if (!ws) {
+                const auto found = byName.find(token);
+                if (found != byName.end()) {
+                    wireMessage += "[emote:" + found->second->id + ":" + found->second->name + "]";
+                } else {
+                    wireMessage += token;
+                }
+            } else {
+                wireMessage += token;
+            }
+            pos = end;
+        }
+        if (sendRequested(wireMessage)) {
             draft.clear();
             shifted = false;
             refreshKeys();
@@ -1388,16 +1365,21 @@ private:
     brls::Box* emotePanel = nullptr;
     brls::Label* emoteStatus = nullptr;
     RecyclingGrid* emoteGrid = nullptr;
-    std::vector<twitch::UserEmote> emotes;
+    enum class EmoteTab { Recent, All };
+    EmoteTab emoteTab = EmoteTab::Recent;
+    brls::Button* btnRecentTab = nullptr;
+    brls::Button* btnAllTab = nullptr;
+    std::vector<kick::UserEmote> recentEmotes;
+    std::vector<kick::UserEmote> emotes;
     bool loading = true;
     bool emoteLoadStarted = false;
     bool emotePanelVisible = false;
     std::vector<KeySlot> slots;
 };
 
-class TwitchChatPanel : public brls::Box {
+class KickChatPanel : public brls::Box {
 public:
-    TwitchChatPanel(
+    KickChatPanel(
         bool docked,
         std::function<void()> sendRequested,
         std::function<bool()> backRequested)
@@ -1414,12 +1396,31 @@ public:
         this->setVisibility(brls::Visibility::GONE);
         this->setFocusable(false);
 
-        title = new brls::Label();
-        title->setText("LIVE CHAT");
-        title->setFontSize(18);
-        title->setTextColor(nvgRGB(245, 246, 250));
-        title->setMarginBottom(7);
-        this->addView(title);
+        headerBox = new brls::Box();
+        headerBox->setAxis(brls::Axis::ROW);
+        headerBox->setAlignItems(brls::AlignItems::CENTER);
+        headerBox->setMarginBottom(7);
+
+        titlePrefix = new brls::Label();
+        titlePrefix->setText("LIVE CHAT");
+        titlePrefix->setFontSize(16);
+        titlePrefix->setTextColor(nvgRGB(245, 246, 250));
+
+        chattersCountLabel = new brls::Label();
+        chattersCountLabel->setFontSize(16);
+        chattersCountLabel->setTextColor(nvgRGB(83, 252, 24)); // Bright Kick green
+        chattersCountLabel->setVisibility(brls::Visibility::GONE);
+
+        chattersSuffix = new brls::Label();
+        chattersSuffix->setText(" active chatters");
+        chattersSuffix->setFontSize(14);
+        chattersSuffix->setTextColor(nvgRGB(173, 181, 199));
+        chattersSuffix->setVisibility(brls::Visibility::GONE);
+
+        headerBox->addView(titlePrefix);
+        headerBox->addView(chattersCountLabel);
+        headerBox->addView(chattersSuffix);
+        this->addView(headerBox);
 
         status = new brls::Label();
         status->setText("");
@@ -1435,7 +1436,7 @@ public:
         this->addView(messagesBox);
 
         for (size_t index = 0; index < ROW_POOL; ++index) {
-            auto* row = new TwitchChatMessageView();
+            auto* row = new KickChatMessageView();
             row->setVisibility(brls::Visibility::GONE);
             messagesBox->addView(row);
             rows.push_back(row);
@@ -1446,6 +1447,11 @@ public:
         composeButton->setFontSize(15);
         composeButton->setHeight(46);
         composeButton->setStyle(&brls::BUTTONSTYLE_BORDERED);
+        composeButton->setBorderThickness(2.0f);
+        composeButton->setBorderColor(nvgRGB(83, 252, 24));
+        composeButton->setBackgroundColor(nvgRGB(24, 115, 36));
+        composeButton->setCornerRadius(8);
+        composeButton->setTextColor(nvgRGB(255, 255, 255));
         composeButton->setMarginTop(8);
         composeButton->setVisibility(brls::Visibility::GONE);
         composeButton->registerClickAction(
@@ -1469,7 +1475,7 @@ public:
         this->addView(composeButton);
     }
 
-    void apply(const twitch::ChatPreferences& value) {
+    void apply(const kick::ChatPreferences& value) {
         preferences = value;
         panelWidth = static_cast<float>(
             docked ? value.dockedWidth : value.overlayWidth);
@@ -1478,10 +1484,10 @@ public:
         if (docked) {
             panelHeight = brls::Application::contentHeight;
             this->setHeight(panelHeight);
-            this->setBackgroundColor(nvgRGBA(25, 32, 47, 255));
+            this->setBackgroundColor(nvgRGBA(0, 0, 0, 255));
         } else {
             const bool compact =
-                value.overlaySize == twitch::ChatOverlaySize::Compact;
+                value.overlaySize == kick::ChatOverlaySize::Compact;
             panelHeight = compact
                 ? std::max(
                       280.0f,
@@ -1492,15 +1498,15 @@ public:
             const float inset = compact ? 12.0f : 0.0f;
             const bool onLeft =
                 value.overlayPosition ==
-                    twitch::ChatOverlayPosition::TopLeft ||
+                    kick::ChatOverlayPosition::TopLeft ||
                 value.overlayPosition ==
-                    twitch::ChatOverlayPosition::BottomLeft;
+                    kick::ChatOverlayPosition::BottomLeft;
             const bool onBottom =
                 compact &&
                 (value.overlayPosition ==
-                     twitch::ChatOverlayPosition::BottomRight ||
+                     kick::ChatOverlayPosition::BottomRight ||
                  value.overlayPosition ==
-                     twitch::ChatOverlayPosition::BottomLeft);
+                     kick::ChatOverlayPosition::BottomLeft);
 
             this->setPositionTop(
                 onBottom ? brls::View::AUTO : inset);
@@ -1518,7 +1524,7 @@ public:
 
         composeButton->setVisibility(
             value.participation ==
-                    twitch::ChatParticipation::Interactive
+                    kick::ChatParticipation::Interactive
                 ? brls::Visibility::VISIBLE
                 : brls::Visibility::GONE);
 
@@ -1528,7 +1534,8 @@ public:
     void setStatus(const std::string& value) {
         if (value.empty() ||
             value == "Live chat" ||
-            value == "Chat disabled") {
+            value == "Chat disabled" ||
+            value == "Connected") {
             status->setText("");
             status->setVisibility(brls::Visibility::GONE);
             return;
@@ -1538,7 +1545,32 @@ public:
         status->setVisibility(brls::Visibility::VISIBLE);
     }
 
-    void append(twitch::ChatMessage message) {
+    void setChatterCount(int count) {
+        currentChatterCount = count;
+        if (count > 0) {
+            titlePrefix->setText("LIVE CHAT · ");
+            std::string countStr;
+            if (count >= 1000000) countStr = fmt::format("{:.1f}M", count / 1000000.0);
+            else if (count >= 100000) countStr = fmt::format("{:.0f}K", count / 1000.0);
+            else if (count >= 1000) countStr = fmt::format("{},{:03d}", count / 1000, count % 1000);
+            else countStr = std::to_string(count);
+
+            chattersCountLabel->setText(countStr);
+            chattersCountLabel->setVisibility(brls::Visibility::VISIBLE);
+            chattersSuffix->setText(count == 1 ? " active chatter" : " active chatters");
+            chattersSuffix->setVisibility(brls::Visibility::VISIBLE);
+        } else {
+            titlePrefix->setText("LIVE CHAT");
+            chattersCountLabel->setVisibility(brls::Visibility::GONE);
+            chattersSuffix->setVisibility(brls::Visibility::GONE);
+        }
+    }
+
+    void append(kick::ChatMessage message) {
+        if (status->getVisibility() == brls::Visibility::VISIBLE) {
+            status->setText("");
+            status->setVisibility(brls::Visibility::GONE);
+        }
         messages.push_back(std::move(message));
         while (messages.size() > MAX_MESSAGES)
             messages.pop_front();
@@ -1546,14 +1578,18 @@ public:
     }
 
     void replaceMessages(
-        const std::deque<twitch::ChatMessage>& value) {
+        const std::deque<kick::ChatMessage>& value) {
+        if (!value.empty() && status->getVisibility() == brls::Visibility::VISIBLE) {
+            status->setText("");
+            status->setVisibility(brls::Visibility::GONE);
+        }
         messages = value;
         while (messages.size() > MAX_MESSAGES)
             messages.pop_front();
         refresh();
     }
 
-    const std::deque<twitch::ChatMessage>& visibleMessages() const {
+    const std::deque<kick::ChatMessage>& visibleMessages() const {
         return messages;
     }
 
@@ -1564,7 +1600,7 @@ public:
         panelHeight = height;
         this->setWidth(width);
         this->setHeight(height);
-        this->setBackgroundColor(nvgRGBA(18, 23, 34, 255));
+        this->setBackgroundColor(nvgRGBA(0, 0, 0, 255));
         composeButton->setVisibility(brls::Visibility::GONE);
         refresh();
     }
@@ -1589,7 +1625,7 @@ private:
                 120.0f,
                 panelHeight - reserved);
 
-        std::vector<const twitch::ChatMessage*> selected;
+        std::vector<const kick::ChatMessage*> selected;
         float consumed = 0.0f;
 
         for (auto iterator = messages.rbegin();
@@ -1597,7 +1633,7 @@ private:
              selected.size() < rows.size();
              ++iterator) {
             const float measuredHeight =
-                TwitchChatMessageView::estimateHeightFor(
+                KickChatMessageView::estimateHeightFor(
                 *iterator,
                 preferences,
                 innerWidth,
@@ -1612,7 +1648,7 @@ private:
         }
 
         std::reverse(selected.begin(), selected.end());
-        std::deque<twitch::ChatMessage> visibleMessages;
+        std::deque<kick::ChatMessage> visibleMessages;
         for (size_t index = 0;
              index < selected.size() && index < rows.size();
              ++index) {
@@ -1633,25 +1669,32 @@ private:
     bool docked = false;
     float panelWidth = 330.0f;
     float panelHeight = brls::Application::contentHeight;
-    twitch::ChatPreferences preferences;
+    kick::ChatPreferences preferences;
     std::function<void()> sendRequested;
     std::function<bool()> backRequested;
-    std::deque<twitch::ChatMessage> messages;
-    brls::Label* title = nullptr;
+    std::deque<kick::ChatMessage> messages;
+    brls::Box* headerBox = nullptr;
+    brls::Label* titlePrefix = nullptr;
+    brls::Label* chattersCountLabel = nullptr;
+    brls::Label* chattersSuffix = nullptr;
+    int currentChatterCount = 0;
     brls::Label* status = nullptr;
     brls::Box* messagesBox = nullptr;
     brls::Button* composeButton = nullptr;
-    std::vector<TwitchChatMessageView*> rows;
+    std::vector<KickChatMessageView*> rows;
 };
 
 struct ChatUiState {
     std::atomic_bool alive{true};
-    TwitchChatPanel* activePanel = nullptr;
-    std::deque<twitch::ChatMessage> messages;
+    KickChatPanel* activePanel = nullptr;
+    std::deque<kick::ChatMessage> messages;
     std::string status;
+    int chatterCount = 0;
 
-    void append(twitch::ChatMessage message) {
+    void append(kick::ChatMessage message) {
+        status.clear();
         if (activePanel) {
+            activePanel->setStatus("");
             activePanel->append(std::move(message));
             messages = activePanel->visibleMessages();
             return;
@@ -1663,19 +1706,32 @@ struct ChatUiState {
     }
 
     void setStatus(const std::string& value) {
+        if (!messages.empty() && value.rfind("Connecting", 0) == 0) {
+            return;
+        }
         status = value;
         if (activePanel) activePanel->setStatus(value);
     }
 
-    void activate(TwitchChatPanel* panel) {
+    void setChatterCount(int count) {
+        chatterCount = count;
+        if (activePanel) activePanel->setChatterCount(count);
+    }
+
+    void activate(KickChatPanel* panel) {
         if (activePanel == panel) return;
 
         activePanel = panel;
         if (!activePanel) return;
 
+        if (!messages.empty() && status.rfind("Connecting", 0) == 0) {
+            status.clear();
+        }
+
         activePanel->replaceMessages(messages);
         messages = activePanel->visibleMessages();
         activePanel->setStatus(status);
+        activePanel->setChatterCount(chatterCount);
     }
 
 private:
@@ -1683,7 +1739,7 @@ private:
 };
 
 
-struct TwitchPlaybackRecoveryState {
+struct KickPlaybackRecoveryState {
     std::atomic_bool alive{true};
     std::atomic_bool recovering{false};
     std::atomic_bool retryScheduled{false};
@@ -1699,32 +1755,43 @@ struct TwitchPlaybackRecoveryState {
     std::atomic_int pendingRecoveryAttempt{0};
     std::atomic_uint hardwareStopGeneration{0};
     std::atomic_int decoderMode{
-        static_cast<int>(twitch::DecoderMode::Software)};
+        static_cast<int>(kick::DecoderMode::Software)};
     std::atomic_int attempt{0};
     std::atomic_int reconfigCount{0};
     std::atomic_uint restoreGeneration{0};
     std::chrono::steady_clock::time_point lastLoadedAt{};
     std::chrono::steady_clock::time_point lastReconfigRecovery{};
+    // Flap protection: when a busy channel's playlist keeps ending, resolving
+    // a brand-new playlist every time hands out a different edge host and
+    // restarts the stream over and over. Remember the last playlist that
+    // actually opened so recovery can retry it first, and back off when
+    // interruptions cluster together.
+    std::string lastUrl;
+    std::chrono::steady_clock::time_point lastRecoveryAt{};
+    int recentRecoveries = 0;
+    int reuseStreak = 0;
+    std::atomic_bool backoffDone{false};
     std::string channel;
+    std::function<void(std::vector<kick::SubtitleTrack>)> onSubtitlesResolved;
 };
 
-constexpr int TWITCH_RECOVERY_MAX_ATTEMPTS = 5;
+constexpr int KICK_RECOVERY_MAX_ATTEMPTS = 5;
 constexpr int HYBRID_RESTORE_STABLE_SECONDS = 8;
 constexpr int HYBRID_REARM_SECONDS = 3;
 
-void performTwitchPlaybackRecovery(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
+void performKickPlaybackRecovery(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
     int attempt);
 
-void resolveTwitchReplacementPlaylist(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
+void resolveKickReplacementPlaylist(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
     int attempt);
 
 void continueHardwareRecoveryAfterStop(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state);
+    const std::shared_ptr<KickPlaybackRecoveryState>& state);
 
 void scheduleHybridHardwareRestore(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state) {
+    const std::shared_ptr<KickPlaybackRecoveryState>& state) {
     if (!state || !state->alive.load() ||
         !state->hybridSoftware.load() ||
         !state->hybridRestoreEligible.load())
@@ -1734,7 +1801,7 @@ void scheduleHybridHardwareRestore(
         state->restoreGeneration.fetch_add(1) + 1;
 
     brls::Logger::info(
-        "twiNX Hybrid: normal presentation returned; waiting {} seconds "
+        "kickNX Hybrid: normal presentation returned; waiting {} seconds "
         "before restoring hardware decoding",
         HYBRID_RESTORE_STABLE_SECONDS);
 
@@ -1753,8 +1820,8 @@ void scheduleHybridHardwareRestore(
                 if (!state->alive.load() ||
                     generation != state->restoreGeneration.load() ||
                     state->recovering.load() ||
-                    twitch::loadDecoderMode() !=
-                        twitch::DecoderMode::Hybrid ||
+                    kick::loadDecoderMode() !=
+                        kick::DecoderMode::Hybrid ||
                     !state->hybridSoftware.load() ||
                     !state->hybridRestoreEligible.load())
                     return;
@@ -1772,7 +1839,7 @@ void scheduleHybridHardwareRestore(
                 mpv.command("set", "pause", "no");
 
                 brls::Logger::warning(
-                    "twiNX Hybrid: requested hardware decoder restoration");
+                    "kickNX Hybrid: requested hardware decoder restoration");
 
                 ThreadPool::instance().submit(
                     [state, generation](HTTP&) {
@@ -1790,8 +1857,8 @@ void scheduleHybridHardwareRestore(
                             if (!state->alive.load() ||
                                 generation !=
                                     state->restoreGeneration.load() ||
-                                twitch::loadDecoderMode() !=
-                                    twitch::DecoderMode::Hybrid)
+                                kick::loadDecoderMode() !=
+                                    kick::DecoderMode::Hybrid)
                                 return;
 
                             auto& mpv = MPVCore::instance();
@@ -1807,11 +1874,8 @@ void scheduleHybridHardwareRestore(
                                 state->hardwareDecode.store(false);
                                 state->reconfigArmed.store(true);
                                 mpv.command("set", "hwdec", "no");
-                                brls::Application::notify(
-                                    "twiNX Hybrid: hardware restore failed; "
-                                    "continuing in software");
                                 brls::Logger::warning(
-                                    "twiNX Hybrid: hardware decoder did not "
+                                    "kickNX Hybrid: hardware decoder did not "
                                     "reactivate; software remains active");
                                 return;
                             }
@@ -1819,12 +1883,10 @@ void scheduleHybridHardwareRestore(
                             state->hybridSoftware.store(false);
                             state->hardwareDecode.store(true);
                             state->reconfigArmed.store(true);
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
                             mpv.logHardwareDecoderState(
                                 "hybrid-hardware-restored");
 #endif
-                            brls::Application::notify(
-                                "twiNX Hybrid: hardware decoding restored");
                         });
                     });
             });
@@ -1842,11 +1904,11 @@ bool isAudioOnlyQuality(const std::string& value) {
     return normalized == "audioonly";
 }
 
-void scheduleTwitchHardwareActivationCheck(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
-    twitch::DecoderMode decoderMode) {
+void scheduleKickHardwareActivationCheck(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
+    kick::DecoderMode decoderMode) {
     if (!state || !state->alive.load() ||
-        !twitch::decoderUsesHardware(decoderMode) ||
+        !kick::decoderUsesHardware(decoderMode) ||
         state->hybridSoftware.load())
         return;
 
@@ -1864,7 +1926,7 @@ void scheduleTwitchHardwareActivationCheck(
             brls::sync([state, decoderMode]() {
                 if (!state->alive.load() ||
                     state->hybridSoftware.load() ||
-                    twitch::loadDecoderMode() != decoderMode)
+                    kick::loadDecoderMode() != decoderMode)
                     return;
 
                 auto& mpv = MPVCore::instance();
@@ -1874,16 +1936,16 @@ void scheduleTwitchHardwareActivationCheck(
                 const std::string active =
                     mpv.getString("hwdec-current");
 
-                if (isAudioOnlyQuality(twitch::loadPreferredQuality())) {
+                if (isAudioOnlyQuality(kick::loadPreferredQuality())) {
                     brls::Logger::info(
-                        "twiNX: skipping hardware activation warning for "
+                        "kickNX: skipping hardware activation warning for "
                         "explicit audio-only playback");
                     return;
                 }
 
                 if (codec.empty() || width <= 0 || height <= 0) {
                     brls::Logger::info(
-                        "twiNX: hardware activation check postponed; "
+                        "kickNX: hardware activation check postponed; "
                         "no video stream is active yet "
                         "(codec='{}' size={}x{})",
                         codec,
@@ -1894,48 +1956,46 @@ void scheduleTwitchHardwareActivationCheck(
 
                 if (active.empty() || active == "no") {
                     brls::Logger::warning(
-                        "twiNX: Twitch hardware decoder did not activate; "
+                        "kickNX: Kick hardware decoder did not activate; "
                         "hwdec-current='{}'",
                         active.empty() ? "<empty>" : active);
 
-                    if (decoderMode == twitch::DecoderMode::Hybrid) {
+                    if (decoderMode == kick::DecoderMode::Hybrid) {
                         state->hybridSoftware.store(true);
                         state->hardwareDecode.store(false);
                         mpv.command("set", "hwdec", "no");
-                        brls::Application::notify(
-                            "twiNX Hybrid: hardware did not activate; "
+                        brls::Logger::warning(
+                            "kickNX Hybrid: hardware did not activate; "
                             "continuing in software");
                     } else {
-                        brls::Application::notify(
-                            "twiNX warning: experimental hardware "
-                            "decoding did not activate");
+                        brls::Logger::warning(
+                            "kickNX: experimental hardware decoding did not activate");
                     }
                     return;
                 }
 
                 state->hardwareDecode.store(true);
                 brls::Logger::info(
-                    "twiNX: Twitch hardware decoder active: {}",
+                    "kickNX: Kick hardware decoder active: {}",
                     active);
             });
         });
 }
 
-void finishTwitchRecoveryFailure(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
+void finishKickRecoveryFailure(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
     const std::string& error) {
     state->retryScheduled.store(false);
     state->recovering.store(false);
     state->attempt.store(0);
 
     if (state->alive.load()) {
-        brls::Application::notify(
-            "twiNX could not resume the live stream: " + error);
+        brls::Logger::warning("kickNX could not resume the live stream: {}", error);
     }
 }
 
-void scheduleTwitchPlaybackRetry(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
+void scheduleKickPlaybackRetry(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
     const std::string& error) {
     if (!state || !state->alive.load()) return;
 
@@ -1944,8 +2004,8 @@ void scheduleTwitchPlaybackRetry(
         return;
 
     const int nextAttempt = state->attempt.fetch_add(1) + 1;
-    if (nextAttempt > TWITCH_RECOVERY_MAX_ATTEMPTS) {
-        finishTwitchRecoveryFailure(state, error);
+    if (nextAttempt > KICK_RECOVERY_MAX_ATTEMPTS) {
+        finishKickRecoveryFailure(state, error);
         return;
     }
 
@@ -1966,13 +2026,13 @@ void scheduleTwitchPlaybackRetry(
                     return;
 
                 state->retryScheduled.store(false);
-                performTwitchPlaybackRecovery(state, nextAttempt);
+                performKickPlaybackRecovery(state, nextAttempt);
             });
         });
 }
 
-void useTwitchSoftwareDecoder(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
+void useKickSoftwareDecoder(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
     const std::string& reason) {
     auto& mpv = MPVCore::instance();
     mpv.command("set", "pause", "yes");
@@ -1987,40 +2047,55 @@ void useTwitchSoftwareDecoder(
     }
 
     brls::Logger::warning(
-        "twiNX Hybrid: switched to software decoding ({})",
+        "kickNX Hybrid: switched to software decoding ({})",
         reason);
 }
 
-void resolveTwitchReplacementPlaylist(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
+void resolveKickReplacementPlaylist(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
     int attempt) {
     if (!state || !state->alive.load() || !state->recovering.load())
         return;
 
-    auto config = twitch::loadConfig();
+    // Edge Flap Protection:
+    // If we have the current playlist URL and haven't exhausted edge retries yet (attempt < 2),
+    // try to reload the same edge URL first. This prevents switching CDN edge hosts
+    // (e.g. from use12 to use14/use15) on temporary packet drops or brief segment delays.
+    if (attempt < 2 && !state->lastUrl.empty()) {
+        brls::Logger::info("kickNX: retrying the same edge server playlist (attempt {})", attempt);
+        MPVCore::BOTTOM_BAR = false;
+        MPVCore::instance().setUrl(state->lastUrl, "");
+        return;
+    }
+
+    auto config = kick::loadConfig();
     config.channel = state->channel;
 
-    twitch::resolveLiveAsync(
+    kick::resolveLiveAsync(
         config,
-        [state](twitch::Resolution result) {
+        [state](kick::Resolution result) {
             if (!state->alive.load() || !state->recovering.load()) return;
+
+            if (state->onSubtitlesResolved) {
+                state->onSubtitlesResolved(result.subtitles);
+            }
 
             MPVCore::BOTTOM_BAR = false;
             MPVCore::instance().setUrl(
                 result.selected.url,
-                twitch::mpvExtra());
+                "");
 
             // Recovery remains active until MPV_LOADED confirms that this
             // replacement playlist actually opened.
         },
         [state, attempt](const std::string& error) {
             if (!state->alive.load()) return;
-            scheduleTwitchPlaybackRetry(state, error);
+            scheduleKickPlaybackRetry(state, error);
         });
 }
 
 void continueHardwareRecoveryAfterStop(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state) {
+    const std::shared_ptr<KickPlaybackRecoveryState>& state) {
     if (!state || !state->alive.load() || !state->recovering.load())
         return;
 
@@ -2032,13 +2107,13 @@ void continueHardwareRecoveryAfterStop(
 
     const int attempt = state->pendingRecoveryAttempt.load();
     brls::Logger::warning(
-        "twiNX: old hardware-decoded Twitch file stopped; "
+        "kickNX: old hardware-decoded Kick file stopped; "
         "resolving a fresh playlist without toggling hwdec");
-    resolveTwitchReplacementPlaylist(state, attempt);
+    resolveKickReplacementPlaylist(state, attempt);
 }
 
 void scheduleHardwareStopWatchdog(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
     unsigned int generation) {
     ThreadPool::instance().submit(
         [state, generation](HTTP&) {
@@ -2056,32 +2131,32 @@ void scheduleHardwareStopWatchdog(
 
                 if (MPVCore::instance().isStopped()) {
                     brls::Logger::warning(
-                        "twiNX: hardware stop confirmation event was delayed; "
+                        "kickNX: hardware stop confirmation event was delayed; "
                         "continuing after MPV reported the file stopped");
                     continueHardwareRecoveryAfterStop(state);
                     return;
                 }
 
                 state->waitingForHardwareStop.store(false);
-                finishTwitchRecoveryFailure(
+                finishKickRecoveryFailure(
                     state,
                     "the hardware decoder did not stop cleanly");
                 brls::Logger::error(
-                    "twiNX: aborted hardware recovery because MPV did not "
+                    "kickNX: aborted hardware recovery because MPV did not "
                     "confirm a clean stop within 5 seconds");
             });
         });
 }
 
-void performTwitchPlaybackRecovery(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
+void performKickPlaybackRecovery(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
     int attempt) {
     if (!state || !state->alive.load()) return;
 
-    const twitch::DecoderMode mode = twitch::loadDecoderMode();
+    const kick::DecoderMode mode = kick::loadDecoderMode();
     state->decoderMode.store(static_cast<int>(mode));
 
-    if (mode == twitch::DecoderMode::Hardware) {
+    if (mode == kick::DecoderMode::Hardware) {
         auto& mpv = MPVCore::instance();
         state->hardwareDecode.store(true);
         state->hybridSoftware.store(false);
@@ -2094,9 +2169,9 @@ void performTwitchPlaybackRecovery(
         if (mpv.isStopped()) {
             state->waitingForHardwareStop.store(false);
             brls::Logger::warning(
-                "twiNX: hardware-decoded Twitch file had already ended; "
+                "kickNX: hardware-decoded Kick file had already ended; "
                 "resolving a fresh playlist");
-            resolveTwitchReplacementPlaylist(state, attempt);
+            resolveKickReplacementPlaylist(state, attempt);
             return;
         }
 
@@ -2105,7 +2180,7 @@ void performTwitchPlaybackRecovery(
             state->hardwareStopGeneration.fetch_add(1) + 1;
 
         brls::Logger::warning(
-            "twiNX: stopping the old hardware-decoded Twitch file before "
+            "kickNX: stopping the old hardware-decoded Kick file before "
             "loading its replacement");
         mpv.stop();
         scheduleHardwareStopWatchdog(state, generation);
@@ -2115,11 +2190,11 @@ void performTwitchPlaybackRecovery(
     state->waitingForHardwareStop.store(false);
     state->hardwareStopGeneration.fetch_add(1);
 
-    if (mode == twitch::DecoderMode::Hybrid) {
-        // The first dangerous Twitch transition moves Hybrid to software.
+    if (mode == kick::DecoderMode::Hybrid) {
+        // The first dangerous Kick transition moves Hybrid to software.
         // Subsequent recovery events keep software active until the return to
         // the normal presentation is confirmed and stable.
-        useTwitchSoftwareDecoder(
+        useKickSoftwareDecoder(
             state,
             state->hybridRestoreEligible.load()
                 ? "return transition"
@@ -2128,22 +2203,21 @@ void performTwitchPlaybackRecovery(
         auto& mpv = MPVCore::instance();
         mpv.command("set", "pause", "yes");
         mpv.command("drop-buffers");
-        mpv.command("set", "hwdec", "no");
         state->hardwareDecode.store(false);
         state->hybridSoftware.store(false);
     }
 
-    resolveTwitchReplacementPlaylist(state, attempt);
+    resolveKickReplacementPlaylist(state, attempt);
 }
 
-bool requestTwitchPlaybackRecovery(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state,
+bool requestKickPlaybackRecovery(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state,
     MpvEventEnum event) {
-#if defined(TWINX_PLAYBACK_DEBUG)
-    twinx::debug::log(
+#if defined(KICKNX_PLAYBACK_DEBUG)
+    kicknx::debug::log(
         "TW_RECOVERY",
         "request event=%s(%d) state=%p alive=%d recovering=%d waiting_stop=%d switching=%d",
-        twinx::debug::playerEventName(static_cast<int>(event)),
+        kicknx::debug::playerEventName(static_cast<int>(event)),
         static_cast<int>(event),
         state.get(),
         state && state->alive.load() ? 1 : 0,
@@ -2155,14 +2229,14 @@ bool requestTwitchPlaybackRecovery(
 
     if (state->decoderSwitching.load()) {
         brls::Logger::debug(
-            "twiNX Hybrid: ignoring decoder-generated event {}",
+            "kickNX Hybrid: ignoring decoder-generated event {}",
             static_cast<int>(event));
         return true;
     }
 
     if (state->waitingForHardwareStop.load()) {
         brls::Logger::debug(
-            "twiNX: ignoring event {} while waiting for the old "
+            "kickNX: ignoring event {} while waiting for the old "
             "hardware-decoded file to stop",
             static_cast<int>(event));
         return true;
@@ -2174,27 +2248,25 @@ bool requestTwitchPlaybackRecovery(
         state->recovering.load())
         return true;
 
-    const twitch::DecoderMode mode = twitch::loadDecoderMode();
+    const kick::DecoderMode mode = kick::loadDecoderMode();
     state->decoderMode.store(static_cast<int>(mode));
 
-    // Hardware-only mode must never force a decoder teardown or playlist
-    // replacement after MPV has begun processing a Twitch presentation
-    // transition. The Switch NVTEGRA path can still own frames inside
-    // mp_image_hw_download at this point. Let MPV finish naturally; if the
-    // presentation ends or errors, VideoView will show its normal controlled
-    // end/error UI instead of racing the hardware decoder.
-    if (mode == twitch::DecoderMode::Hardware) {
+    // In Hardware mode, VIDEO_RECONFIG events are suppressed to avoid tearing down
+    // NVTEGRA during in-flight frames. For actual stream dropouts (END_OF_FILE,
+    // MPV_FILE_ERROR), we allow hardware recovery to run via performKickPlaybackRecovery
+    // which cleanly stops the hardware file before reloading, preventing premature exit
+    // to the home screen when a streamer's cache empties.
+    if (mode == kick::DecoderMode::Hardware && event == MpvEventEnum::VIDEO_RECONFIG) {
         brls::Logger::warning(
-            "twiNX Hardware: automatic live recovery suppressed for event {} "
-            "to avoid tearing down an active NVTEGRA frame",
-            static_cast<int>(event));
-        return false;
+            "kickNX Hardware: video reconfig recovery suppressed "
+            "to avoid tearing down an active NVTEGRA frame");
+        return true;
     }
 
     // A second transition while Hybrid is already in software is our signal
-    // that Twitch has moved away from the inserted presentation. Hardware is
+    // that Kick has moved away from the inserted presentation. Hardware is
     // restored only after the replacement stream has loaded and stayed stable.
-    if (mode == twitch::DecoderMode::Hybrid &&
+    if (mode == kick::DecoderMode::Hybrid &&
         state->hybridSoftware.load()) {
         state->hybridRestoreEligible.store(true);
     }
@@ -2205,20 +2277,27 @@ bool requestTwitchPlaybackRecovery(
         state->retryScheduled.store(false);
         state->restoreGeneration.fetch_add(1);
 
+        const auto incidentTime = std::chrono::steady_clock::now();
+        if (state->lastRecoveryAt.time_since_epoch().count() != 0 &&
+            incidentTime - state->lastRecoveryAt < std::chrono::seconds(60)) {
+            state->recentRecoveries++;
+        } else {
+            state->recentRecoveries = 1;
+            state->reuseStreak = 0;
+        }
+        state->lastRecoveryAt = incidentTime;
+        state->backoffDone.store(false);
+
         brls::Logger::warning(
-            "twiNX: Twitch live playback interrupted (event {}), "
+            "kickNX: Kick live playback interrupted (event {}), "
             "resolving a fresh playlist",
             static_cast<int>(event));
-        brls::Application::notify(
-            mode == twitch::DecoderMode::Hybrid
-                ? "twiNX Hybrid: stabilizing the live stream in software…"
-                : "twiNX: resuming the live stream…");
 
-        performTwitchPlaybackRecovery(state, 0);
+        performKickPlaybackRecovery(state, 0);
     } else {
         // If the replacement playlist fails before MPV_LOADED, schedule one
         // controlled retry rather than starting overlapping resolver jobs.
-        scheduleTwitchPlaybackRetry(
+        scheduleKickPlaybackRetry(
             state,
             "the replacement playlist did not open");
     }
@@ -2226,10 +2305,10 @@ bool requestTwitchPlaybackRecovery(
     return true;
 }
 
-void handleTwitchVideoReconfig(
-    const std::shared_ptr<TwitchPlaybackRecoveryState>& state) {
-#if defined(TWINX_PLAYBACK_DEBUG)
-    twinx::debug::log(
+void handleKickVideoReconfig(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state) {
+#if defined(KICKNX_PLAYBACK_DEBUG)
+    kicknx::debug::log(
         "TW_RECONFIG",
         "enter state=%p alive=%d switching=%d armed=%d recovering=%d count=%d",
         state.get(),
@@ -2243,22 +2322,22 @@ void handleTwitchVideoReconfig(
         state->decoderSwitching.load())
         return;
 
-    const twitch::DecoderMode mode = twitch::loadDecoderMode();
+    const kick::DecoderMode mode = kick::loadDecoderMode();
     state->decoderMode.store(static_cast<int>(mode));
 
-    if (mode == twitch::DecoderMode::Software) return;
+    if (mode == kick::DecoderMode::Software) return;
 
     const int count = state->reconfigCount.fetch_add(1) + 1;
     const auto now = std::chrono::steady_clock::now();
 
-    // Ignore startup/reload reconfiguration. A later Twitch presentation
+    // Ignore startup/reload reconfiguration. A later Kick presentation
     // change (such as live -> commercial or commercial -> live) is the
     // dangerous transition.
     if (!state->reconfigArmed.load() ||
         state->lastLoadedAt.time_since_epoch().count() == 0 ||
         now - state->lastLoadedAt < std::chrono::seconds(5)) {
         brls::Logger::debug(
-            "twiNX: ignoring startup video reconfig {}",
+            "kickNX: ignoring startup video reconfig {}",
             count);
         return;
     }
@@ -2266,17 +2345,17 @@ void handleTwitchVideoReconfig(
     if (state->lastReconfigRecovery.time_since_epoch().count() != 0 &&
         now - state->lastReconfigRecovery < std::chrono::seconds(8)) {
         brls::Logger::debug(
-            "twiNX: throttling repeated video reconfig {}",
+            "kickNX: throttling repeated video reconfig {}",
             count);
         return;
     }
 
-    if (mode == twitch::DecoderMode::Hardware) {
+    if (mode == kick::DecoderMode::Hardware) {
         // Diagnostic/safety behavior: do not stop, reload, drop buffers, or
         // change hwdec in response to VIDEO_RECONFIG. Any of those operations
         // can race a hardware frame currently being downloaded by MPV.
         brls::Logger::warning(
-            "twiNX Hardware: Twitch video reconfiguration {} detected; "
+            "kickNX Hardware: Kick video reconfiguration {} detected; "
             "leaving MPV/NVTEGRA untouched",
             count);
         return;
@@ -2284,25 +2363,25 @@ void handleTwitchVideoReconfig(
 
     state->lastReconfigRecovery = now;
 
-    if (mode == twitch::DecoderMode::Hybrid) {
+    if (mode == kick::DecoderMode::Hybrid) {
         if (state->hybridSoftware.load()) {
             state->hybridRestoreEligible.store(true);
             brls::Logger::warning(
-                "twiNX Hybrid: second Twitch presentation transition "
+                "kickNX Hybrid: second Kick presentation transition "
                 "detected; hardware restore will be attempted after stable "
                 "software playback");
         } else {
             brls::Logger::warning(
-                "twiNX Hybrid: Twitch presentation transition detected; "
+                "kickNX Hybrid: Kick presentation transition detected; "
                 "switching to software before consuming the new frames");
         }
     } else {
         brls::Logger::warning(
-            "twiNX: post-startup Twitch video reconfiguration detected; "
+            "kickNX: post-startup Kick video reconfiguration detected; "
             "resetting hardware decoder before new frames are consumed");
     }
 
-    requestTwitchPlaybackRecovery(
+    requestKickPlaybackRecovery(
         state,
         MpvEventEnum::VIDEO_RECONFIG);
 }
@@ -2339,20 +2418,26 @@ std::atomic_uint64_t activePlaybackSession{0};
 
 class RemotePlayer : public brls::Box {
 public:
-    RemotePlayer(const remote::DirEntry& item, std::string twitchChannel = "")
-        : twitchChannel(std::move(twitchChannel)),
+    RemotePlayer(
+        const remote::DirEntry& item,
+        std::string kickChannel = "",
+        std::string loadingNote = "",
+        std::vector<kick::SubtitleTrack> kickSubtitles = {},
+        int64_t uptimeSeconds = 0)
+        : kickChannel(std::move(kickChannel)),
+          kickSubtitles(std::move(kickSubtitles)),
           playbackSessionId(++nextPlaybackSession) {
         activePlaybackSession.store(playbackSessionId);
-#if defined(TWINX_PLAYBACK_DEBUG)
-        twinx::debug::log(
+#if defined(KICKNX_PLAYBACK_DEBUG)
+        kicknx::debug::log(
             "TW_PLAYER",
             "construct session=%llu channel=%s item_type=%d item_name=%s",
             static_cast<unsigned long long>(playbackSessionId),
-            this->twitchChannel.empty() ? "<non-twitch>" : this->twitchChannel.c_str(),
+            this->kickChannel.empty() ? "<non-kick>" : this->kickChannel.c_str(),
             static_cast<int>(item.type),
             item.name.c_str());
 #endif
-        MPVCore::LIVE_STREAM_RECOVERY = !this->twitchChannel.empty();
+        MPVCore::LIVE_STREAM_RECOVERY = !this->kickChannel.empty();
         resetPlayerVideoLayout();
         float width = brls::Application::contentWidth;
         float height = brls::Application::contentHeight;
@@ -2361,35 +2446,57 @@ public:
         view->setId("video");
         view->setTitie(item.name);
         view->hideVideoQuality();
+        if (!loadingNote.empty()) {
+            view->setLoadingNote(loadingNote);
+        }
+        view->showLoading();
         this->setDimensions(width, height);
         this->setAxis(brls::Axis::ROW);
         this->addView(view);
+
+        VideoView::setGlobalCloseHandler([this]() {
+            deactivatePlayback();
+        });
 
         auto composeChat = [this]() {
             openChatComposer();
         };
 
-        auto closePlayback = []() {
+        auto closePlayback = [this]() {
+            deactivatePlayback();
             return VideoView::close(true);
         };
 
+        this->registerAction(
+            "hints/back"_i18n,
+            brls::BUTTON_B,
+            [this](brls::View*) {
+                if (portraitLayout && portraitComposer && portraitComposer->isEmotePanelVisible()) {
+                    portraitComposer->setEmotePanelVisible(false);
+                    return true;
+                }
+                deactivatePlayback();
+                return VideoView::close(true);
+            },
+            true);
+
         chatOverlayPanel =
-            new TwitchChatPanel(
+            new KickChatPanel(
                 false,
                 composeChat,
                 closePlayback);
         view->setContentOverlay(chatOverlayPanel);
 
         chatDockedPanel =
-            new TwitchChatPanel(
+            new KickChatPanel(
                 true,
                 composeChat,
                 closePlayback);
         this->addView(chatDockedPanel);
 
-        if (!this->twitchChannel.empty()) {
+        if (!this->kickChannel.empty()) {
             portraitComposer = new PortraitChatComposer(
-                this->twitchChannel,
+                this->kickChannel,
                 [this](const std::string& message) {
                     return sendPortraitMessage(message);
                 });
@@ -2398,21 +2505,22 @@ public:
 
         chatUi = std::make_shared<ChatUiState>();
 
-        if (this->twitchChannel.empty()) {
+        if (this->kickChannel.empty()) {
             chatOverlayPanel->setVisibility(brls::Visibility::GONE);
             chatDockedPanel->setVisibility(brls::Visibility::GONE);
             view->setDimensions(width, height);
         }
 
-        if (!this->twitchChannel.empty()) {
+        if (!this->kickChannel.empty()) {
+            view->setLiveMode(true, uptimeSeconds);
             MPVCore::LIVE_STREAM_RECOVERY = true;
 
-            const twitch::DecoderMode decoderMode =
-                twitch::loadDecoderMode();
+            const kick::DecoderMode decoderMode =
+                kick::loadDecoderMode();
             const bool hardwareDecode =
-                twitch::decoderUsesHardware(decoderMode);
-#if defined(TWINX_PLAYBACK_DEBUG)
-            twinx::debug::log(
+                kick::decoderUsesHardware(decoderMode);
+#if defined(KICKNX_PLAYBACK_DEBUG)
+            kicknx::debug::log(
                 "TW_PLAYER",
                 "session=%llu decoder_mode=%d hardware=%d",
                 static_cast<unsigned long long>(playbackSessionId),
@@ -2429,46 +2537,49 @@ public:
                     "vd-lavc-dr",
                     "no");
                 brls::Logger::warning(
-                    decoderMode == twitch::DecoderMode::Hybrid
-                        ? "twiNX: experimental Twitch Hybrid decoding enabled"
-                        : "twiNX: experimental Twitch hardware decoding enabled");
+                    decoderMode == kick::DecoderMode::Hybrid
+                        ? "kickNX: experimental Kick Hybrid decoding enabled"
+                        : "kickNX: experimental Kick hardware decoding enabled");
             } else {
                 MPVCore::instance().command("set", "hwdec", "no");
                 brls::Logger::info(
-                    "twiNX: stable Twitch software decoding enabled");
+                    "kickNX: stable Kick software decoding enabled");
             }
 
             playbackRecovery =
-                std::make_shared<TwitchPlaybackRecoveryState>();
-            playbackRecovery->channel = this->twitchChannel;
+                std::make_shared<KickPlaybackRecoveryState>();
+            playbackRecovery->channel = this->kickChannel;
             playbackRecovery->hardwareDecode.store(hardwareDecode);
             playbackRecovery->decoderMode.store(
                 static_cast<int>(decoderMode));
             playbackRecovery->hybridSoftware.store(false);
             playbackRecovery->hybridRestoreEligible.store(false);
+            playbackRecovery->onSubtitlesResolved = [this](std::vector<kick::SubtitleTrack> subs) {
+                this->kickSubtitles = std::move(subs);
+            };
 
-            std::weak_ptr<TwitchPlaybackRecoveryState> weakRecovery =
+            std::weak_ptr<KickPlaybackRecoveryState> weakRecovery =
                 playbackRecovery;
             view->setPlaybackRecoveryHandler(
                 [weakRecovery](MpvEventEnum event) {
                     auto state = weakRecovery.lock();
                     if (!state) return true;
-                    return requestTwitchPlaybackRecovery(state, event);
+                    return requestKickPlaybackRecovery(state, event);
                 });
 
             chatPreferenceSubscribeID =
-                twitch::chatPreferencesEvent()->subscribe(
-                    [this](twitch::ChatPreferences preferences) {
+                kick::chatPreferencesEvent()->subscribe(
+                    [this](kick::ChatPreferences preferences) {
                         applyChatPreferences(preferences);
                     });
             applyChatPreferences(
-                twitch::loadChatPreferences());
+                kick::loadChatPreferences());
 
             auto& orientationController =
-                twinx::portrait::OrientationController::instance();
+                kicknx::portrait::OrientationController::instance();
             orientationSubscribeID =
                 orientationController.getOrientationChanged()->subscribe(
-                    [this](twinx::portrait::DisplayOrientation orientation) {
+                    [this](kicknx::portrait::DisplayOrientation orientation) {
                         applyDisplayOrientation(orientation);
                     });
             applyDisplayOrientation(orientationController.orientation());
@@ -2493,19 +2604,22 @@ public:
                 std::make_shared<std::atomic_bool>(
                     false);
             this->ptrLock();
-            twitch::loadChannelProfileAsync(
-                twitch::loadConfig(),
-                this->twitchChannel,
-                [this](twitch::UserProfile profile) {
+            kick::loadChannelProfileAsync(
+                kick::loadConfig(),
+                this->kickChannel,
+                [this](kick::UserProfile profile) {
                     channelProfile =
                         std::move(profile);
                     view->showChannelButton(
                         channelProfile.profileImageUrl);
+                    if (channelProfile.uptimeSeconds > 0) {
+                        view->setStreamUptime(channelProfile.uptimeSeconds);
+                    }
                     this->ptrUnlock();
                 },
                 [this](const std::string& error) {
                     brls::Logger::warning(
-                        "twiNX: player channel avatar "
+                        "kickNX: player channel avatar "
                         "could not be loaded: {}",
                         error);
                     view->hideChannelButton();
@@ -2526,13 +2640,13 @@ public:
                 activePlaybackSession.load() != playbackSessionId)
                 return;
 
-#if defined(TWINX_PLAYBACK_DEBUG)
-            twinx::debug::log(
+#if defined(KICKNX_PLAYBACK_DEBUG)
+            kicknx::debug::log(
                 "TW_EVENT",
                 "session=%llu event=%s(%d) recovery=%p recovering=%d armed=%d "
                 "hw=%d hybrid_sw=%d waiting_stop=%d",
                 static_cast<unsigned long long>(playbackSessionId),
-                twinx::debug::playerEventName(static_cast<int>(event)),
+                kicknx::debug::playerEventName(static_cast<int>(event)),
                 static_cast<int>(event),
                 playbackRecovery.get(),
                 playbackRecovery && playbackRecovery->recovering.load() ? 1 : 0,
@@ -2545,13 +2659,13 @@ public:
             auto& mpv = MPVCore::instance();
             switch (event) {
             case MpvEventEnum::MPV_LOADED: {
-                if (!this->twitchChannel.empty()) {
-                    applyTwitchVideoLayout(currentChatPreferences);
+                if (!this->kickChannel.empty()) {
+                    applyKickVideoLayout(currentChatPreferences);
                     if (playbackRecovery) {
-                        const twitch::DecoderMode decoderMode =
-                            twitch::loadDecoderMode();
+                        const kick::DecoderMode decoderMode =
+                            kick::loadDecoderMode();
                         const bool hardwareDecode =
-                            twitch::decoderUsesHardware(decoderMode) &&
+                            kick::decoderUsesHardware(decoderMode) &&
                             !playbackRecovery->hybridSoftware.load();
 
                         playbackRecovery->decoderMode.store(
@@ -2560,36 +2674,42 @@ public:
                             hardwareDecode);
                         playbackRecovery->lastLoadedAt =
                             std::chrono::steady_clock::now();
+                        {
+                            const std::string loadedPath =
+                                mpv.getString("path");
+                            if (!loadedPath.empty())
+                                playbackRecovery->lastUrl = loadedPath;
+                        }
                         playbackRecovery->waitingForHardwareStop.store(false);
                         playbackRecovery->hardwareStopGeneration.fetch_add(1);
                         playbackRecovery->reconfigArmed.store(
-                            decoderMode != twitch::DecoderMode::Software);
+                            decoderMode != kick::DecoderMode::Software);
 
-                        if (decoderMode == twitch::DecoderMode::Software) {
+                        if (decoderMode == kick::DecoderMode::Software) {
                             playbackRecovery->hybridSoftware.store(false);
                             playbackRecovery->hybridRestoreEligible.store(false);
                             MPVCore::instance().command(
                                 "set",
                                 "hwdec",
                                 "no");
-                        } else if (decoderMode == twitch::DecoderMode::Hybrid &&
+                        } else if (decoderMode == kick::DecoderMode::Hybrid &&
                                    playbackRecovery->hybridSoftware.load()) {
                             MPVCore::instance().command(
                                 "set",
                                 "hwdec",
                                 "no");
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
                             MPVCore::instance().logHardwareDecoderState(
                                 "hybrid-software-transition");
 #endif
                         } else {
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
                             MPVCore::instance().logHardwareDecoderState(
-                                decoderMode == twitch::DecoderMode::Hybrid
+                                decoderMode == kick::DecoderMode::Hybrid
                                     ? "hybrid-hardware"
-                                    : "twitch-experimental-hardware");
+                                    : "kick-experimental-hardware");
 #endif
-                            scheduleTwitchHardwareActivationCheck(
+                            scheduleKickHardwareActivationCheck(
                                 playbackRecovery,
                                 decoderMode);
                         }
@@ -2602,21 +2722,37 @@ public:
                 if (recoveryCompleted) {
                     playbackRecovery->retryScheduled.store(false);
                     playbackRecovery->attempt.store(0);
-                    brls::Application::notify(
-                        twitch::loadDecoderMode() == twitch::DecoderMode::Hybrid
-                            ? "twiNX Hybrid: live stream stabilized in software"
-                            : "twiNX: live stream resumed");
+                    brls::Logger::info("kickNX: live stream resumed");
                 }
 
                 if (playbackRecovery &&
-                    twitch::loadDecoderMode() == twitch::DecoderMode::Hybrid &&
+                    kick::loadDecoderMode() == kick::DecoderMode::Hybrid &&
                     playbackRecovery->hybridSoftware.load() &&
                     playbackRecovery->hybridRestoreEligible.load()) {
                     scheduleHybridHardwareRestore(playbackRecovery);
                 }
 
                 if (titles.empty()) this->loadList();
+                mpv.command("set", "pause", "no");
                 view->getProfile()->init("Local");
+                for (const auto& sub : this->kickSubtitles) {
+                    mpv.command(
+                        "sub-add",
+                        sub.url.c_str(),
+                        "auto",
+                        sub.name.c_str(),
+                        sub.language.c_str());
+#if defined(KICKNX_PLAYBACK_DEBUG)
+                    kicknx::debug::log(
+                        "TW_SUBTITLE",
+                        "session=%llu sub-add name=%s lang=%s url=%s default=%d",
+                        static_cast<unsigned long long>(playbackSessionId),
+                        sub.name.c_str(),
+                        sub.language.c_str(),
+                        sub.url.c_str(),
+                        sub.isDefault ? 1 : 0);
+#endif
+                }
                 const char* flag = MPVCore::SUBS_FALLBACK ? "select" : "auto";
                 for (auto& it : this->subtitles) {
                     mpv.command("sub-add", it.second.c_str(), flag, it.first.c_str());
@@ -2630,25 +2766,65 @@ public:
                 break;
             case MpvEventEnum::VIDEO_RECONFIG:
                 if (playbackRecovery)
-                    handleTwitchVideoReconfig(playbackRecovery);
+                    handleKickVideoReconfig(playbackRecovery);
                 break;
             default:;
             }
         });
         settingSubscribeID = view->getSettingEvent()->subscribe([this]() {
-            brls::View* setting = new PlayerSetting(nullptr, this->twitchChannel);
+            brls::View* setting = new PlayerSetting(nullptr, this->kickChannel);
             brls::Application::pushActivity(new brls::Activity(setting));
         });
     }
 
+    void deactivatePlayback() {
+        if (playerShuttingDown) return;
+        playerShuttingDown = true;
+        if (playerAlive) playerAlive->store(false);
+
+        VideoView::setGlobalCloseHandler(nullptr);
+
+        if (activePlaybackSession.load() == playbackSessionId)
+            activePlaybackSession.store(0);
+
+        MPVCore::LIVE_STREAM_RECOVERY = false;
+        if (playbackRecovery) {
+            playbackRecovery->alive.store(false);
+            playbackRecovery->recovering.store(false);
+            playbackRecovery->retryScheduled.store(false);
+            playbackRecovery->reconfigArmed.store(false);
+            playbackRecovery->decoderSwitching.store(false);
+            playbackRecovery->restoreGeneration.fetch_add(1);
+        }
+        view->setPlaybackRecoveryHandler({});
+
+        if (chatUi) chatUi->alive.store(false);
+        stopChat();
+        resetPlayerVideoLayout();
+
+        auto& mpv = MPVCore::instance();
+        mpv.stop();
+        const char* configuredHwdec = MPVCore::HARDWARE_DEC
+            ? MPVCore::PLAYER_HWDEC_METHOD.c_str()
+            : "no";
+        mpv.command("set", "hwdec", configuredHwdec);
+    }
+
+    void deactivatePlaybackForNavigation() {
+        deactivatePlayback();
+    }
+
     ~RemotePlayer() override {
-        shutdownAudioReactiveHaptics();
-#if defined(TWINX_PLAYBACK_DEBUG)
-        twinx::debug::log(
+        if (playerAlive) playerAlive->store(false);
+        deactivatePlayback();
+        if (asyncCancelToken)
+            asyncCancelToken->store(true);
+#if defined(KICKNX_PLAYBACK_DEBUG)
+        kicknx::debug::log(
             "TW_PLAYER",
             "destruct session=%llu channel=%s owns=%d",
             static_cast<unsigned long long>(playbackSessionId),
-            this->twitchChannel.empty() ? "<non-twitch>" : this->twitchChannel.c_str(),
+            this->kickChannel.empty() ? "<non-kick>" : this->kickChannel.c_str(),
             activePlaybackSession.load() == playbackSessionId ? 1 : 0);
 #endif
         playerShuttingDown = true;
@@ -2657,10 +2833,10 @@ public:
         if (ownsPlayback)
             activePlaybackSession.store(0);
 
-        if (ownsPlayback && !this->twitchChannel.empty()) {
+        if (ownsPlayback && !this->kickChannel.empty()) {
             auto resetPreferences = currentChatPreferences;
-            resetPreferences.mode = twitch::ChatMode::Off;
-            applyTwitchVideoLayout(resetPreferences);
+            resetPreferences.mode = kick::ChatMode::Off;
+            applyKickVideoLayout(resetPreferences);
         }
 
         if (ownsPlayback) {
@@ -2700,11 +2876,11 @@ public:
 
         if (chatUi) chatUi->alive.store(false);
         chatClient.reset();
-        if (!this->twitchChannel.empty()) {
-            twitch::chatPreferencesEvent()->unsubscribe(
+        if (!this->kickChannel.empty()) {
+            kick::chatPreferencesEvent()->unsubscribe(
                 chatPreferenceSubscribeID);
             if (orientationSubscribeID) {
-                twinx::portrait::OrientationController::instance()
+                kicknx::portrait::OrientationController::instance()
                     .getOrientationChanged()->unsubscribe(*orientationSubscribeID);
                 orientationSubscribeID.reset();
             }
@@ -2725,36 +2901,44 @@ public:
             view->getChannelEvent()->unsubscribe(
                 channelSubscribeID);
         view->getSettingEvent()->unsubscribe(settingSubscribeID);
-        if (this->twitchChannel.empty()) {
+        if (this->kickChannel.empty()) {
             mpv.command("write-watch-later-config");
         } else {
             brls::Logger::debug(
-                "twiNX: skipped watch-later write for Twitch live playback");
+                "kickNX: skipped watch-later write for Kick live playback");
         }
     }
 
     void willDisappear(bool resetState) override {
-        twinx::haptics::stopAudioReactive();
-        audioReactiveOutputActive = false;
+        deactivatePlayback();
 #ifdef ANDROID
         if (brls::Application::getThemeVariant() == brls::ThemeVariant::LIGHT)
             brls::Application::getTheme().addColor("brls/clear", nvgRGBA(235, 235, 235, 255));
         else
             brls::Application::getTheme().addColor("brls/clear", nvgRGBA(45, 45, 45, 255));
+#else
+        restoreClearColor();
 #endif
     }
 
     void willAppear(bool resetState) override {
 #ifdef ANDROID
         brls::Application::getTheme().addColor("brls/clear", nvgRGBA(0, 0, 0, 0));
+#else
+        // While MPV has no frame to present (initial load, live reconnects)
+        // the window clear colour shows through. Keep it black instead of the
+        // theme grey so buffering never flashes a grey screen.
+        brls::Application::getTheme().addColor("brls/clear", nvgRGBA(0, 0, 0, 255));
 #endif
-        if (!this->twitchChannel.empty())
+        if (!this->kickChannel.empty())
             restorePlaybackFocus();
     }
 
-    void frame(brls::FrameContext* ctx) override {
-        brls::Box::frame(ctx);
-        updateAudioReactiveHaptics();
+    static void restoreClearColor() {
+        if (brls::Application::getThemeVariant() == brls::ThemeVariant::LIGHT)
+            brls::Application::getTheme().addColor("brls/clear", nvgRGB(235, 235, 235));
+        else
+            brls::Application::getTheme().addColor("brls/clear", nvgRGB(45, 45, 45));
     }
 
     void setList(const DirList& list, size_t index, const std::string& extra) {
@@ -2800,9 +2984,32 @@ public:
         view->getPlayEvent()->fire(index);
     }
 
+    uint64_t getPlaybackSessionId() const { return playbackSessionId; }
+
+    void setPlaybackCancelToken(std::shared_ptr<std::atomic_bool> cancel) {
+        asyncCancelToken = std::move(cancel);
+    }
+
+    void setTitle(const std::string& title) {
+        if (view) view->setTitie(title);
+    }
+
+    void showLoading(const std::string& note = "") {
+        if (view) {
+            if (!note.empty()) view->setLoadingNote(note);
+            view->showLoading();
+        }
+    }
+
+    void setKickSubtitles(std::vector<kick::SubtitleTrack> subs) {
+        this->kickSubtitles = std::move(subs);
+    }
+
     void setUrl(const std::string& path, const std::string& extra = "") {
+        if (path.empty()) return;
         playSubscribeID = view->getPlayEvent()->subscribe([](int index) { return VideoView::close(true); });
- MPVCore::instance().setUrl(path, extra);
+        MPVCore::instance().command("set", "pause", "no");
+        MPVCore::instance().setUrl(path, extra);
     }
 
     void loadList() {
@@ -2826,41 +3033,12 @@ public:
         });
     }
 
-    void deactivatePlaybackForNavigation() {
-        if (playerShuttingDown) return;
-        playerShuttingDown = true;
-
-        if (activePlaybackSession.load() == playbackSessionId)
-            activePlaybackSession.store(0);
-
-        MPVCore::LIVE_STREAM_RECOVERY = false;
-        if (playbackRecovery) {
-            playbackRecovery->alive.store(false);
-            playbackRecovery->recovering.store(false);
-            playbackRecovery->retryScheduled.store(false);
-            playbackRecovery->reconfigArmed.store(false);
-            playbackRecovery->decoderSwitching.store(false);
-            playbackRecovery->restoreGeneration.fetch_add(1);
-        }
-        view->setPlaybackRecoveryHandler({});
-
-        if (chatUi) chatUi->alive.store(false);
-        stopChat();
-        resetPlayerVideoLayout();
-
-        auto& mpv = MPVCore::instance();
-        mpv.stop();
-        const char* configuredHwdec = MPVCore::HARDWARE_DEC
-            ? MPVCore::PLAYER_HWDEC_METHOD.c_str()
-            : "no";
-        mpv.command("set", "hwdec", configuredHwdec);
-    }
 
     void openChannelPage() {
-        if (twitchChannel.empty() || navigatingToChannel) return;
+        if (kickChannel.empty() || navigatingToChannel) return;
         navigatingToChannel = true;
 
-        const std::string channel = twitchChannel;
+        const std::string channel = kickChannel;
         deactivatePlaybackForNavigation();
 
         if (!brls::Application::popActivity(
@@ -2874,13 +3052,16 @@ public:
         brls::sync([channel]() {
             brls::Application::pushActivity(
                 new brls::Activity(
-                    new TwitchChannelPage(channel)),
+                    new KickChannelPage(channel)),
                 brls::TransitionAnimation::NONE);
         });
     }
 
     void restorePlaybackFocus() {
-        brls::sync([this]() {
+        std::weak_ptr<std::atomic_bool> weakAlive = playerAlive;
+        brls::sync([this, weakAlive]() {
+            auto alive = weakAlive.lock();
+            if (!alive || !alive->load()) return;
             if (!playerShuttingDown &&
                 activePlaybackSession.load() == playbackSessionId)
                 brls::Application::giveFocus(view);
@@ -2889,34 +3070,34 @@ public:
 
     void cycleChatMode() {
         auto preferences =
-            twitch::loadChatPreferences();
+            kick::loadChatPreferences();
 
         const char* description = "Off";
         switch (preferences.mode) {
-        case twitch::ChatMode::Off:
+        case kick::ChatMode::Off:
             preferences.mode =
-                twitch::ChatMode::Overlay;
+                kick::ChatMode::Overlay;
             description = "Overlay";
             break;
 
-        case twitch::ChatMode::Overlay:
+        case kick::ChatMode::Overlay:
             preferences.mode =
-                twitch::ChatMode::RightPanel;
+                kick::ChatMode::RightPanel;
             description = "Right panel";
             break;
 
-        case twitch::ChatMode::RightPanel:
+        case kick::ChatMode::RightPanel:
         default:
             preferences.mode =
-                twitch::ChatMode::Off;
+                kick::ChatMode::Off;
             description = "Off";
             break;
         }
 
-        if (!twitch::saveChatPreferences(
+        if (!kick::saveChatPreferences(
                 preferences)) {
             brls::Application::notify(
-                "twiNX: could not change chat layout");
+                "kickNX: could not change chat layout");
             return;
         }
 
@@ -2926,10 +3107,10 @@ public:
     }
 
     void updateChatInteractionAction(
-        const twitch::ChatPreferences& preferences) {
+        const kick::ChatPreferences& preferences) {
         const bool interactive =
             preferences.participation ==
-            twitch::ChatParticipation::Interactive;
+            kick::ChatParticipation::Interactive;
 
         if (interactive &&
             chatSendAction == ACTION_NONE) {
@@ -2950,44 +3131,44 @@ public:
 
 
     bool sendPortraitMessage(const std::string& message) {
-        const auto preferences = twitch::loadChatPreferences();
+        const auto preferences = kick::loadChatPreferences();
         if (preferences.participation !=
-            twitch::ChatParticipation::Interactive) {
+            kick::ChatParticipation::Interactive) {
             brls::Application::notify(
                 "Enable Interactive under Chat participation first");
             return false;
         }
-        if (!twitch::hasChatWriteScope()) {
+        if (!kick::hasChatWriteScope()) {
             brls::Application::notify(
                 "Sign out and sign in again once to enable interactive chat");
             return false;
         }
         if (message.empty()) return false;
 
-        twitch::sendChatMessageAsync(
-            twitchChannel,
+        kick::sendChatMessageAsync(
+            kickChannel,
             message,
             [](const std::string&) {
-                brls::Application::notify("twiNX: chat message sent");
+                brls::Application::notify("kickNX: chat message sent");
             },
             [](const std::string& error) {
-                brls::Application::notify("twiNX chat error: " + error);
+                brls::Application::notify("kickNX chat error: " + error);
             });
         return true;
     }
 
     void openChatComposer() {
         const auto preferences =
-            twitch::loadChatPreferences();
+            kick::loadChatPreferences();
 
         if (preferences.participation !=
-            twitch::ChatParticipation::Interactive) {
+            kick::ChatParticipation::Interactive) {
             brls::Application::notify(
                 "Enable Interactive under Chat participation first");
             return;
         }
 
-        if (!twitch::hasChatWriteScope()) {
+        if (!kick::hasChatWriteScope()) {
             brls::Application::notify(
                 "Sign out and sign in again once to enable "
                 "interactive chat");
@@ -2995,7 +3176,7 @@ public:
         }
 
         if (preferences.composerMode ==
-            twitch::ChatComposerMode::NintendoKeyboard) {
+            kick::ChatComposerMode::NintendoKeyboard) {
             auto* ime =
                 brls::Application::getImeManager();
             if (!ime) {
@@ -3004,29 +3185,35 @@ public:
                 return;
             }
 
+            std::weak_ptr<std::atomic_bool> weakAlive = playerAlive;
+            const std::string channelName = kickChannel;
             ime->openForText(
-                [this](std::string message) {
-                    restorePlaybackFocus();
+                [this, weakAlive, channelName](std::string message) {
+                    // The keyboard can return after the stream was closed and
+                    // this player destroyed; never touch it in that case.
+                    auto alive = weakAlive.lock();
+                    const bool playerExists = alive && alive->load();
+                    if (playerExists) restorePlaybackFocus();
 
                     if (message.empty()) return;
 
                     brls::Application::notify(
-                        "twiNX: sending chat message…");
+                        "kickNX: sending chat message…");
 
-                    twitch::sendChatMessageAsync(
-                        twitchChannel,
+                    kick::sendChatMessageAsync(
+                        channelName,
                         message,
                         [](const std::string&) {
                             brls::Application::notify(
-                                "twiNX: chat message sent");
+                                "kickNX: chat message sent");
                         },
                         [](const std::string& error) {
                             brls::Application::notify(
-                                "twiNX chat error: " + error);
+                                "kickNX chat error: " + error);
                         });
                 },
-                "Twitch chat",
-                "Send a message as your signed-in Twitch account",
+                "Kick chat",
+                "Send a message as your signed-in Kick account",
                 500,
                 "");
             return;
@@ -3034,22 +3221,25 @@ public:
 
         brls::Application::pushActivity(
             new brls::Activity(
-                new TwitchChatComposer(
-                    twitchChannel)));
+                new KickChatComposer(
+                    kickChannel)));
     }
 
     void stopChat() {
         chatClient.reset();
-        if (chatUi) chatUi->setStatus("Chat disabled");
+        if (chatUi) {
+            chatUi->setStatus("Chat disabled");
+            chatUi->setChatterCount(0);
+        }
     }
 
     void startChat() {
-        if (chatClient || twitchChannel.empty()) return;
+        if (chatClient || kickChannel.empty()) return;
 
         std::weak_ptr<ChatUiState> weak = chatUi;
-        chatClient = std::make_unique<twitch::ChatClient>(
-            twitchChannel,
-            [weak](twitch::ChatMessage message) {
+        chatClient = std::make_unique<kick::ChatClient>(
+            kickChannel,
+            [weak](kick::ChatMessage message) {
                 brls::sync([weak, message = std::move(message)]() mutable {
                     auto state = weak.lock();
                     if (!state || !state->alive.load()) return;
@@ -3062,19 +3252,26 @@ public:
                     if (!state || !state->alive.load()) return;
                     state->setStatus(status);
                 });
+            },
+            [weak](int count) {
+                brls::sync([weak, count]() {
+                    auto state = weak.lock();
+                    if (!state || !state->alive.load()) return;
+                    state->setChatterCount(count);
+                });
             });
     }
 
     void applyDisplayOrientation(
-        twinx::portrait::DisplayOrientation orientation) {
+        kicknx::portrait::DisplayOrientation orientation) {
         portraitOrientation = orientation;
         portraitLayout =
-            orientation != twinx::portrait::DisplayOrientation::Landscape;
+            orientation != kicknx::portrait::DisplayOrientation::Landscape;
 
         brls::Application::setContentOrientation(
-            orientation == twinx::portrait::DisplayOrientation::PortraitClockwise
+            orientation == kicknx::portrait::DisplayOrientation::PortraitClockwise
                 ? brls::ContentOrientation::PORTRAIT_CLOCKWISE
-                : orientation == twinx::portrait::DisplayOrientation::PortraitCounterClockwise
+                : orientation == kicknx::portrait::DisplayOrientation::PortraitCounterClockwise
                     ? brls::ContentOrientation::PORTRAIT_COUNTER_CLOCKWISE
                     : brls::ContentOrientation::LANDSCAPE);
 
@@ -3087,9 +3284,9 @@ public:
             brls::Application::giveFocus(view);
     }
 
-    void applyTwitchVideoLayout(
-        const twitch::ChatPreferences& preferences) {
-        const twitch::ChatMode mode = preferences.mode;
+    void applyKickVideoLayout(
+        const kick::ChatPreferences& preferences) {
+        const kick::ChatMode mode = preferences.mode;
         auto& mpv = MPVCore::instance();
 
         if (portraitLayout) {
@@ -3101,7 +3298,7 @@ public:
             const float unused = 1.0f - occupied;
             const bool clockwise =
                 portraitOrientation ==
-                twinx::portrait::DisplayOrientation::PortraitClockwise;
+                kicknx::portrait::DisplayOrientation::PortraitClockwise;
 
             const std::string left =
                 fmt::format("{:.6f}", clockwise ? unused : 0.0f);
@@ -3134,7 +3331,7 @@ public:
         // through MPV's own window-relative video margin.
         const float contentWidth = brls::Application::contentWidth;
         const float rightMargin =
-            mode == twitch::ChatMode::RightPanel && contentWidth > 0.0f
+            mode == kick::ChatMode::RightPanel && contentWidth > 0.0f
                 ? static_cast<float>(preferences.dockedWidth) /
                     contentWidth
                 : 0.0f;
@@ -3165,7 +3362,7 @@ public:
         mpv.command("set", "video-align-y", "0");
         mpv.command("set", "video-recenter", "yes");
 
-        if (mode == twitch::ChatMode::RightPanel) {
+        if (mode == kick::ChatMode::RightPanel) {
             // Fit the complete source image into the remaining area. Any
             // aspect-ratio mismatch becomes black letterboxing rather than
             // cropping the stream behind the chat panel.
@@ -3176,7 +3373,7 @@ public:
             mpv.command("set", "video-align-x", "-1");
 
             brls::Logger::info(
-                "twiNX: docked video fit enabled, right margin ratio {}",
+                "kickNX: docked video fit enabled, right margin ratio {}",
                 rightMarginValue);
         } else {
             // Restore the user's normal player aspect choice when leaving the
@@ -3185,14 +3382,14 @@ public:
             mpv.setAspect(MPVCore::VIDEO_ASPECT);
 
             brls::Logger::info(
-                "twiNX: docked video fit disabled");
+                "kickNX: docked video fit disabled");
         }
     }
 
-    void applyChatPreferences(const twitch::ChatPreferences& preferences) {
+    void applyChatPreferences(const kick::ChatPreferences& preferences) {
         if (playerShuttingDown ||
             activePlaybackSession.load() != playbackSessionId ||
-            twitchChannel.empty() ||
+            kickChannel.empty() ||
             !chatOverlayPanel ||
             !chatDockedPanel)
             return;
@@ -3226,7 +3423,7 @@ public:
                 portraitComposer->setVisibility(brls::Visibility::VISIBLE);
             }
             startChat();
-            applyTwitchVideoLayout(preferences);
+            applyKickVideoLayout(preferences);
             this->invalidate();
             return;
         }
@@ -3236,10 +3433,10 @@ public:
         if (portraitComposer)
             portraitComposer->setVisibility(brls::Visibility::GONE);
         view->setGrow(1.0f);
-        applyTwitchVideoLayout(preferences);
+        applyKickVideoLayout(preferences);
 
         switch (preferences.mode) {
-        case twitch::ChatMode::Off:
+        case kick::ChatMode::Off:
             chatUi->activate(nullptr);
             chatOverlayPanel->setVisibility(brls::Visibility::GONE);
             chatDockedPanel->setVisibility(brls::Visibility::GONE);
@@ -3247,7 +3444,7 @@ public:
             stopChat();
             break;
 
-        case twitch::ChatMode::RightPanel:
+        case kick::ChatMode::RightPanel:
             // TV layout: the complete video is scaled into the remaining
             // width, and chat occupies its own column rather than covering it.
             chatOverlayPanel->setVisibility(brls::Visibility::GONE);
@@ -3263,7 +3460,7 @@ public:
             startChat();
             break;
 
-        case twitch::ChatMode::Overlay:
+        case kick::ChatMode::Overlay:
             chatDockedPanel->setVisibility(brls::Visibility::GONE);
             chatOverlayPanel->setVisibility(brls::Visibility::VISIBLE);
             view->setDimensions(width, height);
@@ -3276,192 +3473,44 @@ public:
     }
 
 private:
-    void updateAudioReactiveHaptics() {
-        if (twitchChannel.empty()) return;
-
-        auto& mpv = MPVCore::instance();
-        const bool enabled = twinx::haptics::audioReactiveEnabled();
-        if (!enabled) {
-            if (audioReactiveFilterInstalled) {
-                mpv.command("af", "remove", "@twinx_haptics");
-                audioReactiveFilterInstalled = false;
-            }
-            if (audioReactiveOutputActive) {
-                twinx::haptics::stopAudioReactive();
-                audioReactiveOutputActive = false;
-            }
-            audioReactiveBaselineReady = false;
-            return;
-        }
-
-        const auto now = std::chrono::steady_clock::now();
-        if (!audioReactiveFilterInstalled) {
-            mpv.command(
-                "af",
-                "add",
-                "@twinx_haptics:lavfi=[astats=length=0.02:metadata=1:"
-                "reset=1:measure_perchannel=none:"
-                "measure_overall=RMS_level+Peak_level]");
-            audioReactiveFilterInstalled = true;
-            audioReactiveBaselineReady = false;
-            nextAudioReactiveSample = now + std::chrono::milliseconds(250);
-            brls::Logger::info(
-                "twiNX: audio-reactive loudness meter enabled");
-            return;
-        }
-
-        if (now < nextAudioReactiveSample) return;
-        nextAudioReactiveSample = now + std::chrono::milliseconds(20);
-
-        const auto metadata = mpv.getNodeStringMap(
-            "af-metadata/twinx_haptics");
-        const auto rmsEntry = metadata.find(
-            "lavfi.astats.Overall.RMS_level");
-        const auto peakEntry = metadata.find(
-            "lavfi.astats.Overall.Peak_level");
-        if (rmsEntry == metadata.end() || peakEntry == metadata.end()) {
-            if (audioReactiveOutputActive) {
-                twinx::haptics::stopAudioReactive();
-                audioReactiveOutputActive = false;
-            }
-            return;
-        }
-
-        auto parseLevel = [](const std::string& value, double& result) {
-            char* end = nullptr;
-            result = std::strtod(value.c_str(), &end);
-            return end != value.c_str() && std::isfinite(result) &&
-                   result <= 0.0 && result >= -120.0;
-        };
-
-        double levelDb = -120.0;
-        double peakDb = -120.0;
-        if (!parseLevel(rmsEntry->second, levelDb) ||
-            !parseLevel(peakEntry->second, peakDb)) {
-            if (audioReactiveOutputActive) {
-                twinx::haptics::stopAudioReactive();
-                audioReactiveOutputActive = false;
-            }
-            return;
-        }
-
-        if (!audioReactiveBaselineReady) {
-            audioReactiveBaselineDb = levelDb;
-            audioReactiveBaselineReady = true;
-            return;
-        }
-
-        const double riseAboveBaseline =
-            levelDb - audioReactiveBaselineDb;
-        const double baselineRate =
-            levelDb < audioReactiveBaselineDb ? 0.16 : 0.018;
-        audioReactiveBaselineDb +=
-            (levelDb - audioReactiveBaselineDb) * baselineRate;
-
-        const double fastTransient = std::max(
-            riseAboveBaseline,
-            peakDb - audioReactiveBaselineDb - 9.0);
-
-        double thresholdDb = 2.5;
-        double spanDb = 14.0;
-        double maximum = 0.72;
-        bool absolutePeakRequired = false;
-        switch (twinx::haptics::audioReactiveProfile()) {
-        case twinx::haptics::AudioReactiveProfile::Quiet:
-            thresholdDb = 4.0;
-            spanDb = 16.0;
-            maximum = 0.35;
-            break;
-        case twinx::haptics::AudioReactiveProfile::Extreme:
-            thresholdDb = 1.0;
-            spanDb = 8.0;
-            maximum = 1.0;
-            break;
-        case twinx::haptics::AudioReactiveProfile::HighPeaksOnly:
-            thresholdDb = 10.0;
-            spanDb = 8.0;
-            maximum = 1.0;
-            absolutePeakRequired = true;
-            break;
-        case twinx::haptics::AudioReactiveProfile::Balanced:
-        default:
-            break;
-        }
-
-        double relativePeak = std::clamp(
-            (fastTransient - thresholdDb) / spanDb,
-            0.0,
-            1.0);
-        if (absolutePeakRequired && peakDb < -7.0)
-            relativePeak = 0.0;
-
-        const double silenceGate = std::clamp(
-            (peakDb + 50.0) / 18.0,
-            0.0,
-            1.0);
-        const float intensity = static_cast<float>(
-            relativePeak * silenceGate * maximum);
-
-        if (intensity < 0.06f) {
-            if (audioReactiveOutputActive) {
-                twinx::haptics::stopAudioReactive();
-                audioReactiveOutputActive = false;
-            }
-            return;
-        }
-
-        twinx::haptics::setAudioReactiveLevel(intensity);
-        audioReactiveOutputActive = true;
-    }
-
-    void shutdownAudioReactiveHaptics() {
-        twinx::haptics::stopAudioReactive();
-        audioReactiveOutputActive = false;
-        if (audioReactiveFilterInstalled) {
-            MPVCore::instance().command(
-                "af", "remove", "@twinx_haptics");
-            audioReactiveFilterInstalled = false;
-        }
-        audioReactiveBaselineReady = false;
-    }
-
     VideoView* view = new VideoView();
     std::string url;
-    std::string twitchChannel;
+    std::string kickChannel;
     std::vector<std::string> titles;
     std::unordered_map<std::string, std::string> subtitles;
+    std::vector<kick::SubtitleTrack> kickSubtitles;
     MPVEvent::Subscription eventSubscribeID;
     brls::Event<int>::Subscription playSubscribeID;
     brls::VoidEvent::Subscription settingSubscribeID;
     brls::VoidEvent::Subscription channelSubscribeID;
     bool channelEventSubscribed = false;
     HTTP::Cancel channelProfileCancel;
-    twitch::UserProfile channelProfile;
-    brls::Event<twitch::ChatPreferences>::Subscription chatPreferenceSubscribeID;
-    std::optional<brls::Event<twinx::portrait::DisplayOrientation>::Subscription>
+    kick::UserProfile channelProfile;
+    brls::Event<kick::ChatPreferences>::Subscription chatPreferenceSubscribeID;
+    std::optional<brls::Event<kicknx::portrait::DisplayOrientation>::Subscription>
         orientationSubscribeID;
-    TwitchChatPanel* chatOverlayPanel = nullptr;
-    TwitchChatPanel* chatDockedPanel = nullptr;
+    KickChatPanel* chatOverlayPanel = nullptr;
+    KickChatPanel* chatDockedPanel = nullptr;
     PortraitChatComposer* portraitComposer = nullptr;
     std::shared_ptr<ChatUiState> chatUi;
-    std::shared_ptr<TwitchPlaybackRecoveryState> playbackRecovery;
-    std::unique_ptr<twitch::ChatClient> chatClient;
-    twitch::ChatMode currentChatMode = twitch::ChatMode::Off;
-    twitch::ChatPreferences currentChatPreferences;
+    std::shared_ptr<KickPlaybackRecoveryState> playbackRecovery;
+    std::unique_ptr<kick::ChatClient> chatClient;
+    kick::ChatMode currentChatMode = kick::ChatMode::Off;
+    kick::ChatPreferences currentChatPreferences;
     brls::ActionIdentifier chatSendAction = ACTION_NONE;
     brls::ActionIdentifier chatModeAction = ACTION_NONE;
-    bool audioReactiveFilterInstalled = false;
-    bool audioReactiveOutputActive = false;
-    bool audioReactiveBaselineReady = false;
-    double audioReactiveBaselineDb = -60.0;
-    std::chrono::steady_clock::time_point nextAudioReactiveSample{};
     uint64_t playbackSessionId = 0;
     bool portraitLayout = false;
     float portraitVideoHeight = 405.0f;
-    twinx::portrait::DisplayOrientation portraitOrientation =
-        twinx::portrait::DisplayOrientation::Landscape;
+    kicknx::portrait::DisplayOrientation portraitOrientation =
+        kicknx::portrait::DisplayOrientation::Landscape;
     bool playerShuttingDown = false;
+    // Shared with asynchronous callbacks (e.g. the Nintendo software keyboard)
+    // so they can tell whether this player still exists before touching it.
+    std::shared_ptr<std::atomic_bool> playerAlive =
+        std::make_shared<std::atomic_bool>(true);
     bool navigatingToChannel = false;
+    std::shared_ptr<std::atomic_bool> asyncCancelToken;
 };
 
 class FileCard : public RecyclingGridItem {
@@ -3704,14 +3753,164 @@ RecyclingGrid* RemoteView::newRecycler() {
     return view;
 }
 
-void RemoteView::play(const std::string& path, const std::string& name, const std::string& extra, const std::string& twitchChannel) {
+void RemoteView::play(
+    const std::string& path,
+    const std::string& name,
+    const std::string& extra,
+    const std::string& kickChannel,
+    const std::string& loadingNote,
+    const std::vector<kick::SubtitleTrack>& subtitles,
+    int64_t uptimeSeconds) {
     // Every playback launch starts from a clean global MPV presentation. This
     // prevents a live chat margin or recovery session leaking into VODs/clips.
     MPVCore::LIVE_STREAM_RECOVERY = false;
     MPVCore::instance().stop();
+    MPVCore::instance().command("set", "pause", "no");
     resetPlayerVideoLayout();
 
-    RemotePlayer* view = new RemotePlayer({remote::EntryType::VIDEO, name, path}, twitchChannel);
+    RemotePlayer* view = new RemotePlayer(
+        {remote::EntryType::VIDEO, name, path},
+        kickChannel,
+        loadingNote,
+        subtitles,
+        uptimeSeconds);
     brls::Application::pushActivity(new brls::Activity(view), brls::TransitionAnimation::NONE);
-    view->setUrl(path, extra);
+    if (!path.empty()) {
+        view->setUrl(path, extra);
+    }
+}
+
+void RemoteView::playLive(
+    const kick::Config& config,
+    int64_t uptimeSeconds) {
+    MPVCore::LIVE_STREAM_RECOVERY = true;
+    MPVCore::instance().stop();
+    resetPlayerVideoLayout();
+
+    const std::string channel = config.channel;
+    const std::string fullTitle = "Kick - " + channel;
+    const std::string loadingNote = "";
+
+    RemotePlayer* player = new RemotePlayer(
+        {remote::EntryType::VIDEO, fullTitle, ""},
+        channel,
+        loadingNote,
+        {},
+        uptimeSeconds);
+    brls::Application::pushActivity(new brls::Activity(player), brls::TransitionAnimation::NONE);
+
+    auto cancel = std::make_shared<std::atomic_bool>(false);
+    player->setPlaybackCancelToken(cancel);
+    const uint64_t sessionId = player->getPlaybackSessionId();
+
+    kick::resolveLiveAsync(
+        config,
+        [player, sessionId, channel](kick::Resolution result) {
+            if (activePlaybackSession.load() != sessionId) return;
+            player->setTitle("Kick - " + channel);
+            player->setKickSubtitles(result.subtitles);
+            MPVCore::BOTTOM_BAR = false;
+            player->setUrl(result.selected.url, "");
+        },
+        [sessionId, channel](const std::string& error) {
+            if (activePlaybackSession.load() != sessionId) return;
+            auto* dialog = new brls::Dialog(
+                "Failed to load stream for " + channel + ":\n" + error);
+            dialog->addButton("hints/back"_i18n, []() {
+                VideoView::close(true);
+            });
+            dialog->open();
+        });
+}
+
+void RemoteView::playVod(
+    const std::string& videoId,
+    const std::string& title,
+    const std::string& details) {
+    MPVCore::LIVE_STREAM_RECOVERY = false;
+    MPVCore::instance().stop();
+    resetPlayerVideoLayout();
+
+    const std::string fullTitle = "Kick VOD · " + title;
+    const std::string loadingNote = "";
+
+    RemotePlayer* player = new RemotePlayer(
+        {remote::EntryType::VIDEO, fullTitle, ""},
+        "",
+        loadingNote,
+        {},
+        0);
+    brls::Application::pushActivity(new brls::Activity(player), brls::TransitionAnimation::NONE);
+
+    auto cancel = std::make_shared<std::atomic_bool>(false);
+    player->setPlaybackCancelToken(cancel);
+    const uint64_t sessionId = player->getPlaybackSessionId();
+
+    kick::resolveVodAsync(
+        videoId,
+        [player, sessionId, fullTitle](kick::MediaPlayback playback) {
+            if (activePlaybackSession.load() != sessionId) return;
+            player->setTitle(fullTitle);
+            player->setKickSubtitles(playback.subtitles);
+            player->setUrl(playback.url, "");
+        },
+        [sessionId, details](const std::string& error) {
+            if (activePlaybackSession.load() != sessionId) return;
+            std::string msg = error;
+            if (!details.empty()) {
+                msg += "\n\n" + details;
+            }
+            auto* dialog = new brls::Dialog("Kick VOD playback error:\n" + msg);
+            dialog->addButton("hints/back"_i18n, []() {
+                VideoView::close(true);
+            });
+            dialog->open();
+        },
+        cancel);
+}
+
+void RemoteView::playClip(
+    const std::string& slug,
+    const std::string& title,
+    const std::string& details) {
+    MPVCore::LIVE_STREAM_RECOVERY = false;
+    MPVCore::instance().stop();
+    resetPlayerVideoLayout();
+
+    const std::string fullTitle = "Kick clip · " + title;
+    const std::string loadingNote = "";
+
+    RemotePlayer* player = new RemotePlayer(
+        {remote::EntryType::VIDEO, fullTitle, ""},
+        "",
+        loadingNote,
+        {},
+        0);
+    brls::Application::pushActivity(new brls::Activity(player), brls::TransitionAnimation::NONE);
+
+    auto cancel = std::make_shared<std::atomic_bool>(false);
+    player->setPlaybackCancelToken(cancel);
+    const uint64_t sessionId = player->getPlaybackSessionId();
+
+    kick::resolveClipAsync(
+        slug,
+        [player, sessionId, fullTitle](kick::MediaPlayback playback) {
+            if (activePlaybackSession.load() != sessionId) return;
+            player->setTitle(fullTitle);
+            player->setKickSubtitles(playback.subtitles);
+            player->setUrl(playback.url, "");
+        },
+        [sessionId, details](const std::string& error) {
+            if (activePlaybackSession.load() != sessionId) return;
+            std::string msg = error;
+            if (!details.empty()) {
+                msg += "\n\n" + details;
+            }
+            auto* dialog = new brls::Dialog("Kick clip playback error:\n" + msg);
+            dialog->addButton("hints/back"_i18n, []() {
+                VideoView::close(true);
+            });
+            dialog->open();
+        },
+        cancel);
 }

@@ -63,13 +63,11 @@ std::unordered_map<AppConfig::Item, AppConfig::Option> AppConfig::settingMap = {
     {TRANSCODEC, {"transcodec", {"h264", "hevc", "av1"}}},
     {FORCE_DIRECTPLAY, {"force_directplay"}},
     {FULLSCREEN, {"fullscreen"}},
-    {OSD_ON_TOGGLE, {"osd_on_toggle"}},
     {TOUCH_GESTURE, {"touch_gesture"}},
     {CLIP_POINT, {"clip_point"}},
     {SYNC_SETTING, {"sync_setting"}},
     {OVERCLOCK, {"overclock"}},
     {MPV_VO, {"mpv_vo", {"gpu", "gpu-next", "mediacodec_embed"}}},
-    {PLAYER_BOTTOM_BAR, {"player_bottom_bar"}},
     {PLAYER_LOW_QUALITY, {"player_low_quality"}},
     {PLAYER_SUBS_FALLBACK, {"player_subs_fallback"}},
     {PLAYER_INMEMORY_CACHE,
@@ -86,7 +84,6 @@ std::unordered_map<AppConfig::Item, AppConfig::Option> AppConfig::settingMap = {
         }},
     {PLAYER_HWDEC, {"player_hwdec"}},
     {PLAYER_HWDEC_CUSTOM, {"player_hwdec_custom"}},
-    {PLAYER_ASPECT, {"player_aspect", {"auto", "stretch", "crop", "4:3", "16:9"}}},
     {PLAYER_TV_MODE, {"player_tv_mode"}},
     {DANMAKU, {"danmaku"}},
     {DANMAKU_ON, {"danmaku_on"}},
@@ -129,8 +126,6 @@ std::unordered_map<AppConfig::Item, AppConfig::Option> AppConfig::settingMap = {
         {"request_timeout", {"3000", "5000", "10000", "20000", "30000"}, {3000, 5000, 10000, 20000, 30000}}},
     {HTTP_PROXY_STATUS, {"http_proxy_status"}},
     {HTTP_PROXY, {"http_proxy"}},
-
-    {DOWNLOAD_QUALITY, {"download_quality", {"Original", "1080p", "720p", "480p"}, {0, 1, 2, 3}}},
 
     {KEY_REFRESH, {"key_refresh"}},
     {KEY_LAST, {"key_last"}},
@@ -320,8 +315,6 @@ bool AppConfig::init() {
     VideoContext::FULLSCREEN = this->getItem(FULLSCREEN, false);
 
     // 初始化是否固定显示底部进度条
-    MPVCore::BOTTOM_BAR = this->getItem(PLAYER_BOTTOM_BAR, true);
-    MPVCore::OSD_ON_TOGGLE = this->getItem(OSD_ON_TOGGLE, true);
     MPVCore::TOUCH_GESTURE = this->getItem(TOUCH_GESTURE, true);
     MPVCore::CLIP_POINT = this->getItem(CLIP_POINT, true);
     // 初始化内存缓存大小
@@ -345,7 +338,6 @@ bool AppConfig::init() {
     // 初始化默认的倍速设定
     MPVCore::VIDEO_SPEED = this->getItem(PLAYER_SPEED, MPVCore::VIDEO_SPEED);
     // 初始化视频比例
-    MPVCore::VIDEO_ASPECT = this->getItem(PLAYER_ASPECT, MPVCore::VIDEO_ASPECT);
     MPVCore::OSD_TV_MODE = this->getItem(PLAYER_TV_MODE, false);
 
     // 初始化弹幕相关内容
@@ -770,8 +762,25 @@ void AppConfig::addColor(const brls::ThemeVariant tv, const std::string& name, N
 }
 
 void AppConfig::initThemes() {
-    this->addColor(brls::ThemeVariant::LIGHT, "color/app", nvgRGB(2, 176, 183));
-    this->addColor(brls::ThemeVariant::DARK, "color/app", nvgRGB(51, 186, 227));
+    this->addColor(brls::ThemeVariant::LIGHT, "color/app", nvgRGB(24, 115, 36));
+    this->addColor(brls::ThemeVariant::DARK, "color/app", nvgRGB(83, 252, 24));
+
+    // Kick signature bright green focus / hover highlight colors (#53FC18)
+    this->addColor(brls::ThemeVariant::LIGHT, "brls/highlight/color1", nvgRGB(83, 252, 24));
+    this->addColor(brls::ThemeVariant::LIGHT, "brls/highlight/color2", nvgRGB(105, 255, 55));
+    this->addColor(brls::ThemeVariant::LIGHT, "brls/click_pulse", nvgRGBA(83, 252, 24, 45));
+    this->addColor(brls::ThemeVariant::LIGHT, "brls/accent", nvgRGB(83, 252, 24));
+    this->addColor(brls::ThemeVariant::LIGHT, "brls/sidebar/active_item", nvgRGB(83, 252, 24));
+    this->addColor(brls::ThemeVariant::LIGHT, "brls/header/border", nvgRGB(83, 252, 24));
+    this->addColor(brls::ThemeVariant::LIGHT, "brls/header/rectangle", nvgRGB(83, 252, 24));
+
+    this->addColor(brls::ThemeVariant::DARK, "brls/highlight/color1", nvgRGB(83, 252, 24));
+    this->addColor(brls::ThemeVariant::DARK, "brls/highlight/color2", nvgRGB(105, 255, 55));
+    this->addColor(brls::ThemeVariant::DARK, "brls/click_pulse", nvgRGBA(83, 252, 24, 45));
+    this->addColor(brls::ThemeVariant::DARK, "brls/accent", nvgRGB(83, 252, 24));
+    this->addColor(brls::ThemeVariant::DARK, "brls/sidebar/active_item", nvgRGB(83, 252, 24));
+    this->addColor(brls::ThemeVariant::DARK, "brls/header/border", nvgRGB(83, 252, 24));
+    this->addColor(brls::ThemeVariant::DARK, "brls/header/rectangle", nvgRGB(83, 252, 24));
     // metadata pills (detail pages)
     this->addColor(brls::ThemeVariant::LIGHT, "color/pill", nvgRGBA(0, 0, 0, 18));
     this->addColor(brls::ThemeVariant::DARK, "color/pill", nvgRGBA(255, 255, 255, 22));

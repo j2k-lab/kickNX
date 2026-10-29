@@ -46,9 +46,7 @@ private:
     BRLS_BIND(brls::SelectorCell, selectorInmemory, "setting/video/inmemory");
     BRLS_BIND(brls::SelectorCell, selectorScale, "setting/ui/scale");
     BRLS_BIND(brls::SelectorCell, selectorVSync, "setting/ui/vsync");
-    BRLS_BIND(brls::BooleanCell, btnBottomBar, "setting/ui/bottom_bar");
     BRLS_BIND(brls::BooleanCell, btnShowFPS, "setting/ui/show_fps");
-    BRLS_BIND(brls::BooleanCell, btnOSDOnToggle, "setting/player/osd_on_toggle");
     BRLS_BIND(brls::BooleanCell, btnTouchGesture, "setting/player/touch_gesture");
     BRLS_BIND(brls::BooleanCell, btnTvOsdMode, "setting/player/tv_model");
     BRLS_BIND(brls::BooleanCell, btnClipPoint, "setting/player/clip_point");
@@ -63,8 +61,6 @@ private:
     BRLS_BIND(brls::BooleanCell, btnTls, "setting/network/tls");
     BRLS_BIND(brls::BooleanCell, btnProxy, "setting/network/proxy_status");
     BRLS_BIND(brls::InputCell, inputProxy, "setting/network/proxy");
-
-    BRLS_BIND(brls::SelectorCell, selectorDownloadQuality, "setting/download/quality");
 
     BRLS_BIND(SelectorCell, selectorKeymap, "setting/keymap");
     BRLS_BIND(SelectorCell, selectorLang, "setting/language");

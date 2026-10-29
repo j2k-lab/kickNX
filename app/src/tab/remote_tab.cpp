@@ -1,7 +1,6 @@
 #include "tab/remote_tab.hpp"
 #include "tab/remote_view.hpp"
 #include "tab/remote_add.hpp"
-#include "tab/download_tab.hpp"
 #include "utils/config.hpp"
 
 using namespace brls::literals;
@@ -25,12 +24,6 @@ brls::View* RemoteTab::create() { return new RemoteTab(); }
 
 void RemoteTab::onCreate() {
     AutoSidebarItem* item;
-    item = new AutoSidebarItem();
-    item->setTabStyle(AutoTabBarStyle::ACCENT);
-    item->setFontSize(22);
-    item->setLabel("main/tabs/downloads"_i18n);
-    this->tabFrame->addTab(item, []() { return new DownloadView(); });
-
     item = new AutoSidebarItem();
     item->setTabStyle(AutoTabBarStyle::ACCENT);
     item->setFontSize(22);

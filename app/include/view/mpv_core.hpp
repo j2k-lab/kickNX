@@ -8,6 +8,7 @@
 #include <borealis/core/singleton.hpp>
 #include <mpv/client.h>
 #include <utils/event.hpp>
+#include <atomic>
 #ifdef MPV_SW_RENDER
 #include <mpv/render.h>
 #elif defined(BOREALIS_USE_D3D11)
@@ -116,14 +117,14 @@ public:
     // this is not a software-decoding fallback.
     void prepareHardwareDecoderRecovery();
 
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
     // Diagnostic decoder and frame-timing probes. Production builds compile
     // these out so playback transitions perform no synchronous MPV queries.
     void logHardwareDecoderState(const std::string& reason);
     void logPlaybackPerformance(const char* reason);
 #endif
 
-#if defined(TWINX_PLAYBACK_DEBUG)
+#if defined(KICKNX_PLAYBACK_DEBUG)
     // Writes a bounded, privacy-safe snapshot of the active MPV presentation.
     void logPlaybackSnapshot(const char* reason);
 #endif
@@ -133,7 +134,7 @@ public:
     // core states
     int64_t duration = 0;  // second
     int64_t video_progress = 0;
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
     int64_t performanceLogBucket = -1;
 #endif
     int64_t volume = 0;
@@ -142,12 +143,12 @@ public:
 
     inline static bool DEBUG = false;
 
-    // Twitch live playback can recover transient HLS EOF/file errors
+    // Kick live playback can recover transient HLS EOF/file errors
     // without allowing MPVCore to enter its destructive stop path first.
     inline static bool LIVE_STREAM_RECOVERY = false;
 
     // Bottom progress bar
-    inline static bool BOTTOM_BAR = true;
+    inline static bool BOTTOM_BAR = false;
     inline static bool OSD_ON_TOGGLE = true;
     // 是否开启 TV 客户端的控制逻辑
     inline static bool OSD_TV_MODE = false;

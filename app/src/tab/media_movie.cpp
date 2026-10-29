@@ -39,40 +39,7 @@ MediaMovie::MediaMovie(const jellyfin::Item& item) : itemId(item.Id) {
         return true;
     });
 
-    auto& dm = DownloadManager::instance();
-    this->updateDownloadButton();
-    // live progress on the button (events emitted on the UI thread)
-    this->progressSub =
-        dm.getProgressEvent()->subscribe([this](const std::string& id, int64_t downloaded, int64_t total) {
-            if (id != this->itemId || total <= 0) return;
-            // "Downloading... (42%)" — a bare percentage does not say what
-            // the button does; completion goes back through updateDownloadButton
-            this->btnDownload->setText(
-                fmt::format("{} ({:.0f}%)", "main/download/downloading"_i18n, downloaded * 100.0 / total));
-        });
-    this->statusSub = dm.getStatusEvent()->subscribe([this](const std::string& id, DownloadStatus status) {
-        if (id == this->itemId) this->updateDownloadButton();
-    });
-    this->btnDownload->registerClickAction([this](...) {
-        auto& dm = DownloadManager::instance();
-        switch (dm.findItem(this->itemId)) {
-        case DownloadStatus::Queued:
-        case DownloadStatus::Downloading:
-            Dialog::cancelable("main/download/confirm_cancel"_i18n, [this]() {
-                DownloadManager::instance().cancelDownload(this->itemId);
-                this->updateDownloadButton();
-            });
-            break;
-        case DownloadStatus::Completed:
-            brls::Application::notify("main/download/completed"_i18n);
-            break;
-        default:
-            int qi = AppConfig::instance().getValueIndex(AppConfig::DOWNLOAD_QUALITY);
-            dm.addDownload(this->itemId, static_cast<DownloadQuality>(qi));
-            this->updateDownloadButton();
-        }
-        return true;
-    });
+    this->btnDownload->setVisibility(brls::Visibility::GONE);
 
     this->doMovie();
     this->doSimilar();
@@ -80,27 +47,9 @@ MediaMovie::MediaMovie(const jellyfin::Item& item) : itemId(item.Id) {
 
 MediaMovie::~MediaMovie() {
     brls::Logger::debug("Tab MediaMovie: delete");
-    auto& dm = DownloadManager::instance();
-    dm.getProgressEvent()->unsubscribe(this->progressSub);
-    dm.getStatusEvent()->unsubscribe(this->statusSub);
     Image::cancel(this->imageLogo);
     Image::cancel(this->imagePoster);
     Image::cancel(this->imageBackdrop);
-}
-
-void MediaMovie::updateDownloadButton() {
-    auto& dm = DownloadManager::instance();
-    switch (dm.findItem(this->itemId)) {
-    case DownloadStatus::Completed:
-        this->btnDownload->setText("main/download/completed"_i18n);
-        break;
-    case DownloadStatus::Queued:
-    case DownloadStatus::Downloading:
-        this->btnDownload->setText("main/download/downloading"_i18n);
-        break;
-    default:
-        this->btnDownload->setText("main/download/start"_i18n);
-    }
 }
 
 void MediaMovie::doRequest() {

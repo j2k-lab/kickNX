@@ -7,7 +7,6 @@
 #include <borealis.hpp>
 #include <api/jellyfin/media.hpp>
 #include <view/presenter.hpp>
-#include <utils/download.hpp>
 
 class HRecyclerFrame;
 class TextBox;
@@ -52,10 +51,6 @@ private:
     void doSpecial();
     /// plays the next unwatched episode
     void doPlay();
-    /// downloads the whole show (filtered allLeaves, confirmation dialog)
-    void doDownloadSeries();
-    void updateDownloadButton();
 
     std::string seriesId;
-    DownloadManager::StatusEvent::Subscription statusSub;
 };

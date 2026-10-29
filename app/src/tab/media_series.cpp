@@ -50,15 +50,8 @@ MediaSeries::MediaSeries(const jellyfin::Episode& item) {
         this->doPlay();
         return true;
     });
-    this->btnDownload->registerClickAction([this](...) {
-        this->doDownloadSeries();
-        return true;
-    });
 
-    auto& dm = DownloadManager::instance();
-    this->updateDownloadButton();
-    this->statusSub = dm.getStatusEvent()->subscribe(
-        [this](const std::string& id, DownloadStatus status) { this->updateDownloadButton(); });
+    this->btnDownload->setVisibility(brls::Visibility::GONE);
 
     this->doSeason();
     this->doSeries();
@@ -68,8 +61,6 @@ MediaSeries::MediaSeries(const jellyfin::Episode& item) {
 
 MediaSeries::~MediaSeries() {
     brls::Logger::debug("Tab MediaSeries: delete");
-    auto& dm = DownloadManager::instance();
-    dm.getStatusEvent()->unsubscribe(this->statusSub);
     Image::cancel(this->imageLogo);
     Image::cancel(this->imagePoster);
     Image::cancel(this->imageBackdrop);
@@ -249,45 +240,4 @@ void MediaSeries::doPlay() {
             brls::Application::notify(ex);
         },
         jellyfin::apiShowNextUp, query);
-}
-
-void MediaSeries::doDownloadSeries() {
-    ASYNC_RETAIN
-    jellyfin::getJSON<jellyfin::Result<jellyfin::Episode>>(
-        [ASYNC_TOKEN](const jellyfin::Result<jellyfin::Episode>& r) {
-            ASYNC_RELEASE
-            auto& dm = DownloadManager::instance();
-            std::vector<std::string> wanted;
-            for (auto& item : r.Items) {
-                if (dm.findItem(item.Id) > DownloadStatus::Completed) wanted.push_back(item.Id);
-            }
-            if (wanted.empty()) {
-                brls::Application::notify("main/download/completed"_i18n);
-                return;
-            }
-            Dialog::cancelable(
-                fmt::format(fmt::runtime("main/download/confirm_season"_i18n), wanted.size()), [wanted]() {
-                    auto& dm = DownloadManager::instance();
-                    int qi = AppConfig::instance().getValueIndex(AppConfig::DOWNLOAD_QUALITY);
-                    for (auto& key : wanted) dm.addDownload(key, static_cast<DownloadQuality>(qi));
-                    brls::Application::notify("main/download/queued"_i18n);
-                });
-        },
-        [ASYNC_TOKEN](const std::string& ex) {
-            ASYNC_RELEASE
-            brls::Application::notify(ex);
-        },
-        jellyfin::apiShowEpisodes, this->seriesId, "");
-}
-
-void MediaSeries::updateDownloadButton() {
-    auto& dm = DownloadManager::instance();
-    auto it = dm.findSeries(this->seriesId);
-    if (it.first == 0) {
-        this->btnDownload->setText("main/download/start"_i18n);
-    } else if (it.first == it.second) {
-        this->btnDownload->setText("main/download/completed"_i18n);
-    } else {
-        this->btnDownload->setText(fmt::format("{} {}/{}", "main/download/downloading"_i18n, it.second, it.first));
-    }
 }

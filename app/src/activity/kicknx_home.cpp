@@ -1,13 +1,14 @@
-#include "activity/twinx_home.hpp"
-#include "activity/twitch_channel.hpp"
-#include "api/twitch.hpp"
-#include "api/twitch_auth.hpp"
-#include "api/twitch_helix.hpp"
+#include "activity/kicknx_home.hpp"
+#include "activity/kick_channel.hpp"
+#include "api/kick.hpp"
+#include "api/kick_auth.hpp"
+#include "api/kick_helix.hpp"
 #include "tab/remote_view.hpp"
 #include "utils/image.hpp"
 #include "utils/config.hpp"
 #include "view/h_recycling.hpp"
 #include "view/mpv_core.hpp"
+#include "view/qr_code_view.hpp"
 
 #include <borealis/core/cache_helper.hpp>
 
@@ -53,7 +54,7 @@ private:
     brls::View* focusProxy = nullptr;
 };
 
-class TwiNXActionButton : public brls::Box {
+class KickNXActionButton : public brls::Box {
 public:
     brls::View* getNextFocus(
         brls::FocusDirection direction,
@@ -61,25 +62,61 @@ public:
         if (direction == brls::FocusDirection::DOWN && downTarget) {
             if (auto* target = downTarget()) return target;
         }
+        if (direction == brls::FocusDirection::UP && upTarget) {
+            if (auto* target = upTarget()) return target;
+        }
         return brls::Box::getNextFocus(direction, currentView);
     }
 
     std::function<brls::View*()> downTarget;
+    std::function<brls::View*()> upTarget;
 };
 
-class TwiNXProfileAvatar : public brls::View {
+class AvatarImageLoader : public brls::Image {
 public:
-    TwiNXProfileAvatar() {
-        loader = new brls::Image();
-        loader->setFreeTexture(false);
-        this->setFocusable(false);
-        this->setVisibility(brls::Visibility::GONE);
+    explicit AvatarImageLoader(std::function<void()> onLoaded)
+        : onLoaded(std::move(onLoaded)) {}
+
+    void innerSetImage(int texture) override {
+        brls::Image::innerSetImage(texture);
+        if (onLoaded) onLoaded();
     }
 
-    ~TwiNXProfileAvatar() override {
+private:
+    std::function<void()> onLoaded;
+};
+
+class KickNXProfileAvatar : public brls::View {
+public:
+    KickNXProfileAvatar() {
+        loader = new AvatarImageLoader([this]() {
+            this->invalidate();
+        });
+        loader->setFreeTexture(false);
+        this->setFocusable(true);
+        this->setCornerRadius(38);
+        this->setHighlightCornerRadius(38);
+        this->setHideHighlightBackground(true);
+        this->setHideHighlightBorder(true);
+        this->setVisibility(brls::Visibility::GONE);
+        this->addGestureRecognizer(new brls::TapGestureRecognizer(this));
+    }
+
+    ~KickNXProfileAvatar() override {
         Image::cancel(loader);
         delete loader;
     }
+
+    brls::View* getNextFocus(
+        brls::FocusDirection direction,
+        brls::View* currentView) override {
+        if (direction == brls::FocusDirection::DOWN && downTarget) {
+            if (auto* target = downTarget()) return target;
+        }
+        return brls::View::getNextFocus(direction, currentView);
+    }
+
+    std::function<brls::View*()> downTarget;
 
     void setProfileImage(const std::string& url) {
         if (url == currentUrl) {
@@ -118,10 +155,10 @@ public:
 
         nvgSave(vg);
 
-        // Neutral Twitch-toned placeholder while the image is downloading.
+        // Kick-toned placeholder while the image is downloading.
         nvgBeginPath(vg);
         nvgCircle(vg, centerX, centerY, radius);
-        nvgFillColor(vg, nvgRGB(91, 46, 145));
+        nvgFillColor(vg, nvgRGB(24, 115, 36));
         nvgFill(vg);
 
         if (loader && loader->getTexture() > 0) {
@@ -145,10 +182,17 @@ public:
             nvgFill(vg);
         }
 
+        const bool focused = isFocused();
         nvgBeginPath(vg);
         nvgCircle(vg, centerX, centerY, radius);
-        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 90));
-        nvgStrokeWidth(vg, 2.0f);
+        if (focused) {
+            // Bright Kick green ring on hover/focus (#53FC18)
+            nvgStrokeColor(vg, nvgRGB(83, 252, 24));
+            nvgStrokeWidth(vg, 4.0f);
+        } else {
+            nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 90));
+            nvgStrokeWidth(vg, 2.0f);
+        }
         nvgStroke(vg);
 
         nvgRestore(vg);
@@ -160,12 +204,12 @@ private:
 };
 
 brls::Box* makeButton(const std::string& text, brls::Label** outLabel = nullptr) {
-    auto* button = new TwiNXActionButton();
+    auto* button = new KickNXActionButton();
     button->setFocusable(true);
     button->setAxis(brls::Axis::ROW);
     button->setPadding(12, 22, 12, 22);
     button->setCornerRadius(8);
-    button->setBackgroundColor(nvgRGB(91, 46, 145));
+    button->setBackgroundColor(nvgRGB(24, 115, 36));
     button->setMarginRight(12);
     button->addGestureRecognizer(new brls::TapGestureRecognizer(button));
 
@@ -184,19 +228,25 @@ std::string viewersText(int viewers) {
     return std::to_string(viewers) + " viewers";
 }
 
-std::string streamKey(const twitch::Stream& item) {
+std::string followersText(int followers) {
+    if (followers >= 1000000) return fmt::format("{:.1f}M followers", followers / 1000000.0);
+    if (followers >= 1000) return fmt::format("{:.1f}K followers", followers / 1000.0);
+    return std::to_string(followers) + " followers";
+}
+
+std::string streamKey(const kick::Stream& item) {
     if (!item.userLogin.empty()) return item.userLogin;
     if (!item.userId.empty()) return item.userId;
     return item.id;
 }
 
-std::string categoryKey(const twitch::Category& item) {
+std::string categoryKey(const kick::Category& item) {
     return item.id.empty() ? item.name : item.id;
 }
 
-std::string joinErrors(const twitch::HomeData& data) {
+std::string joinErrors(const kick::HomeData& data) {
     std::vector<std::string> errors;
-    if (!data.followedError.empty()) errors.push_back("live followed channels");
+    if (!data.followedError.empty()) errors.push_back("followed channels");
     if (!data.offlineFollowedError.empty()) errors.push_back("offline followed channels");
     if (!data.popularError.empty()) errors.push_back("popular streams");
     if (!data.categoriesError.empty()) errors.push_back("categories");
@@ -292,7 +342,8 @@ public:
         picture = new brls::Image();
         picture->setHeight(205);
         picture->setWidthPercentage(100);
-        picture->setImageFromRes("img/video-card-bg.png");
+        picture->setScalingType(brls::ImageScalingType::FILL);
+        picture->setImageFromRes("img/category-card-bg.png");
         this->addView(picture);
 
         title = new brls::Label();
@@ -322,7 +373,8 @@ public:
 
     void prepareForReuse() override {
         Image::cancel(picture);
-        picture->setImageFromRes("img/video-card-bg.png");
+        picture->setScalingType(brls::ImageScalingType::FILL);
+        picture->setImageFromRes("img/category-card-bg.png");
         title->setText("");
         onFocused = nullptr;
         upTarget = nullptr;
@@ -342,11 +394,11 @@ public:
 
 class StreamDataSource : public RecyclingGridDataSource {
 public:
-    using Selection = std::function<void(const twitch::Stream&)>;
-    using Focus = std::function<void(const twitch::Stream&, size_t)>;
+    using Selection = std::function<void(const kick::Stream&)>;
+    using Focus = std::function<void(const kick::Stream&, size_t)>;
 
     StreamDataSource(
-        std::vector<twitch::Stream> data,
+        std::vector<kick::Stream> data,
         Selection selected,
         Focus focused,
         std::function<brls::View*()> up)
@@ -367,15 +419,20 @@ public:
             if (!detail.empty()) detail += " · ";
             detail += viewersText(item.viewerCount);
         } else {
-            if (!detail.empty()) detail += " · ";
-            detail += "Offline";
+            if (item.followersCount > 0) {
+                if (!detail.empty()) detail += " · ";
+                detail += followersText(item.followersCount);
+            } else {
+                if (!detail.empty()) detail += " · ";
+                detail += "Offline";
+            }
         }
         cell->subtitle->setText(detail);
         if (!item.thumbnailUrl.empty()) {
-            Image::with(cell->picture, twitch::streamThumbnail(item.thumbnailUrl));
+            Image::with(cell->picture, kick::streamThumbnail(item.thumbnailUrl));
         }
 
-        const twitch::Stream focusedItem = item;
+        const kick::Stream focusedItem = item;
         const Focus focusedCallback = onFocused;
         cell->onFocused = [focusedItem, index, focusedCallback]() {
             if (focusedCallback) focusedCallback(focusedItem, index);
@@ -389,11 +446,11 @@ public:
 
     void clearData() override { items.clear(); }
 
-    size_t append(std::vector<twitch::Stream> incoming) {
+    size_t append(std::vector<kick::Stream> incoming) {
         size_t added = 0;
         for (auto& item : incoming) {
             const std::string key = streamKey(item);
-            const auto duplicate = std::find_if(items.begin(), items.end(), [&](const twitch::Stream& current) {
+            const auto duplicate = std::find_if(items.begin(), items.end(), [&](const kick::Stream& current) {
                 return streamKey(current) == key;
             });
             if (duplicate != items.end()) continue;
@@ -411,7 +468,7 @@ public:
     }
 
 private:
-    std::vector<twitch::Stream> items;
+    std::vector<kick::Stream> items;
     Selection onSelected;
     Focus onFocused;
     std::function<brls::View*()> upTarget;
@@ -419,11 +476,11 @@ private:
 
 class CategoryDataSource : public RecyclingGridDataSource {
 public:
-    using Selection = std::function<void(const twitch::Category&)>;
-    using Focus = std::function<void(const twitch::Category&, size_t)>;
+    using Selection = std::function<void(const kick::Category&)>;
+    using Focus = std::function<void(const kick::Category&, size_t)>;
 
     CategoryDataSource(
-        std::vector<twitch::Category> data,
+        std::vector<kick::Category> data,
         Selection selected,
         Focus focused,
         std::function<brls::View*()> up)
@@ -440,10 +497,14 @@ public:
         cell->upTarget = upTarget;
         cell->title->setText(item.name);
         if (!item.boxArtUrl.empty()) {
-            Image::with(cell->picture, twitch::categoryThumbnail(item.boxArtUrl));
+            cell->picture->setScalingType(brls::ImageScalingType::FIT);
+            Image::with(cell->picture, kick::categoryThumbnail(item.boxArtUrl));
+        } else {
+            cell->picture->setScalingType(brls::ImageScalingType::FILL);
+            cell->picture->setImageFromRes("img/category-card-bg.png");
         }
 
-        const twitch::Category focusedItem = item;
+        const kick::Category focusedItem = item;
         const Focus focusedCallback = onFocused;
         cell->onFocused = [focusedItem, index, focusedCallback]() {
             if (focusedCallback) focusedCallback(focusedItem, index);
@@ -457,11 +518,11 @@ public:
 
     void clearData() override { items.clear(); }
 
-    size_t append(std::vector<twitch::Category> incoming) {
+    size_t append(std::vector<kick::Category> incoming) {
         size_t added = 0;
         for (auto& item : incoming) {
             const std::string key = categoryKey(item);
-            const auto duplicate = std::find_if(items.begin(), items.end(), [&](const twitch::Category& current) {
+            const auto duplicate = std::find_if(items.begin(), items.end(), [&](const kick::Category& current) {
                 return categoryKey(current) == key;
             });
             if (duplicate != items.end()) continue;
@@ -479,7 +540,7 @@ public:
     }
 
 private:
-    std::vector<twitch::Category> items;
+    std::vector<kick::Category> items;
     Selection onSelected;
     Focus onFocused;
     std::function<brls::View*()> upTarget;
@@ -487,13 +548,13 @@ private:
 
 }  // namespace
 
-class TwitchRow : public brls::Box {
+class KickRow : public brls::Box {
 public:
     enum class Kind { Streams, Categories };
     using FocusCallback = std::function<void(const std::string&, const std::string&)>;
-    using StreamFocusCallback = std::function<void(const twitch::Stream&)>;
+    using StreamFocusCallback = std::function<void(const kick::Stream&)>;
 
-    TwitchRow(std::string identifier, const std::string& text, Kind rowKind, FocusCallback focus)
+    KickRow(std::string identifier, const std::string& text, Kind rowKind, FocusCallback focus)
         : id(std::move(identifier)), kind(rowKind), focusCallback(std::move(focus)) {
         this->setAxis(brls::Axis::COLUMN);
         this->setMarginBottom(18);
@@ -535,13 +596,13 @@ public:
     void onStreamFocused(StreamFocusCallback callback) { streamFocusCallback = std::move(callback); }
 
     void setStreams(
-        std::vector<twitch::Stream> items,
-        std::function<void(const twitch::Stream&)> selected,
+        std::vector<kick::Stream> items,
+        std::function<void(const kick::Stream&)> selected,
         const std::string& emptyText,
         std::function<brls::View*()> upTarget = {}) {
         count = items.size();
         streamSource = new StreamDataSource(std::move(items), std::move(selected),
-            [this](const twitch::Stream& stream, size_t) {
+            [this](const kick::Stream& stream, size_t) {
                 if (focusCallback) focusCallback(id, streamKey(stream));
                 if (streamFocusCallback) streamFocusCallback(stream);
             }, upTarget);
@@ -551,13 +612,13 @@ public:
     }
 
     void setCategories(
-        std::vector<twitch::Category> items,
-        std::function<void(const twitch::Category&)> selected,
+        std::vector<kick::Category> items,
+        std::function<void(const kick::Category&)> selected,
         const std::string& emptyText,
         std::function<brls::View*()> upTarget = {}) {
         count = items.size();
         categorySource = new CategoryDataSource(std::move(items), std::move(selected),
-            [this](const twitch::Category& category, size_t) {
+            [this](const kick::Category& category, size_t) {
                 if (focusCallback) focusCallback(id, categoryKey(category));
             }, upTarget);
         streamSource = nullptr;
@@ -565,7 +626,7 @@ public:
         showResult(count > 0, emptyText);
     }
 
-    size_t appendStreams(std::vector<twitch::Stream> items) {
+    size_t appendStreams(std::vector<kick::Stream> items) {
         if (!streamSource) return 0;
         const size_t added = streamSource->append(std::move(items));
         count += added;
@@ -574,7 +635,7 @@ public:
         return added;
     }
 
-    size_t appendCategories(std::vector<twitch::Category> items) {
+    size_t appendCategories(std::vector<kick::Category> items) {
         if (!categorySource) return 0;
         const size_t added = categorySource->append(std::move(items));
         count += added;
@@ -644,10 +705,11 @@ private:
     bool hasMore = false;
 };
 
-TwiNXHome::TwiNXHome() {
+KickNXHome::KickNXHome() {
+    instance = this;
     this->setAxis(brls::Axis::COLUMN);
     this->setDimensions(brls::Application::contentWidth, brls::Application::contentHeight);
-    this->setBackgroundColor(nvgRGB(16, 18, 24));
+    this->setBackgroundColor(nvgRGB(0, 0, 0));
 
     // Borealis already uses an LRU texture cache. Tighten its absolute runtime
     // cap for this thumbnail-heavy client so stale channel/category artwork is
@@ -657,6 +719,8 @@ TwiNXHome::TwiNXHome() {
 
     auto* top = new brls::Box();
     top->setAxis(brls::Axis::COLUMN);
+    top->setWidthPercentage(100);
+    top->setBackgroundColor(nvgRGB(16, 18, 24));
     top->setPadding(24, 48, 12, 48);
     this->addView(top);
 
@@ -671,11 +735,29 @@ TwiNXHome::TwiNXHome() {
     headingText->setGrow(1.0f);
     headingRow->addView(headingText);
 
+    auto* titleRow = new brls::Box();
+    titleRow->setAxis(brls::Axis::ROW);
+    titleRow->setAlignItems(brls::AlignItems::CENTER);
+    headingText->addView(titleRow);
+
+    auto* titleLogo = new brls::Image();
+    titleLogo->setImageFromRes("img/kicknx_logo.png");
+    titleLogo->setScalingType(brls::ImageScalingType::FIT);
+    titleLogo->setHeight(44);
+    titleLogo->setWidth(44.0f * 644.0f / 186.0f);
+    titleRow->addView(titleLogo);
+
     auto* title = new brls::Label();
-    title->setText("twiNX · Twitch for Nintendo Switch");
+    title->setText("· Kick for Nintendo Switch");
     title->setFontSize(33);
-    title->setTextColor(nvgRGB(240, 242, 248));
-    headingText->addView(title);
+    title->setTextColor(nvgRGB(83, 252, 24));
+    title->setMarginLeft(14);
+    // Keep the title on one line: during abrupt screen transitions the label
+    // can be laid out while its parent is momentarily narrow, which wrapped
+    // "Switch" onto a second line.
+    title->setSingleLine(true);
+    title->setShrink(0.0f);
+    titleRow->addView(title);
 
     accountLabel = new brls::Label();
     accountLabel->setFontSize(18);
@@ -683,10 +765,20 @@ TwiNXHome::TwiNXHome() {
     accountLabel->setMarginTop(5);
     headingText->addView(accountLabel);
 
-    profileAvatar = new TwiNXProfileAvatar();
+    profileAvatar = new KickNXProfileAvatar();
     profileAvatar->setWidth(76);
     profileAvatar->setHeight(76);
     profileAvatar->setMarginLeft(24);
+    profileAvatar->registerClickAction([this](brls::View*) {
+        const auto session = kick::loadOAuth();
+        if (session.signedIn() && !session.login.empty()) {
+            brls::Application::pushActivity(
+                new brls::Activity(
+                    new KickChannelPage(session.login)));
+            return true;
+        }
+        return false;
+    });
     headingRow->addView(profileAvatar);
 
     statusLabel = new brls::Label();
@@ -702,7 +794,7 @@ TwiNXHome::TwiNXHome() {
 
     loginButton = makeButton("Sign in", &loginButtonLabel);
     loginButton->registerClickAction([this](brls::View*) {
-        if (twitch::loadOAuth().signedIn()) logout(); else beginLogin();
+        if (kick::loadOAuth().signedIn()) logout(); else beginLogin();
         return true;
     });
     actions->addView(loginButton);
@@ -727,6 +819,23 @@ TwiNXHome::TwiNXHome() {
         return true;
     });
     actions->addView(aboutButton);
+
+    auto* avatar = static_cast<KickNXProfileAvatar*>(profileAvatar);
+    avatar->downTarget = [this]() -> brls::View* {
+        return aboutButton ? aboutButton : loginButton;
+    };
+    static_cast<KickNXActionButton*>(aboutButton)->upTarget = [this]() -> brls::View* {
+        return (profileAvatar && profileAvatar->getVisibility() == brls::Visibility::VISIBLE) ? profileAvatar : nullptr;
+    };
+    static_cast<KickNXActionButton*>(refreshButton)->upTarget = [this]() -> brls::View* {
+        return (profileAvatar && profileAvatar->getVisibility() == brls::Visibility::VISIBLE) ? profileAvatar : nullptr;
+    };
+    static_cast<KickNXActionButton*>(searchButton)->upTarget = [this]() -> brls::View* {
+        return (profileAvatar && profileAvatar->getVisibility() == brls::Visibility::VISIBLE) ? profileAvatar : nullptr;
+    };
+    static_cast<KickNXActionButton*>(loginButton)->upTarget = [this]() -> brls::View* {
+        return (profileAvatar && profileAvatar->getVisibility() == brls::Visibility::VISIBLE) ? profileAvatar : nullptr;
+    };
 
     errorBox = new brls::Box();
     errorBox->setAxis(brls::Axis::ROW);
@@ -781,7 +890,7 @@ TwiNXHome::TwiNXHome() {
 
     heroLiveLabel = new brls::Label();
     heroLiveLabel->setFontSize(16);
-    heroLiveLabel->setTextColor(nvgRGB(230, 95, 130));
+    heroLiveLabel->setTextColor(nvgRGB(83, 252, 24));
     heroLiveLabel->setMarginBottom(8);
     heroInfo->addView(heroLiveLabel);
 
@@ -814,17 +923,17 @@ TwiNXHome::TwiNXHome() {
     auto remember = [this](const std::string& row, const std::string& key) {
         rememberFocus(row, key);
     };
-    followedRow = new TwitchRow("followed", "Followed channels — live", TwitchRow::Kind::Streams, remember);
-    offlineFollowedRow = new TwitchRow("offline-followed", "Followed channels — offline", TwitchRow::Kind::Streams, remember);
-    popularRow = new TwitchRow("popular", "Popular live streams", TwitchRow::Kind::Streams, remember);
-    categoryStreamsRow = new TwitchRow("category-streams", "Category streams", TwitchRow::Kind::Streams, remember);
-    categoriesRow = new TwitchRow("categories", "Top categories", TwitchRow::Kind::Categories, remember);
-    searchRow = new TwitchRow("search", "Search results", TwitchRow::Kind::Streams, remember);
+    followedRow = new KickRow("followed", "Followed channels", KickRow::Kind::Streams, remember);
+    offlineFollowedRow = new KickRow("offline-followed", "Followed channels — offline", KickRow::Kind::Streams, remember);
+    popularRow = new KickRow("popular", "Popular live streams", KickRow::Kind::Streams, remember);
+    categoryStreamsRow = new KickRow("category-streams", "Category streams", KickRow::Kind::Streams, remember);
+    categoriesRow = new KickRow("categories", "Top categories", KickRow::Kind::Categories, remember);
+    searchRow = new KickRow("search", "Search results", KickRow::Kind::Streams, remember);
 
     // The hero is the visual context for the followed-channel row. Keep the
     // page pinned to its absolute top while moving horizontally between those
     // cards, so changing the selected channel never crops the hero banner.
-    auto updateFollowedStream = [this](const twitch::Stream& stream) {
+    auto updateFollowedStream = [this](const kick::Stream& stream) {
         updateHero(stream);
 
         if (homeScroll) {
@@ -849,7 +958,7 @@ TwiNXHome::TwiNXHome() {
     };
 
     auto updateFocusedStream =
-        [this](const twitch::Stream& stream) {
+        [this](const kick::Stream& stream) {
             if (homeScroll)
                 homeScroll->setScrollingBehavior(
                     brls::ScrollingBehavior::CENTERED);
@@ -857,32 +966,33 @@ TwiNXHome::TwiNXHome() {
         };
 
     followedRow->onStreamFocused(updateFollowedStream);
+    offlineFollowedRow->onStreamFocused(updateFocusedStream);
     popularRow->onStreamFocused(updateFocusedStream);
     categoryStreamsRow->onStreamFocused(updateFocusedStream);
     searchRow->onStreamFocused(updateFocusedStream);
 
     content->addView(followedRow);
-    content->addView(offlineFollowedRow);
     content->addView(popularRow);
     content->addView(categoryStreamsRow);
     content->addView(categoriesRow);
     content->addView(searchRow);
+    content->addView(offlineFollowedRow);
 
     auto firstVisibleContentFocus = [this]() -> brls::View* {
         for (auto* row : {
                  followedRow,
-                 offlineFollowedRow,
                  popularRow,
                  categoryStreamsRow,
                  categoriesRow,
-                 searchRow}) {
+                 searchRow,
+                 offlineFollowedRow}) {
             if (auto* focus = row->defaultFocus()) return focus;
         }
         return nullptr;
     };
 
     for (auto* button : {loginButton, searchButton, refreshButton, aboutButton}) {
-        if (auto* actionButton = dynamic_cast<TwiNXActionButton*>(button))
+        if (auto* actionButton = dynamic_cast<KickNXActionButton*>(button))
             actionButton->downTarget = firstVisibleContentFocus;
     }
 
@@ -900,28 +1010,32 @@ TwiNXHome::TwiNXHome() {
     });
 
     updateAccount();
-    if (twitch::loadOAuth().signedIn()) refreshHome();
-    else statusLabel->setText("Sign in with Twitch to load followed channels, streams, categories, and search.");
-    brls::sync([this]() { brls::Application::giveFocus(loginButton); });
+    refreshHome();
+    brls::sync([this]() {
+        if (isActiveActivity()) brls::Application::giveFocus(refreshButton);
+    });
 }
 
-TwiNXHome::~TwiNXHome() {
+KickNXHome::~KickNXHome() {
+    if (instance == this) instance = nullptr;
     if (activeRequest) activeRequest->store(true);
     if (heroPreview) Image::cancel(heroPreview);
 }
 
-void TwiNXHome::updateHero(const twitch::Stream& stream) {
+void KickNXHome::updateHero(const kick::Stream& stream) {
     if (!heroBox || !heroPreview) return;
 
     Image::cancel(heroPreview);
     heroPreview->setImageFromRes("img/video-card-bg.png");
     if (!stream.thumbnailUrl.empty())
-        Image::with(heroPreview, twitch::streamThumbnail(stream.thumbnailUrl, 820, 461));
+        Image::with(heroPreview, kick::streamThumbnail(stream.thumbnailUrl, 820, 461));
 
     const std::string channel = stream.userName.empty() ? stream.userLogin : stream.userName;
-    heroLiveLabel->setText(stream.isLive ? "LIVE · " + viewersText(stream.viewerCount) : "OFFLINE");
-    heroChannelLabel->setText(channel.empty() ? "Twitch" : channel);
-    heroTitleLabel->setText(stream.title.empty() ? "Live on Twitch" : stream.title);
+    heroLiveLabel->setText(stream.isLive ? "LIVE · " + viewersText(stream.viewerCount)
+                                         : (stream.followersCount > 0 ? "OFFLINE · " + followersText(stream.followersCount)
+                                                                      : "OFFLINE"));
+    heroChannelLabel->setText(channel.empty() ? "Kick" : channel);
+    heroTitleLabel->setText(stream.title.empty() ? "Live on Kick" : stream.title);
 
     std::string meta = stream.gameName;
     if (!stream.language.empty()) {
@@ -932,38 +1046,54 @@ void TwiNXHome::updateHero(const twitch::Stream& stream) {
     heroBox->setVisibility(brls::Visibility::VISIBLE);
 }
 
-void TwiNXHome::clearHero() {
+void KickNXHome::clearHero() {
     if (!heroBox || !heroPreview) return;
     Image::cancel(heroPreview);
     heroPreview->setImageFromRes("img/video-card-bg.png");
     heroBox->setVisibility(brls::Visibility::GONE);
 }
 
-void TwiNXHome::setBusy(bool value, const std::string& message) {
+void KickNXHome::willAppear(bool resetState) {
+    brls::Box::willAppear(resetState);
+    if (!busy && statusLabel) {
+        statusLabel->setText("");
+    }
+    if (kick::isFollowedChannelsDirty()) {
+        kick::clearFollowedChannelsDirty();
+        refreshHome();
+    }
+}
+
+void KickNXHome::setBusy(bool value, const std::string& message) {
     busy = value;
     if (!message.empty()) statusLabel->setText(message);
 }
 
-void TwiNXHome::updateAccount() {
-    const auto session = twitch::loadOAuth();
+void KickNXHome::updateAccount() {
+    const auto session = kick::loadOAuth();
     if (session.signedIn()) {
         accountLabel->setText("Signed in as " +
             (session.displayName.empty() ? session.login : session.displayName));
         loginButtonLabel->setText("Sign out");
+        if (profileAvatar) profileAvatar->setFocusable(true);
+        if (!session.profileImageUrl.empty()) {
+            updateProfileImage(session.profileImageUrl);
+        }
     } else {
-        accountLabel->setText("Not signed in");
+        accountLabel->setText("Guest mode · Public Kick streams & live chat enabled");
         loginButtonLabel->setText("Sign in");
+        if (profileAvatar) profileAvatar->setFocusable(false);
         updateProfileImage("");
     }
 }
 
-void TwiNXHome::updateProfileImage(const std::string& url) {
+void KickNXHome::updateProfileImage(const std::string& url) {
     if (!profileAvatar) return;
-    static_cast<TwiNXProfileAvatar*>(
+    static_cast<KickNXProfileAvatar*>(
         profileAvatar)->setProfileImage(url);
 }
 
-uint64_t TwiNXHome::beginBrowsingRequest(const std::string& message) {
+uint64_t KickNXHome::beginBrowsingRequest(const std::string& message) {
     // A browsing refresh/search may replace an older browsing operation. Login
     // and playback resolution remain non-replaceable because they use separate
     // protocols and must complete their own lifecycle cleanly.
@@ -977,7 +1107,7 @@ uint64_t TwiNXHome::beginBrowsingRequest(const std::string& message) {
     return id;
 }
 
-bool TwiNXHome::finishBrowsingRequest(uint64_t requestId) {
+bool KickNXHome::finishBrowsingRequest(uint64_t requestId) {
     this->ptrUnlock();
     if (requestId != requestGeneration) return false;
     activeRequest.reset();
@@ -985,7 +1115,7 @@ bool TwiNXHome::finishBrowsingRequest(uint64_t requestId) {
     return true;
 }
 
-void TwiNXHome::cancelBrowsingRequest() {
+void KickNXHome::cancelBrowsingRequest() {
     if (!activeRequest) return;
     activeRequest->store(true);
     activeRequest.reset();
@@ -993,39 +1123,42 @@ void TwiNXHome::cancelBrowsingRequest() {
     busy = false;
 }
 
-void TwiNXHome::showRequestError(const std::string& message, std::function<void()> retry) {
+void KickNXHome::showRequestError(const std::string& message, std::function<void()> retry) {
     errorLabel->setText(message);
     retryAction = std::move(retry);
     retryButton->setVisibility(retryAction ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
     errorBox->setVisibility(brls::Visibility::VISIBLE);
 }
 
-void TwiNXHome::clearRequestError() {
+void KickNXHome::clearRequestError() {
     retryAction = nullptr;
     errorBox->setVisibility(brls::Visibility::GONE);
 }
 
-void TwiNXHome::rememberFocus(const std::string& row, const std::string& key) {
+void KickNXHome::rememberFocus(const std::string& row, const std::string& key) {
     lastFocusedRow = row;
     lastFocusedKey = key;
 }
 
-void TwiNXHome::restoreContentFocus() {
+bool KickNXHome::isActiveActivity() {
+    const auto& stack = brls::Application::getActivitiesStack();
+    return !stack.empty() && (stack.back() == this->getParentActivity() || stack.back()->getContentView() == this);
+}
+
+void KickNXHome::restoreContentFocus() {
+    if (!isActiveActivity()) return;
     if (lastFocusedRow == "followed" && followedRow->focusKey(lastFocusedKey)) return;
-    if (lastFocusedRow == "offline-followed" && offlineFollowedRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "popular" && popularRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "category-streams" && categoryStreamsRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "categories" && categoriesRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "search" && searchRow->focusKey(lastFocusedKey)) return;
+    if (lastFocusedRow == "offline-followed" && offlineFollowedRow->focusKey(lastFocusedKey)) return;
     focusFirstContentRow();
 }
 
-void TwiNXHome::focusFirstContentRow() {
+void KickNXHome::focusFirstContentRow() {
+    if (!isActiveActivity()) return;
     if (auto* focus = followedRow->defaultFocus()) {
-        brls::Application::giveFocus(focus);
-        return;
-    }
-    if (auto* focus = offlineFollowedRow->defaultFocus()) {
         brls::Application::giveFocus(focus);
         return;
     }
@@ -1037,61 +1170,300 @@ void TwiNXHome::focusFirstContentRow() {
         brls::Application::giveFocus(focus);
         return;
     }
+    if (auto* focus = offlineFollowedRow->defaultFocus()) {
+        brls::Application::giveFocus(focus);
+        return;
+    }
     brls::Application::giveFocus(refreshButton);
 }
 
-void TwiNXHome::beginLogin() {
+void KickNXHome::beginLogin() {
     if (busy) return;
     clearRequestError();
-    setBusy(true, "Requesting a Twitch activation code…");
+
+    struct LoginDialogState {
+        kick::TVLinkSession tvSession;
+        kick::QRCodeView* qrView = nullptr;
+        brls::Label* pairCodeLabel = nullptr;
+        brls::Label* statusText = nullptr;
+        brls::RepeatingTimer timer;
+        HTTP::Cancel cancel = std::make_shared<std::atomic_bool>(false);
+        std::function<void()> pollFunc;
+        bool submitting = false;
+        bool polling = false;
+
+        ~LoginDialogState() {
+            timer.stop();
+            if (cancel) cancel->store(true);
+        }
+    };
+
+    auto state = std::make_shared<LoginDialogState>();
+
+    auto* page = new brls::Box();
+    page->setAxis(brls::Axis::COLUMN);
+    page->setDimensions(
+        brls::Application::contentWidth,
+        brls::Application::contentHeight);
+    page->setBackgroundColor(nvgRGB(16, 18, 24));
+
+    auto* heading = new brls::Box();
+    heading->setAxis(brls::Axis::ROW);
+    heading->setAlignItems(brls::AlignItems::CENTER);
+    heading->setPadding(20, 48, 14, 48);
+    heading->setWidthPercentage(100);
+    page->addView(heading);
+
+    auto* headingText = new brls::Box();
+    headingText->setAxis(brls::Axis::COLUMN);
+    headingText->setGrow(1.0f);
+    heading->addView(headingText);
+
+    auto* title = new brls::Label();
+    title->setText("Sign in to Kick");
+    title->setFontSize(32);
+    title->setTextColor(nvgRGB(244, 246, 251));
+    headingText->addView(title);
+
+    auto* subtitle = new brls::Label();
+    subtitle->setText(
+        "Scan with the Kick mobile app to pair your account");
+    subtitle->setFontSize(16);
+    subtitle->setTextColor(nvgRGB(171, 179, 196));
+    subtitle->setMarginTop(4);
+    headingText->addView(subtitle);
+
+    auto* backButton = makeButton("Back");
+    backButton->setMarginRight(0);
+    backButton->registerClickAction([state](brls::View*) {
+        if (state->submitting) return true;
+        state->timer.stop();
+        if (state->cancel) state->cancel->store(true);
+        return brls::Application::popActivity();
+    });
+    heading->addView(backButton);
+
+    // Full-screen two-panel hero layout for instant QR & TV code sign-in
+    auto* body = new brls::Box();
+    body->setAxis(brls::Axis::ROW);
+    body->setGrow(1.0f);
+    body->setWidthPercentage(100);
+    body->setPadding(10, 48, 28, 48);
+    body->setJustifyContent(brls::JustifyContent::SPACE_BETWEEN);
+    body->setAlignItems(brls::AlignItems::STRETCH);
+    page->addView(body);
+
+    // ==========================================
+    // Left: Centered & Enlarged Hero QR Card
+    // ==========================================
+    auto* qrCard = new brls::Box();
+    qrCard->setAxis(brls::Axis::COLUMN);
+    qrCard->setAlignItems(brls::AlignItems::CENTER);
+    qrCard->setJustifyContent(brls::JustifyContent::CENTER);
+    qrCard->setWidth(480);
+    qrCard->setCornerRadius(18);
+    qrCard->setBackgroundColor(nvgRGB(24, 28, 38));
+    qrCard->setPadding(24, 24, 24, 24);
+    body->addView(qrCard);
+
+    state->qrView = new kick::QRCodeView("", 350.0f);
+    qrCard->addView(state->qrView);
+
+    auto* qrHint = new brls::Label();
+    qrHint->setText("Point your phone camera at this QR code");
+    qrHint->setFontSize(16);
+    qrHint->setTextColor(nvgRGB(175, 183, 201));
+    qrHint->setMarginTop(18);
+    qrCard->addView(qrHint);
+
+    // ==========================================
+    // Right: Instructions, 6-Digit Code & Actions
+    // ==========================================
+    auto* infoCard = new brls::Box();
+    infoCard->setAxis(brls::Axis::COLUMN);
+    infoCard->setGrow(1.0f);
+    infoCard->setMarginLeft(32);
+    infoCard->setCornerRadius(18);
+    infoCard->setBackgroundColor(nvgRGB(24, 28, 38));
+    infoCard->setPadding(32, 40, 28, 40);
+    infoCard->setJustifyContent(brls::JustifyContent::SPACE_BETWEEN);
+    body->addView(infoCard);
+
+    auto* infoTop = new brls::Box();
+    infoTop->setAxis(brls::Axis::COLUMN);
+    infoCard->addView(infoTop);
+
+    auto* qrHeading = new brls::Label();
+    qrHeading->setText("Instant QR & TV Code Sign-In");
+    qrHeading->setFontSize(26);
+    qrHeading->setTextColor(nvgRGB(244, 246, 251));
+    infoTop->addView(qrHeading);
+
+    auto* step1 = new brls::Label();
+    step1->setText("1. Open the Kick app on your phone (signed into your account).");
+    step1->setFontSize(16);
+    step1->setTextColor(nvgRGB(180, 188, 204));
+    step1->setMarginTop(16);
+    infoTop->addView(step1);
+
+    auto* step2 = new brls::Label();
+    step2->setText("2. Point your phone camera or QR scanner at the code on the left.");
+    step2->setFontSize(16);
+    step2->setTextColor(nvgRGB(180, 188, 204));
+    step2->setMarginTop(10);
+    infoTop->addView(step2);
+
+    auto* step3 = new brls::Label();
+    step3->setText("3. Confirm that this 6-digit verification code matches in the app:");
+    step3->setFontSize(16);
+    step3->setTextColor(nvgRGB(180, 188, 204));
+    step3->setMarginTop(10);
+    infoTop->addView(step3);
+
+    auto* codeBox = new brls::Box();
+    codeBox->setAxis(brls::Axis::ROW);
+    codeBox->setAlignItems(brls::AlignItems::CENTER);
+    codeBox->setJustifyContent(brls::JustifyContent::CENTER);
+    codeBox->setPadding(14, 32, 14, 32);
+    codeBox->setCornerRadius(12);
+    codeBox->setBackgroundColor(nvgRGB(16, 19, 27));
+    codeBox->setMarginTop(18);
+    codeBox->setWidth(320);
+    infoTop->addView(codeBox);
+
+    state->pairCodeLabel = new brls::Label();
+    state->pairCodeLabel->setFontSize(44);
+    state->pairCodeLabel->setTextColor(nvgRGB(83, 252, 24));
+    codeBox->addView(state->pairCodeLabel);
+
+    auto* infoBottom = new brls::Box();
+    infoBottom->setAxis(brls::Axis::COLUMN);
+    infoCard->addView(infoBottom);
+
+    state->statusText = new brls::Label();
+    state->statusText->setText("Waiting for confirmation in the Kick mobile app…");
+    state->statusText->setFontSize(16);
+    state->statusText->setTextColor(nvgRGB(83, 252, 24));
+    state->statusText->setMarginBottom(16);
+    infoBottom->addView(state->statusText);
+
+    auto* qrActionRow = new brls::Box();
+    qrActionRow->setAxis(brls::Axis::ROW);
+    qrActionRow->setAlignItems(brls::AlignItems::CENTER);
+    infoBottom->addView(qrActionRow);
+
+    auto* refreshQrBtn = makeButton("Refresh Code");
+    qrActionRow->addView(refreshQrBtn);
+
+    auto* cancelBtn = makeButton("Cancel");
+    cancelBtn->setMarginLeft(16);
+    cancelBtn->registerClickAction([state](brls::View*) {
+        if (state->submitting) return true;
+        state->timer.stop();
+        if (state->cancel) state->cancel->store(true);
+        return brls::Application::popActivity();
+    });
+    qrActionRow->addView(cancelBtn);
+
+    auto refreshSession = [this, state]() {
+        if (state->cancel) state->cancel->store(true);
+        state->cancel = std::make_shared<std::atomic_bool>(false);
+        state->polling = false;
+        state->tvSession = kick::createTVLinkSession();
+        if (state->qrView) state->qrView->setText(state->tvSession.verificationUrl);
+        if (state->pairCodeLabel) {
+            std::string c = state->tvSession.code;
+            if (c.size() == 6) c = c.substr(0, 3) + " " + c.substr(3);
+            state->pairCodeLabel->setText(c);
+        }
+        if (state->statusText) {
+            state->statusText->setText("Waiting for confirmation in the Kick mobile app…");
+        }
+    };
+    refreshSession();
+
+    refreshQrBtn->registerClickAction([refreshSession](brls::View*) {
+        refreshSession();
+        return true;
+    });
+
+    state->pollFunc = [this, state]() {
+        if (state->submitting || state->polling || (state->cancel && state->cancel->load())) return;
+        state->polling = true;
+        kick::pollTVLinkAuthAsync(
+            kick::loadConfig(),
+            state->tvSession,
+            [this, state](kick::OAuthSession session) {
+                state->timer.stop();
+                state->polling = false;
+                state->submitting = false;
+                setBusy(false, "Signed in to Kick as " +
+                    (session.displayName.empty() ? session.login : session.displayName));
+                updateAccount();
+                updateProfileImage(session.profileImageUrl);
+                brls::Application::notify("kickNX: Signed in as " +
+                    (session.displayName.empty() ? session.login : session.displayName));
+                this->ptrUnlock();
+                brls::Application::popActivity();
+                refreshHome();
+            },
+            [state](bool pending, const std::string& message) {
+                state->polling = false;
+                if (state->cancel && state->cancel->load()) return;
+                if (state->statusText) {
+                    state->statusText->setText(message);
+                }
+            },
+            state->cancel);
+    };
+
+    state->timer.setCallback([state]() {
+        if (state->pollFunc) state->pollFunc();
+    });
+    state->timer.start(2500);
+
+    page->registerAction("Back", brls::BUTTON_B, [state](brls::View*) {
+        if (state->submitting) return true;
+        state->timer.stop();
+        if (state->cancel) state->cancel->store(true);
+        return brls::Application::popActivity();
+    });
+
+    brls::Application::pushActivity(new brls::Activity(page));
+    brls::sync([refreshQrBtn]() {
+        brls::Application::giveFocus(refreshQrBtn);
+    });
+}
+
+void KickNXHome::logout() {
+    if (busy && !activeRequest) return;
+    cancelBrowsingRequest();
+    clearRequestError();
+    setBusy(true, "Signing out of Kick…");
     this->ptrLock();
-    twitch::loginDeviceAsync(
-        twitch::loadConfig(),
-        [this](twitch::DeviceAuthorization code) {
-            statusLabel->setText(
-                "On your phone or computer open twitch.tv/activate · Code: " +
-                code.userCode + " · Waiting for authorization…");
-        },
-        [this](twitch::OAuthSession) {
-            setBusy(false, "Twitch sign-in completed.");
+    kick::logoutAsync(
+        kick::loadConfig(),
+        [this]() {
+            updateProfileImage("");
             updateAccount();
+            followedRow->clear();
+            offlineFollowedRow->clear();
+            setBusy(false, "Signed out. Browsing Kick in guest mode.");
+            brls::Application::notify("kickNX: Signed out of Kick");
             this->ptrUnlock();
             refreshHome();
-        },
-        [this](const std::string& error) {
-            setBusy(false, "Login error: " + error);
-            showRequestError("Twitch sign-in failed: " + error, [this]() { beginLogin(); });
-            brls::Application::notify("twiNX: " + error);
-            this->ptrUnlock();
         });
 }
 
-void TwiNXHome::logout() {
-    if (busy && !activeRequest) return;
-    cancelBrowsingRequest();
-    twitch::clearOAuth();
-    clearRows();
-    clearRequestError();
-    updateProfileImage("");
-    updateAccount();
-    statusLabel->setText("Signed out. Select Sign in to reconnect your Twitch account.");
-}
-
-void TwiNXHome::refreshHome() {
-    if (!twitch::loadOAuth().signedIn()) {
-        statusLabel->setText("Sign in to Twitch first.");
-        brls::Application::giveFocus(loginButton);
-        return;
-    }
-
-    const uint64_t requestId = beginBrowsingRequest("Loading Twitch home…");
+void KickNXHome::refreshHome() {
+    const uint64_t requestId = beginBrowsingRequest("Loading Kick home…");
     if (!requestId) return;
     clearRequestError();
     const HTTP::Cancel requestCancel = activeRequest;
 
-    twitch::loadHomeAsync(
-        twitch::loadConfig(),
-        [this, requestId](twitch::HomeData data) {
+    kick::loadHomeAsync(
+        kick::loadConfig(),
+        [this, requestId](kick::HomeData data) {
             if (!finishBrowsingRequest(requestId)) return;
             showHomeData(std::move(data));
             restoreContentFocus();
@@ -1099,36 +1471,42 @@ void TwiNXHome::refreshHome() {
         [this, requestId](const std::string& error) {
             if (!finishBrowsingRequest(requestId)) return;
             setBusy(false, "Home error: " + error);
-            showRequestError("Could not refresh Twitch home: " + error,
+            showRequestError("Could not refresh Kick home: " + error,
                 [this]() { refreshHome(); });
-            brls::Application::notify("twiNX: " + error);
+            brls::Application::notify("kickNX: " + error);
         },
         requestCancel);
 }
 
-void TwiNXHome::showHomeData(twitch::HomeData data) {
+void KickNXHome::showHomeData(kick::HomeData data) {
     updateAccount();
-    updateProfileImage(
-        data.profile.profileImageUrl);
-    auto play = [this](const twitch::Stream& stream) { playChannel(stream); };
+    std::string profileUrl = data.profile.profileImageUrl;
+    if (profileUrl.empty()) {
+        const auto session = kick::loadOAuth();
+        if (session.signedIn()) profileUrl = session.profileImageUrl;
+    }
+    if (!profileUrl.empty()) {
+        updateProfileImage(profileUrl);
+    }
+    auto play = [this](const kick::Stream& stream) { playChannel(stream); };
 
     if (!data.followed.items.empty()) updateHero(data.followed.items.front());
     else if (!data.popular.items.empty()) updateHero(data.popular.items.front());
     else clearHero();
 
     followedCursor = data.followed.loaded ? data.followed.cursor : "";
-    offlineFollowedCursor = data.offlineFollowed.loaded ? data.offlineFollowed.cursor : "";
     popularCursor = data.popular.loaded ? data.popular.cursor : "";
     categoriesCursor = data.categories.loaded ? data.categories.cursor : "";
 
-    const bool followedHasItems = !data.followed.items.empty();
-    const bool offlineFollowedHasItems = !data.offlineFollowed.items.empty();
+    const bool signedIn = data.account.signedIn();
+    const bool followedHasItems = signedIn && !data.followed.items.empty();
+    const bool offlineFollowedHasItems = signedIn && !data.offlineFollowed.items.empty();
     const bool popularHasItems = !data.popular.items.empty();
     const bool categoriesHaveItems = !data.categories.items.empty();
 
     auto focusTopActions = [this]() -> brls::View* {
         if (homeScroll) homeScroll->setContentOffsetY(0.0f, false);
-        return loginButton;
+        return refreshButton;
     };
 
     std::function<brls::View*()> followedUpTarget;
@@ -1138,42 +1516,46 @@ void TwiNXHome::showHomeData(twitch::HomeData data) {
 
     if (followedHasItems) {
         followedUpTarget = focusTopActions;
-    } else if (offlineFollowedHasItems) {
-        offlineFollowedUpTarget = focusTopActions;
     } else if (popularHasItems) {
         popularUpTarget = focusTopActions;
     } else if (categoriesHaveItems) {
         categoriesUpTarget = focusTopActions;
+    } else if (offlineFollowedHasItems) {
+        offlineFollowedUpTarget = focusTopActions;
     }
 
-    followedRow->setStreams(std::move(data.followed.items), play,
-        data.followedError.empty()
-            ? "None of your followed channels are live right now."
-            : "Live followed channels could not be loaded. Use Retry to try again.",
-        followedUpTarget);
-    offlineFollowedRow->setStreams(std::move(data.offlineFollowed.items), play,
-        data.offlineFollowedError.empty()
-            ? "No offline followed channels were returned."
-            : "Offline followed channels could not be loaded. Use Retry to try again.",
-        offlineFollowedUpTarget);
+    if (signedIn) {
+        followedRow->setStreams(std::move(data.followed.items), play,
+            data.followedError.empty()
+                ? "None of your followed Kick channels are live right now."
+                : "Followed channels could not be loaded. Use Retry to try again.",
+            followedUpTarget);
+        offlineFollowedRow->setStreams(std::move(data.offlineFollowed.items), play,
+            data.offlineFollowedError.empty()
+                ? "No offline followed channels were returned."
+                : "Offline followed channels could not be loaded. Use Retry to try again.",
+            offlineFollowedUpTarget);
+    } else {
+        followedRow->clear();
+        offlineFollowedRow->clear();
+    }
+
     popularRow->setStreams(std::move(data.popular.items), play,
         data.popularError.empty()
-            ? "Twitch returned no popular live streams."
+            ? "Kick returned no featured live streams."
             : "Popular streams could not be loaded. Use Retry to try again.",
         popularUpTarget);
     categoriesRow->setCategories(std::move(data.categories.items),
-        [this](const twitch::Category& category) { openCategory(category); },
+        [this](const kick::Category& category) { openCategory(category); },
         data.categoriesError.empty()
-            ? "Twitch returned no top categories."
+            ? "Kick returned no top categories."
             : "Top categories could not be loaded. Use Retry to try again.",
         categoriesUpTarget);
 
     followedRow->setHasMore(!followedCursor.empty());
-    offlineFollowedRow->setHasMore(!offlineFollowedCursor.empty());
     popularRow->setHasMore(!popularCursor.empty());
     categoriesRow->setHasMore(!categoriesCursor.empty());
     followedRow->onNextPage(!followedCursor.empty(), [this]() { loadMoreFollowed(); });
-    offlineFollowedRow->onNextPage(!offlineFollowedCursor.empty(), [this]() { loadMoreOfflineFollowed(); });
     popularRow->onNextPage(!popularCursor.empty(), [this]() { loadMorePopular(); });
     categoriesRow->onNextPage(!categoriesCursor.empty(), [this]() { loadMoreCategories(); });
 
@@ -1188,27 +1570,28 @@ void TwiNXHome::showHomeData(twitch::HomeData data) {
     if (data.hasErrors()) {
         const std::string sections = joinErrors(data);
         setBusy(false, "Home updated, but " + sections + " could not be loaded.");
-        showRequestError("Some Twitch sections failed to load: " + sections + ".",
+        showRequestError("Some Kick sections failed to load: " + sections + ".",
             [this]() { refreshHome(); });
     } else {
         clearRequestError();
-        setBusy(false, "Home updated.");
+        setBusy(false, "Kick home updated.");
     }
 }
 
-void TwiNXHome::showAbout() {
+void KickNXHome::showAbout() {
     auto* page = new brls::Box();
     page->setAxis(brls::Axis::COLUMN);
     page->setDimensions(
         brls::Application::contentWidth,
         brls::Application::contentHeight);
-    page->setBackgroundColor(nvgRGB(16, 18, 24));
+    page->setBackgroundColor(nvgRGB(0, 0, 0));
 
     auto* heading = new brls::Box();
     heading->setAxis(brls::Axis::ROW);
     heading->setAlignItems(brls::AlignItems::CENTER);
     heading->setPadding(24, 48, 18, 48);
     heading->setWidthPercentage(100);
+    heading->setBackgroundColor(nvgRGB(16, 18, 24));
     page->addView(heading);
 
     auto* headingText = new brls::Box();
@@ -1216,16 +1599,29 @@ void TwiNXHome::showAbout() {
     headingText->setGrow(1.0f);
     heading->addView(headingText);
 
+    auto* titleRow = new brls::Box();
+    titleRow->setAxis(brls::Axis::ROW);
+    titleRow->setAlignItems(brls::AlignItems::CENTER);
+    headingText->addView(titleRow);
+
     auto* title = new brls::Label();
-    title->setText("About twiNX");
+    title->setText("About");
     title->setFontSize(34);
-    title->setTextColor(nvgRGB(244, 246, 251));
-    headingText->addView(title);
+    title->setTextColor(nvgRGB(83, 252, 24));
+    titleRow->addView(title);
+
+    auto* titleLogo = new brls::Image();
+    titleLogo->setImageFromRes("img/kicknx_logo.png");
+    titleLogo->setScalingType(brls::ImageScalingType::FIT);
+    titleLogo->setHeight(44);
+    titleLogo->setWidth(44.0f * 644.0f / 186.0f);
+    titleLogo->setMarginLeft(14);
+    titleRow->addView(titleLogo);
 
     auto* subtitle = new brls::Label();
     subtitle->setText(
         "Version " + AppVersion::getVersion() +
-        " · Twitch for Nintendo Switch");
+        " · Kick for Nintendo Switch");
     subtitle->setFontSize(17);
     subtitle->setTextColor(nvgRGB(171, 179, 196));
     subtitle->setMarginTop(4);
@@ -1280,15 +1676,15 @@ void TwiNXHome::showAbout() {
     content->addView(creditCard);
 
     auto* createdBy = new brls::Label();
-    createdBy->setText("Created by HiroshiYamauchi");
+    createdBy->setText("Created by j2k & Gemini");
     createdBy->setFontSize(24);
-    createdBy->setTextColor(nvgRGB(238, 220, 255));
+    createdBy->setTextColor(nvgRGB(83, 252, 24));
     creditCard->addView(createdBy);
 
     auto* projectDescription = new brls::Label();
     projectDescription->setText(
-        "twiNX is a controller-first, independent Twitch client built "
-        "specifically for Nintendo Switch homebrew.");
+        "kickNX is a controller-first, native Kick client for "
+        "Nintendo Switch homebrew, forked from twiNX.");
     projectDescription->setFontSize(18);
     projectDescription->setTextColor(nvgRGB(190, 197, 212));
     projectDescription->setMarginTop(7);
@@ -1296,94 +1692,76 @@ void TwiNXHome::showAbout() {
 
     addSection("Features");
     addBody(
-        "• Twitch sign-in and followed-channel browsing\n"
-        "• Separate live and offline followed-channel rows\n"
-        "• Popular streams, categories and live search by channel or game with viewer counts\n"
-        "• Detailed channel pages with broadcasts, clips and categories\n"
-        "• Live, VOD and clip playback with video and audio-only quality selection\n"
-        "• Embedded-player live resolution without the commercial-break slate\n"
+        "• Kick sign-in (official TV QR code mobile pairing) and guest-mode browsing\n"
+        "• Followed channels row for live and offline streams\n"
+        "• Featured live streams, subcategories and live search by channel or game with viewer counts\n"
+        "• Detailed channel pages with past broadcasts (VODs), clips and categories\n"
+        "• Live AWS IVS HLS, VOD and clip playback with quality selection\n"
         "• Selectable Software, Hardware and Hybrid playback modes\n"
         "• Automatic portrait mode using attached Joy-Con motion sensors, with either rotation supported\n"
-        "• Smartphone-style portrait player combining video, live chat, a persistent message draft, inline touch keyboard and emote sheet\n"
-        "• Live chat with badges, static/animated emotes and message composer\n"
+        "• Smartphone-style portrait player combining video, live Pusher chat, a persistent message draft, inline touch keyboard and emote sheet\n"
+        "• Real-time Pusher WebSocket chat with static/animated Kick emotes and message composer\n"
         "• Touch controls for switching between the portrait keyboard and emote sheet\n"
-        "• Adjustable touch-keyboard haptics and experimental audio-reactive Joy-Con vibration\n"
+        "• Adjustable touch-keyboard haptics for portrait mode typing\n"
         "• Docked and overlay chat, compact mode and four-corner placement\n"
         "• Controller-first navigation designed for portrait, handheld and TV play");
 
+    addSection("Notes");
+    addBody(
+        "• Subtitles status: Subtitle tracks in Player Settings remain inactive until Kick "
+        "updates their Amazon IVS backend to serve live transcode tracks (Kick's web player "
+        "currently relies on client-side browser speech recognition).");
+
     addSection("Changelog");
     addBody(
-        "0.9.1 — Restored live playback after Twitch retired its previous "
-        "persisted playback query. Updated the resolver query and required "
-        "platform identity, and added automatic removal of obsolete twinx.txt "
-        "files so stale playback settings cannot override the built-in resolver.\n\n"
-        "0.9.0 — Added automatic smartphone-style portrait mode with a persistent "
-        "chat composer, inline keyboard, emote sheet and adjustable keyboard haptics. "
-        "Added live channel/game search with viewer counts, audio-only quality, "
-        "experimental audio-reactive Joy-Con vibration profiles and a touch-accessible "
-        "Send button. Validated animated emotes, hardened "
-        "MPV/FFmpeg/NVTEGRA hardware playback and switched live resolution to Twitch's "
-        "embedded-player identity, avoiding the generic commercial-break presentation. "
-        "Optimized high-activity chat to update only the visible chat panel.\n\n"
-        "0.8.1 — Corrected twiNX branding throughout the interface and added "
-        "this About page with features, complete release history and credits.\n\n"
-        "0.8.0 — Added the offline followed-channels row.\n\n"
-        "0.7.9 — Fixed long-message wrapping and added compact overlay chat "
-        "with selectable corner placement.\n\n"
-        "0.7.8 — Added incoming channel/subscriber emote rendering and an "
-        "experimental animated-emote preference.\n\n"
-        "0.7.7 — Improved player lifecycle ownership, fullscreen VOD/clip "
-        "layout, channel-page focus and network stability.\n\n"
-        "0.7.6 — Fixed a multithreaded libcurl DNS-cache race.\n\n"
-        "0.7.5 — Added finite-index navigation to the chat composer emote grid.\n\n"
-        "0.7.4 — Reworked composer navigation boundaries.\n\n"
-        "0.7.3 — Improved composer cursor behavior and focus rendering.\n\n"
-        "0.7.2 — Added the experimental Hybrid decoder and header/emote fixes.\n\n"
-        "0.7.1 — Added native VOD and clip playback plus navigation fixes.\n\n"
-        "0.7.0 — Added Twitch channel pages and channel-page navigation.");
+        "0.4.0 (Current)\n"
+        "• Channel follow/unfollow button on streamer profiles with live status & sync.\n"
+        "• Clickable user profile avatar navigating directly to your own channel page.\n"
+        "• Custom 3D kickNX buffering indicator with lime-green text shimmer & neon bar.\n"
+        "• Kick bright green theme highlights, section divider lines, and accent tabs.\n"
+        "• Transparent 3D kickNX brand logo headers on Home and About pages.\n"
+        "• OLED true black background on streamer profiles, About page, and playback.\n"
+        "• Dedicated vertical category card placeholder (350x410).\n\n"
+        "0.3.2\n"
+        "• Kick green live playback bar with real-time stream uptime.\n"
+        "• OLED true black home screen background.\n"
+        "• Restored top-right profile avatar for signed-in accounts.\n"
+        "• Kick logo card placeholder & clip/category thumbnail fixes.\n"
+        "• Channel category click returns home and loads that category.\n\n"
+        "0.3.1\n"
+        "• Instant transition & loading indicator for VODs and clips.\n"
+        "• Real-time active chatter counter in the live chat header.\n"
+        "• Multi-language WebVTT subtitle track selection.\n\n"
+        "0.3.0\n"
+        "• Official Kick TV mobile QR code login (kick.com/tv/login).\n"
+        "• 60 FPS smooth video playback presentation.\n"
+        "• Fast single-variant VOD streaming & native quality selector.\n"
+        "• Custom FFmpeg 7.1 hardware acceleration & stream tuning.\n\n"
+        "0.2.0\n"
+        "• Live Pusher chat with static/animated emotes and composer.\n"
+        "• Channel pages with past broadcasts, clips, and category info.\n"
+        "• Followed channels row and global broadcaster/category search.\n\n"
+        "0.1.0\n"
+        "• Initial kickNX native Nintendo Switch release.\n"
+        "• Kick stream discovery, guest browsing, and Joy-Con portrait mode.");
 
+    addSection("Backend notice");
     addBody(
-        "0.6.0 — Chat Composer and Emote Picker.\n\n"
-        "0.5.4 — Image Content-Type Guard.\n\n"
-        "0.5.3 — Added native Twitch badges and the Plus-button chat-layout shortcut.\n\n"
-        "0.5.2 — Chat Text Layout Fix.\n\n"
-        "0.5.1 — Chat and Emote Stability.\n\n"
-        "0.5.0 — First substantial chat feature release.\n\n"
-        "0.4.8 — Decoder Mode Selector.\n\n"
-        "0.4.7 — Hardware Decode Transition.\n\n"
-        "0.4.6 — Twitch software-decode stability and hardware decoder recovery.\n\n"
-        "0.4.5 — Docked Video Fit.\n\n"
-        "0.4.4 — MPVCore-level ad recovery.\n\n"
-        "0.4.3 — Commercial-Break Recovery.\n\n"
-        "0.4.2 — TV-Style Docked Chat.\n\n"
-        "0.4.1 — Chat Behind Player Controls.\n\n"
-        "0.4.0 — Read-Only Live Chat.");
-
-    addBody(
-        "0.3.2 — Reset the home scroll to the absolute top.\n\n"
-        "0.3.1 — TV Home and Player Quality.\n\n"
-        "0.3.0 — Channel Details and Quality Selection.\n\n"
-        "0.2.5 — Deterministic Focus Fix.\n\n"
-        "0.2.4 — Focus and Icon Correction.\n\n"
-        "0.2.3 — Navigation and Branding.\n\n"
-        "0.2.2 — Browsing Stability.\n\n"
-        "0.2.1 — UX Fix.\n\n"
-        "0.2.0 — Login and Browsing Update.\n\n"
-        "0.1.0 — First proof of concept.");
+        "Kick may change or update their backend at any time, which can affect app functionality.");
 
     addSection("Credits");
     addBody(
-        "Design, direction and project ownership: HiroshiYamauchi\n\n"
-        "Built with Twitch APIs and chat services, mpv, FFmpeg, Borealis, "
-        "libcurl, libnx and devkitPro. Twire provided reference behavior for "
-        "embedded-player stream resolution. Thanks to the Nintendo Switch "
-        "homebrew and open-source communities that make projects like "
-        "twiNX possible.");
+        "Project author & direction: j2k\n"
+        "AI co-development: Gemini\n"
+        "Original foundation: twiNX\n\n"
+        "Built with Kick v1/v2 APIs, Centrifugo & Pusher WebSockets, mpv, FFmpeg, Borealis, "
+        "libcurl, libnx, and devkitPro. Special thanks to the twiNX project, Gemini, and the "
+        "Nintendo Switch homebrew and open-source communities that made kickNX possible.");
 
     addSection("Project note");
     addBody(
-        "twiNX is an independent homebrew project. It is not affiliated "
-        "with, endorsed by or sponsored by Twitch Interactive or Nintendo.",
+        "kickNX is an independent homebrew project. It is not affiliated "
+        "with, endorsed by or sponsored by Kick Streaming Pty Ltd or Nintendo.",
         nvgRGB(150, 158, 176));
 
     page->registerAction("Back", brls::BUTTON_B, [](brls::View*) {
@@ -1396,12 +1774,8 @@ void TwiNXHome::showAbout() {
     });
 }
 
-void TwiNXHome::search() {
+void KickNXHome::search() {
     if (busy && !activeRequest) return;
-    if (!twitch::loadOAuth().signedIn()) {
-        statusLabel->setText("Sign in before searching Twitch.");
-        return;
-    }
     brls::Application::getImeManager()->openForText(
         [this](std::string query) {
             query.erase(query.begin(), std::find_if(query.begin(), query.end(), [](unsigned char c) {
@@ -1412,50 +1786,52 @@ void TwiNXHome::search() {
             }
             if (!query.empty()) searchFor(query);
         },
-        "Search Twitch", "Enter a channel or game name", 100, "");
+        "Search Kick", "Enter a Kick channel slug or stream query", 100, "");
 }
 
-void TwiNXHome::searchFor(const std::string& query) {
-    const uint64_t requestId = beginBrowsingRequest("Searching Twitch for “" + query + "”…");
+void KickNXHome::searchFor(const std::string& query) {
+    const uint64_t requestId = beginBrowsingRequest("Searching Kick for “" + query + "”…");
     if (!requestId) return;
     clearRequestError();
     const HTTP::Cancel requestCancel = activeRequest;
 
-    twitch::searchChannelsPageAsync(
-        twitch::loadConfig(), query, "",
-        [this, requestId, query](twitch::StreamPage page) {
+    kick::searchChannelsPageAsync(
+        kick::loadConfig(), query, "",
+        [this, requestId, query](kick::StreamPage page) {
             if (!finishBrowsingRequest(requestId)) return;
             currentSearchQuery = query;
             searchCursor = page.cursor;
             searchRow->setTitle("Search results · " + query);
             searchRow->setStreams(std::move(page.items),
-                [this](const twitch::Stream& stream) { playChannel(stream); },
-                "No live Twitch channels or games matched “" + query + "”.");
+                [this](const kick::Stream& stream) { playChannel(stream); },
+                "No Kick channels matched “" + query + "”.");
             searchRow->setHasMore(!searchCursor.empty());
             searchRow->onNextPage(!searchCursor.empty(), [this]() { loadMoreSearch(); });
             clearRequestError();
             setBusy(false, "Search complete.");
-            if (auto* focus = searchRow->defaultFocus()) brls::Application::giveFocus(focus);
+            if (isActiveActivity()) {
+                if (auto* focus = searchRow->defaultFocus()) brls::Application::giveFocus(focus);
+            }
         },
         [this, requestId, query](const std::string& error) {
             if (!finishBrowsingRequest(requestId)) return;
             setBusy(false, "Search error: " + error);
             showRequestError("Search failed: " + error,
                 [this, query]() { searchFor(query); });
-            brls::Application::notify("twiNX: " + error);
+            brls::Application::notify("kickNX: " + error);
         },
         requestCancel);
 }
 
-void TwiNXHome::openCategory(const twitch::Category& category) {
+void KickNXHome::openCategory(const kick::Category& category) {
     const uint64_t requestId = beginBrowsingRequest("Loading " + category.name + " streams…");
     if (!requestId) return;
     clearRequestError();
     const HTTP::Cancel requestCancel = activeRequest;
 
-    twitch::loadCategoryStreamsPageAsync(
-        twitch::loadConfig(), category.id, "",
-        [this, requestId, category](twitch::StreamPage page) {
+    kick::loadCategoryStreamsPageAsync(
+        kick::loadConfig(), category.id, "",
+        [this, requestId, category](kick::StreamPage page) {
             if (!finishBrowsingRequest(requestId)) return;
             currentCategoryId = category.id;
             currentCategoryName = category.name;
@@ -1463,32 +1839,34 @@ void TwiNXHome::openCategory(const twitch::Category& category) {
             if (!page.items.empty()) updateHero(page.items.front());
             categoryStreamsRow->setTitle("Live in " + category.name);
             categoryStreamsRow->setStreams(std::move(page.items),
-                [this](const twitch::Stream& stream) { playChannel(stream); },
+                [this](const kick::Stream& stream) { playChannel(stream); },
                 "No live channels are currently streaming " + category.name + ".");
             categoryStreamsRow->setHasMore(!categoryStreamsCursor.empty());
             categoryStreamsRow->onNextPage(!categoryStreamsCursor.empty(), [this]() { loadMoreCategoryStreams(); });
             clearRequestError();
             setBusy(false, "Category loaded.");
-            if (auto* focus = categoryStreamsRow->defaultFocus()) brls::Application::giveFocus(focus);
+            if (isActiveActivity()) {
+                if (auto* focus = categoryStreamsRow->defaultFocus()) brls::Application::giveFocus(focus);
+            }
         },
         [this, requestId, category](const std::string& error) {
             if (!finishBrowsingRequest(requestId)) return;
             setBusy(false, "Category error: " + error);
             showRequestError("Could not load " + category.name + ": " + error,
                 [this, category]() { openCategory(category); });
-            brls::Application::notify("twiNX: " + error);
+            brls::Application::notify("kickNX: " + error);
         },
         requestCancel);
 }
 
-void TwiNXHome::loadMoreFollowed() {
+void KickNXHome::loadMoreFollowed() {
     if (followedCursor.empty() || busy) return;
     const std::string cursor = followedCursor;
     const uint64_t requestId = beginBrowsingRequest("Loading more followed channels…");
     if (!requestId) return;
     const HTTP::Cancel requestCancel = activeRequest;
-    twitch::loadFollowedPageAsync(twitch::loadConfig(), cursor,
-        [this, requestId](twitch::StreamPage page) {
+    kick::loadFollowedPageAsync(kick::loadConfig(), cursor,
+        [this, requestId](kick::StreamPage page) {
             if (!finishBrowsingRequest(requestId)) return;
             const size_t added = followedRow->appendStreams(std::move(page.items));
             followedCursor = page.cursor;
@@ -1505,41 +1883,14 @@ void TwiNXHome::loadMoreFollowed() {
         }, requestCancel);
 }
 
-void TwiNXHome::loadMoreOfflineFollowed() {
-    if (offlineFollowedCursor.empty() || busy) return;
-    const std::string cursor = offlineFollowedCursor;
-    const uint64_t requestId = beginBrowsingRequest("Loading more offline followed channels…");
-    if (!requestId) return;
-    const HTTP::Cancel requestCancel = activeRequest;
-    twitch::loadOfflineFollowedPageAsync(twitch::loadConfig(), cursor,
-        [this, requestId](twitch::StreamPage page) {
-            if (!finishBrowsingRequest(requestId)) return;
-            const size_t added = offlineFollowedRow->appendStreams(std::move(page.items));
-            offlineFollowedCursor = page.cursor;
-            offlineFollowedRow->setHasMore(!offlineFollowedCursor.empty());
-            offlineFollowedRow->onNextPage(!offlineFollowedCursor.empty(),
-                [this]() { loadMoreOfflineFollowed(); });
-            clearRequestError();
-            setBusy(false, added
-                ? "More offline followed channels loaded."
-                : "No additional offline followed channels.");
-        },
-        [this, requestId](const std::string& error) {
-            if (!finishBrowsingRequest(requestId)) return;
-            showRequestError("Could not load more offline followed channels: " + error,
-                [this]() { loadMoreOfflineFollowed(); });
-            setBusy(false, "Pagination error: " + error);
-        }, requestCancel);
-}
-
-void TwiNXHome::loadMorePopular() {
+void KickNXHome::loadMorePopular() {
     if (popularCursor.empty() || busy) return;
     const std::string cursor = popularCursor;
     const uint64_t requestId = beginBrowsingRequest("Loading more popular streams…");
     if (!requestId) return;
     const HTTP::Cancel requestCancel = activeRequest;
-    twitch::loadPopularPageAsync(twitch::loadConfig(), cursor,
-        [this, requestId](twitch::StreamPage page) {
+    kick::loadPopularPageAsync(kick::loadConfig(), cursor,
+        [this, requestId](kick::StreamPage page) {
             if (!finishBrowsingRequest(requestId)) return;
             const size_t added = popularRow->appendStreams(std::move(page.items));
             popularCursor = page.cursor;
@@ -1556,14 +1907,14 @@ void TwiNXHome::loadMorePopular() {
         }, requestCancel);
 }
 
-void TwiNXHome::loadMoreCategories() {
+void KickNXHome::loadMoreCategories() {
     if (categoriesCursor.empty() || busy) return;
     const std::string cursor = categoriesCursor;
     const uint64_t requestId = beginBrowsingRequest("Loading more categories…");
     if (!requestId) return;
     const HTTP::Cancel requestCancel = activeRequest;
-    twitch::loadCategoriesPageAsync(twitch::loadConfig(), cursor,
-        [this, requestId](twitch::CategoryPage page) {
+    kick::loadCategoriesPageAsync(kick::loadConfig(), cursor,
+        [this, requestId](kick::CategoryPage page) {
             if (!finishBrowsingRequest(requestId)) return;
             const size_t added = categoriesRow->appendCategories(std::move(page.items));
             categoriesCursor = page.cursor;
@@ -1580,15 +1931,15 @@ void TwiNXHome::loadMoreCategories() {
         }, requestCancel);
 }
 
-void TwiNXHome::loadMoreSearch() {
+void KickNXHome::loadMoreSearch() {
     if (searchCursor.empty() || currentSearchQuery.empty() || busy) return;
     const std::string cursor = searchCursor;
     const std::string query = currentSearchQuery;
     const uint64_t requestId = beginBrowsingRequest("Loading more search results…");
     if (!requestId) return;
     const HTTP::Cancel requestCancel = activeRequest;
-    twitch::searchChannelsPageAsync(twitch::loadConfig(), query, cursor,
-        [this, requestId](twitch::StreamPage page) {
+    kick::searchChannelsPageAsync(kick::loadConfig(), query, cursor,
+        [this, requestId](kick::StreamPage page) {
             if (!finishBrowsingRequest(requestId)) return;
             const size_t added = searchRow->appendStreams(std::move(page.items));
             searchCursor = page.cursor;
@@ -1605,15 +1956,15 @@ void TwiNXHome::loadMoreSearch() {
         }, requestCancel);
 }
 
-void TwiNXHome::loadMoreCategoryStreams() {
+void KickNXHome::loadMoreCategoryStreams() {
     if (categoryStreamsCursor.empty() || currentCategoryId.empty() || busy) return;
     const std::string cursor = categoryStreamsCursor;
     const std::string gameId = currentCategoryId;
     const uint64_t requestId = beginBrowsingRequest("Loading more " + currentCategoryName + " streams…");
     if (!requestId) return;
     const HTTP::Cancel requestCancel = activeRequest;
-    twitch::loadCategoryStreamsPageAsync(twitch::loadConfig(), gameId, cursor,
-        [this, requestId](twitch::StreamPage page) {
+    kick::loadCategoryStreamsPageAsync(kick::loadConfig(), gameId, cursor,
+        [this, requestId](kick::StreamPage page) {
             if (!finishBrowsingRequest(requestId)) return;
             const size_t added = categoryStreamsRow->appendStreams(std::move(page.items));
             categoryStreamsCursor = page.cursor;
@@ -1630,8 +1981,8 @@ void TwiNXHome::loadMoreCategoryStreams() {
         }, requestCancel);
 }
 
-void TwiNXHome::openChannelPage(
-    const twitch::Stream& stream) {
+void KickNXHome::openChannelPage(
+    const kick::Stream& stream) {
     const std::string login =
         stream.userLogin.empty()
             ? stream.userName
@@ -1640,64 +1991,46 @@ void TwiNXHome::openChannelPage(
     if (login.empty()) {
         statusLabel->setText(
             "This result did not contain a "
-            "Twitch channel login.");
+            "Kick channel slug.");
         return;
     }
 
     brls::Application::pushActivity(
         new brls::Activity(
-            new TwitchChannelPage(login)));
+            new KickChannelPage(login)));
 }
 
-void TwiNXHome::playChannel(const twitch::Stream& stream) {
+void KickNXHome::playChannel(const kick::Stream& stream) {
     if (busy) return;
     if (!stream.isLive) {
         openChannelPage(stream);
         return;
     }
 
-    auto config = twitch::loadConfig();
+    auto config = kick::loadConfig();
     config.channel = stream.userLogin;
-    config.preferredQuality = twitch::loadPreferredQuality();
-    if (config.preferredQuality.empty()) config.preferredQuality = "source";
+    config.preferredQuality = kick::loadPreferredQuality();
+    if (config.preferredQuality.empty()) config.preferredQuality = "1080p60";
     if (config.channel.empty()) {
-        statusLabel->setText("This result did not contain a Twitch channel login.");
+        statusLabel->setText("This result did not contain a Kick channel slug.");
         return;
     }
 
-    setBusy(true, "Resolving " + config.channel + "…");
-    this->ptrLock();
-    twitch::resolveLiveAsync(
-        config,
-        [this](twitch::Resolution result) {
-            setBusy(false, "Playing " + result.channel + " · " + result.selected.name);
-            const std::string channel = result.channel;
-            const std::string url = result.selected.url;
-            this->ptrUnlock();
-            MPVCore::BOTTOM_BAR = false;
-            RemoteView::play(url, "Twitch - " + channel, twitch::mpvExtra(), channel);
-        },
-        [this](const std::string& error) {
-            setBusy(false, "Playback error: " + error);
-            brls::Application::notify("twiNX: " + error);
-            this->ptrUnlock();
-        });
+    RemoteView::playLive(config, stream.uptimeSeconds);
 }
 
-void TwiNXHome::playConfiguredChannel() {
-    auto config = twitch::loadConfig();
+void KickNXHome::playConfiguredChannel() {
+    auto config = kick::loadConfig();
     if (config.channel.empty()) {
-        statusLabel->setText("No Twitch channel is selected");
+        statusLabel->setText("No Kick channel is selected");
         return;
     }
-    twitch::Stream stream;
-    stream.userLogin = config.channel;
-    stream.userName = config.channel;
-    stream.isLive = true;
-    playChannel(stream);
+    config.preferredQuality = kick::loadPreferredQuality();
+    if (config.preferredQuality.empty()) config.preferredQuality = "1080p60";
+    RemoteView::playLive(config);
 }
 
-void TwiNXHome::clearRows() {
+void KickNXHome::clearRows() {
     clearHero();
     followedRow->clear();
     offlineFollowedRow->clear();
@@ -1706,7 +2039,6 @@ void TwiNXHome::clearRows() {
     categoriesRow->clear();
     searchRow->clear();
     followedCursor.clear();
-    offlineFollowedCursor.clear();
     popularCursor.clear();
     categoriesCursor.clear();
     searchCursor.clear();

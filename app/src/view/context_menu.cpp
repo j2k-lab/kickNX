@@ -3,7 +3,6 @@
 #include "view/mpv_core.hpp"
 #include "view/video_card.hpp"
 #include "api/jellyfin.hpp"
-#include "utils/download.hpp"
 
 using namespace brls::literals;
 
@@ -96,43 +95,7 @@ ContextMenu::ContextMenu(const jellyfin::Item& item, BaseCardCell* view) : itemI
     this->btnMarkPlay->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnMarkPlay));
     this->btnMarkPlay->setSelected(item.UserData.Played);
 
-    if (item.Type == jellyfin::mediaTypeMovie || item.Type == jellyfin::mediaTypeEpisode ||
-        item.Type == jellyfin::mediaTypeVideo) {
-        auto& dm = DownloadManager::instance();
-        switch (dm.findItem(this->itemId)) {
-        case DownloadStatus::Completed:
-            this->btnDownload->title->setText("main/download/completed"_i18n);
-            this->btnDownload->setSelected(true);
-            break;
-        case DownloadStatus::Queued:
-        case DownloadStatus::Downloading:
-            this->btnDownload->title->setText("main/download/downloading"_i18n);
-            this->btnDownload->setSelected(true);
-            break;
-        default:;
-        }
-        this->btnDownload->registerClickAction([this](brls::View* view) {
-            auto& dm = DownloadManager::instance();
-            switch (dm.findItem(this->itemId)) {
-            case DownloadStatus::Completed:
-                brls::Application::notify("main/download/completed"_i18n);
-                break;
-            case DownloadStatus::Queued:
-            case DownloadStatus::Downloading:
-                brls::Application::notify("main/download/downloading"_i18n);
-                break;
-            default:
-                int qi = AppConfig::instance().getValueIndex(AppConfig::DOWNLOAD_QUALITY);
-                dm.addDownload(this->itemId, static_cast<DownloadQuality>(qi));
-                brls::Application::notify("main/download/queued"_i18n);
-                this->btnDownload->setSelected(true);
-            }
-            return true;
-        });
-        this->btnDownload->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnDownload));
-    } else {
-        this->btnDownload->setVisibility(brls::Visibility::GONE);
-    }
+    this->btnDownload->setVisibility(brls::Visibility::GONE);
 }
 
 bool ContextMenu::doPlayed() {

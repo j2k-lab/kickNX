@@ -1,5 +1,5 @@
-#include "api/twitch.hpp"
-#include "api/twitch_chat.hpp"
+#include "api/kick.hpp"
+#include "api/kick_chat.hpp"
 #include "utils/config.hpp"
 #include "utils/event.hpp"
 #include "utils/haptics.hpp"
@@ -21,33 +21,39 @@ using namespace brls::literals;
 
 namespace {
 
-const std::vector<std::string>& twitchQualityLabels() {
+const std::vector<std::string>& kickQualityLabels() {
     static const std::vector<std::string> labels = {
-        "Auto", "Source", "1080p60", "720p60", "720p",
-        "480p", "360p", "Audio only",
+        "1080p60 (Recommended)", "720p60", "480p", "360p", "160p", "Auto",
     };
     return labels;
 }
 
-const std::vector<std::string>& twitchQualityValues() {
+const std::vector<std::string>& kickQualityValues() {
     static const std::vector<std::string> values = {
-        "auto", "source", "1080p60", "720p60", "720p",
-        "480p", "360p", "audio_only",
+        "1080p60", "720p60", "480p", "360p", "160p", "auto",
     };
     return values;
 }
 
-std::atomic_uint64_t twitchQualitySwitchGeneration{0};
+std::atomic_uint64_t kickQualitySwitchGeneration{0};
 
-int twitchQualityIndex(const std::string& quality) {
-    const auto& values = twitchQualityValues();
+int kickQualityIndex(const std::string& quality) {
+    const auto& values = kickQualityValues();
+    if (quality == "source") {
+        const auto found = std::find(values.begin(), values.end(), "1080p60");
+        if (found != values.end()) return static_cast<int>(std::distance(values.begin(), found));
+    }
+    if (quality == "720p") {
+        const auto found = std::find(values.begin(), values.end(), "720p60");
+        if (found != values.end()) return static_cast<int>(std::distance(values.begin(), found));
+    }
     const auto found = std::find(values.begin(), values.end(), quality);
-    return found == values.end() ? 1 : static_cast<int>(std::distance(values.begin(), found));
+    return found == values.end() ? 0 : static_cast<int>(std::distance(values.begin(), found));
 }
 
-const std::vector<std::string>& twitchDecoderLabels() {
+const std::vector<std::string>& kickDecoderLabels() {
     static const std::vector<std::string> labels = {
-        "Software (stable)",
+        "Software (recommended)",
         "Hardware (experimental)",
         "Hybrid (experimental)",
     };
@@ -57,7 +63,7 @@ const std::vector<std::string>& twitchDecoderLabels() {
 const std::vector<std::string>& portraitOrientationLabels() {
     static const std::vector<std::string> labels = {
         "Auto (Joy-Con sensor)",
-        "Landscape",
+        "Landscape (recommended)",
         "Portrait clockwise",
         "Portrait counter-clockwise",
     };
@@ -71,16 +77,10 @@ const std::vector<std::string>& keyboardHapticLabels() {
     return labels;
 }
 
-const std::vector<std::string>& audioReactiveProfileLabels() {
-    static const std::vector<std::string> labels = {
-        "Balanced", "Quiet", "Extreme", "High peaks only",
-    };
-    return labels;
-}
 
 const std::vector<std::string>& chatModeLabels() {
     static const std::vector<std::string> labels = {
-        "Off", "Right panel", "Overlay",
+        "Off", "Right panel", "Overlay (recommended)",
     };
     return labels;
 }
@@ -95,8 +95,8 @@ const std::vector<std::string>& chatParticipationLabels() {
 
 const std::vector<std::string>& chatComposerLabels() {
     static const std::vector<std::string> labels = {
-        "Nintendo keyboard",
-        "twiNX emote composer",
+        "Nintendo keyboard (recommended)",
+        "kickNX emote composer",
     };
     return labels;
 }
@@ -165,7 +165,7 @@ const std::vector<int>& chatFontValues() {
 
 const std::vector<std::string>& chatOpacityLabels() {
     static const std::vector<std::string> labels = {
-        "40%", "60%", "80%", "95%",
+        "40% (recommended)", "60%", "80%", "95%",
     };
     return labels;
 }
@@ -190,52 +190,40 @@ int closestIndex(const std::vector<int>& values, int wanted) {
 
 }  // namespace
 
-PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChannel) {
+PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string kickChannel) {
     this->inflateFromXMLRes("xml/view/player_setting.xml");
     brls::Logger::debug("PlayerSetting: create");
     this->audioTrack->detail->setVisibility(brls::Visibility::GONE);
     this->subtitleTrack->detail->setVisibility(brls::Visibility::GONE);
 
-    if (twitchChannel.empty()) {
-        btnTwitchQuality->setVisibility(brls::Visibility::GONE);
-        btnTwitchDecoder->setVisibility(brls::Visibility::GONE);
-        btnPortraitOrientation->setVisibility(brls::Visibility::GONE);
-        btnKeyboardHaptic->setVisibility(brls::Visibility::GONE);
-        btnAudioReactiveHaptics->setVisibility(brls::Visibility::GONE);
-        btnAudioReactiveProfile->setVisibility(brls::Visibility::GONE);
-        btnTwitchChatMode->setVisibility(brls::Visibility::GONE);
-        btnTwitchChatParticipation->setVisibility(brls::Visibility::GONE);
-        btnTwitchChatComposer->setVisibility(brls::Visibility::GONE);
-        btnTwitchChatEmotes->setVisibility(brls::Visibility::GONE);
-        btnTwitchChatDockedWidth->setVisibility(brls::Visibility::GONE);
-        btnTwitchChatOverlayWidth->setVisibility(brls::Visibility::GONE);
-        btnTwitchChatFont->setVisibility(brls::Visibility::GONE);
-        btnTwitchChatOpacity->setVisibility(brls::Visibility::GONE);
-        btnTwitchChatTimestamps->setVisibility(brls::Visibility::GONE);
-    } else {
-        const std::string savedQuality = twitch::loadPreferredQuality().empty()
-            ? "source"
-            : twitch::loadPreferredQuality();
-        btnTwitchQuality->init(
-            "Twitch stream quality",
-            twitchQualityLabels(),
-            twitchQualityIndex(savedQuality),
-            [twitchChannel](int selected) {
-                if (selected < 0 || static_cast<size_t>(selected) >= twitchQualityValues().size())
-                    return;
+    const std::string savedQuality = kick::loadPreferredQuality().empty()
+        ? "1080p60"
+        : kick::loadPreferredQuality();
+    btnKickQuality->init(
+        "Kick stream quality",
+        kickQualityLabels(),
+        kickQualityIndex(savedQuality),
+        [kickChannel](int selected) {
+            if (selected < 0 || static_cast<size_t>(selected) >= kickQualityValues().size())
+                return;
 
-                const std::string quality = twitchQualityValues().at(selected);
-                const std::string qualityLabel = twitchQualityLabels().at(selected);
-                const uint64_t generation =
-                    twitchQualitySwitchGeneration.fetch_add(1) + 1;
-                if (!twitch::savePreferredQuality(quality))
-                    brls::Application::notify("twiNX: could not save quality preference");
+            const std::string quality = kickQualityValues().at(selected);
+            const std::string qualityLabel = kickQualityLabels().at(selected);
+            const uint64_t generation =
+                kickQualitySwitchGeneration.fetch_add(1) + 1;
+            if (!kick::savePreferredQuality(quality))
+                brls::Application::notify("kickNX: could not save quality preference");
 
-                auto config = twitch::loadConfig();
-                config.channel = twitchChannel;
+            if (kickChannel.empty()) {
+                brls::Application::notify("kickNX: preferred quality set to " + qualityLabel);
+                return;
+            }
+
+            auto config = kick::loadConfig();
+                config.channel = kickChannel;
                 config.preferredQuality = quality;
                 brls::Logger::info(
-                    "twiNX: selected Twitch quality {}; waiting for final "
+                    "kickNX: selected Kick quality {}; waiting for final "
                     "selector value before reloading",
                     qualityLabel);
 
@@ -244,41 +232,41 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
                         std::this_thread::sleep_for(
                             std::chrono::milliseconds(650));
 
-                        if (generation != twitchQualitySwitchGeneration.load())
+                        if (generation != kickQualitySwitchGeneration.load())
                             return;
 
                         try {
-                            auto result = twitch::resolveLive(config);
+                            auto result = kick::resolveLive(config);
                             brls::sync(
                                 [generation, result = std::move(result)]()
                                     mutable {
                                     if (generation !=
-                                        twitchQualitySwitchGeneration.load())
+                                        kickQualitySwitchGeneration.load())
                                         return;
                                     MPVCore::BOTTOM_BAR = false;
                                     MPVCore::instance().setUrl(
                                         result.selected.url,
-                                        twitch::mpvExtra());
+                                        kick::mpvExtra());
                                     brls::Application::notify(
-                                        "twiNX: switched to " +
+                                        "kickNX: switched to " +
                                         result.selected.name);
                                 });
                         } catch (const std::exception& exception) {
                             const std::string message = exception.what();
                             brls::sync([generation, message]() {
                                 if (generation !=
-                                    twitchQualitySwitchGeneration.load())
+                                    kickQualitySwitchGeneration.load())
                                     return;
                                 brls::Application::notify(
-                                    "twiNX quality error: " + message);
+                                    "kickNX quality error: " + message);
                             });
                         } catch (...) {
                             brls::sync([generation]() {
                                 if (generation !=
-                                    twitchQualitySwitchGeneration.load())
+                                    kickQualitySwitchGeneration.load())
                                     return;
                                 brls::Application::notify(
-                                    "twiNX quality error: unknown resolver "
+                                    "kickNX quality error: unknown resolver "
                                     "error");
                             });
                         }
@@ -286,7 +274,7 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
             });
 
         auto& orientationController =
-            twinx::portrait::OrientationController::instance();
+            kicknx::portrait::OrientationController::instance();
         btnPortraitOrientation->init(
             "Display orientation (experimental)",
             portraitOrientationLabels(),
@@ -294,16 +282,16 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
             [](int selected) {
                 const int bounded = std::clamp(selected, 0, 3);
                 auto& controller =
-                    twinx::portrait::OrientationController::instance();
+                    kicknx::portrait::OrientationController::instance();
                 if (!controller.setMode(
-                        static_cast<twinx::portrait::OrientationMode>(bounded))) {
+                        static_cast<kicknx::portrait::OrientationMode>(bounded))) {
                     brls::Application::notify(
-                        "twiNX: could not save orientation preference");
+                        "kickNX: could not save orientation preference");
                     return;
                 }
                 if (bounded == 0) {
                     brls::Application::notify(
-                        "twiNX: automatic Joy-Con orientation enabled");
+                        "kickNX: automatic Joy-Con orientation enabled");
                 }
             });
 
@@ -312,67 +300,39 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
             keyboardHapticLabels(),
             std::clamp(
                 static_cast<int>(std::lround(
-                    twinx::haptics::keyboardIntensity() * 4.0f)),
+                    kicknx::haptics::keyboardIntensity() * 4.0f)),
                 0,
                 4),
             [](int selected) {
                 const float intensity =
                     static_cast<float>(std::clamp(selected, 0, 4)) / 4.0f;
-                if (!twinx::haptics::setKeyboardIntensity(intensity))
+                if (!kicknx::haptics::setKeyboardIntensity(intensity))
                     brls::Application::notify(
-                        "twiNX: could not save vibration preference");
-                twinx::haptics::keyboardPulse();
+                        "kickNX: could not save vibration preference");
+                kicknx::haptics::keyboardPulse();
             });
 
-        btnAudioReactiveHaptics->init(
-            "Audio-reactive Joy-Con vibration (experimental)",
-            twinx::haptics::audioReactiveEnabled(),
-            [](bool enabled) {
-                if (!twinx::haptics::setAudioReactiveEnabled(enabled)) {
-                    brls::Application::notify(
-                        "twiNX: could not save audio-reactive vibration setting");
-                    return;
-                }
-                brls::Application::notify(
-                    enabled
-                        ? "twiNX: audio-reactive Joy-Con vibration enabled"
-                        : "twiNX: audio-reactive Joy-Con vibration disabled");
-            });
+        const kick::DecoderMode decoderMode =
+            kick::loadDecoderMode();
 
-        btnAudioReactiveProfile->init(
-            "Audio-reactive vibration profile",
-            audioReactiveProfileLabels(),
-            static_cast<int>(twinx::haptics::audioReactiveProfile()),
-            [](int selected) {
-                const auto profile =
-                    static_cast<twinx::haptics::AudioReactiveProfile>(
-                        std::clamp(selected, 0, 3));
-                if (!twinx::haptics::setAudioReactiveProfile(profile))
-                    brls::Application::notify(
-                        "twiNX: could not save vibration profile");
-            });
-
-        const twitch::DecoderMode decoderMode =
-            twitch::loadDecoderMode();
-
-        btnTwitchDecoder->init(
-            "Twitch decoder",
-            twitchDecoderLabels(),
+        btnKickDecoder->init(
+            "Kick decoder",
+            kickDecoderLabels(),
             static_cast<int>(decoderMode),
-            [twitchChannel](int selected) {
-                if (selected < static_cast<int>(twitch::DecoderMode::Software) ||
-                    selected > static_cast<int>(twitch::DecoderMode::Hybrid))
+            [kickChannel](int selected) {
+                if (selected < static_cast<int>(kick::DecoderMode::Software) ||
+                    selected > static_cast<int>(kick::DecoderMode::Hybrid))
                     return;
 
-                const auto mode = static_cast<twitch::DecoderMode>(selected);
-                if (!twitch::saveDecoderMode(mode)) {
+                const auto mode = static_cast<kick::DecoderMode>(selected);
+                if (!kick::saveDecoderMode(mode)) {
                     brls::Application::notify(
-                        "twiNX: could not save decoder preference");
+                        "kickNX: could not save decoder preference");
                     return;
                 }
 
                 auto& mpv = MPVCore::instance();
-                if (mode == twitch::DecoderMode::Software) {
+                if (mode == kick::DecoderMode::Software) {
                     mpv.command("set", "hwdec", "no");
                 } else {
                     mpv.command("set", "vd-lavc-dr", "no");
@@ -383,140 +343,157 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
                 }
 
                 brls::Application::notify(
-                    mode == twitch::DecoderMode::Software
-                        ? "twiNX: switching to software decoder..."
-                        : mode == twitch::DecoderMode::Hybrid
-                            ? "twiNX: switching to Hybrid decoder..."
-                            : "twiNX: switching to hardware decoder...");
+                    mode == kick::DecoderMode::Software
+                        ? "kickNX: switching to software decoder..."
+                        : mode == kick::DecoderMode::Hybrid
+                            ? "kickNX: switching to Hybrid decoder..."
+                            : "kickNX: switching to hardware decoder...");
 
-                auto config = twitch::loadConfig();
-                config.channel = twitchChannel;
-                twitch::resolveLiveAsync(
+                if (kickChannel.empty()) {
+                    return;
+                }
+
+                auto config = kick::loadConfig();
+                config.channel = kickChannel;
+                kick::resolveLiveAsync(
                     config,
-                    [](twitch::Resolution result) {
+                    [](kick::Resolution result) {
                         MPVCore::BOTTOM_BAR = false;
                         MPVCore::instance().setUrl(
                             result.selected.url,
-                            twitch::mpvExtra());
+                            kick::mpvExtra());
                     },
                     [](const std::string& error) {
                         brls::Application::notify(
-                            "twiNX decoder reload error: " + error);
+                            "kickNX decoder reload error: " + error);
                     });
             });
 
-        const twitch::ChatPreferences chat = twitch::loadChatPreferences();
+    if (kickChannel.empty()) {
+        btnKickChatMode->setVisibility(brls::Visibility::GONE);
+        btnKickChatParticipation->setVisibility(brls::Visibility::GONE);
+        btnKickChatComposer->setVisibility(brls::Visibility::GONE);
+        btnKickChatEmotes->setVisibility(brls::Visibility::GONE);
+        btnKickChatOverlaySize->setVisibility(brls::Visibility::GONE);
+        btnKickChatOverlayPosition->setVisibility(brls::Visibility::GONE);
+        btnKickChatDockedWidth->setVisibility(brls::Visibility::GONE);
+        btnKickChatOverlayWidth->setVisibility(brls::Visibility::GONE);
+        btnKickChatFont->setVisibility(brls::Visibility::GONE);
+        btnKickChatOpacity->setVisibility(brls::Visibility::GONE);
+        btnKickChatTimestamps->setVisibility(brls::Visibility::GONE);
+    } else {
+        const kick::ChatPreferences chat = kick::loadChatPreferences();
 
-        btnTwitchChatMode->init(
+        btnKickChatMode->init(
             "Live chat",
             chatModeLabels(),
             static_cast<int>(chat.mode),
             [](int selected) {
-                auto preferences = twitch::loadChatPreferences();
-                preferences.mode = static_cast<twitch::ChatMode>(
+                auto preferences = kick::loadChatPreferences();
+                preferences.mode = static_cast<kick::ChatMode>(
                     std::clamp(selected, 0, 2));
-                if (!twitch::saveChatPreferences(preferences))
-                    brls::Application::notify("twiNX: could not save chat mode");
+                if (!kick::saveChatPreferences(preferences))
+                    brls::Application::notify("kickNX: could not save chat mode");
             });
 
-        btnTwitchChatParticipation->init(
+        btnKickChatParticipation->init(
             "Chat participation",
             chatParticipationLabels(),
             static_cast<int>(chat.participation),
             [](int selected) {
-                auto preferences = twitch::loadChatPreferences();
+                auto preferences = kick::loadChatPreferences();
                 preferences.participation =
                     selected == 1
-                        ? twitch::ChatParticipation::Interactive
-                        : twitch::ChatParticipation::ReadOnly;
-                if (!twitch::saveChatPreferences(preferences)) {
+                        ? kick::ChatParticipation::Interactive
+                        : kick::ChatParticipation::ReadOnly;
+                if (!kick::saveChatPreferences(preferences)) {
                     brls::Application::notify(
-                        "twiNX: could not save chat participation");
+                        "kickNX: could not save chat participation");
                     return;
                 }
 
                 if (preferences.participation ==
-                        twitch::ChatParticipation::Interactive &&
-                    !twitch::hasChatWriteScope()) {
+                        kick::ChatParticipation::Interactive &&
+                    !kick::hasChatWriteScope()) {
                     brls::Application::notify(
                         "Interactive chat requires signing out and "
                         "signing in again once");
                 }
             });
 
-        btnTwitchChatComposer->init(
+        btnKickChatComposer->init(
             "Message composer",
             chatComposerLabels(),
             static_cast<int>(chat.composerMode),
             [](int selected) {
                 auto preferences =
-                    twitch::loadChatPreferences();
+                    kick::loadChatPreferences();
                 preferences.composerMode =
                     selected == 0
-                        ? twitch::ChatComposerMode::NintendoKeyboard
-                        : twitch::ChatComposerMode::TwiNXComposer;
+                        ? kick::ChatComposerMode::NintendoKeyboard
+                        : kick::ChatComposerMode::KickNXComposer;
 
-                if (!twitch::saveChatPreferences(preferences)) {
+                if (!kick::saveChatPreferences(preferences)) {
                     brls::Application::notify(
-                        "twiNX: could not save composer mode");
+                        "kickNX: could not save composer mode");
                 }
             });
 
-        btnTwitchChatEmotes->init(
+        btnKickChatEmotes->init(
             "Chat emotes",
             chatEmoteModeLabels(),
             static_cast<int>(chat.emoteMode),
             [](int selected) {
                 auto preferences =
-                    twitch::loadChatPreferences();
+                    kick::loadChatPreferences();
                 preferences.emoteMode =
                     selected == 1
-                        ? twitch::ChatEmoteMode::Animated
-                        : twitch::ChatEmoteMode::Static;
+                        ? kick::ChatEmoteMode::Animated
+                        : kick::ChatEmoteMode::Static;
 
-                if (!twitch::saveChatPreferences(preferences)) {
+                if (!kick::saveChatPreferences(preferences)) {
                     brls::Application::notify(
-                        "twiNX: could not save chat emote mode");
+                        "kickNX: could not save chat emote mode");
                     return;
                 }
 
                 brls::Application::notify(
                     preferences.emoteMode ==
-                            twitch::ChatEmoteMode::Animated
+                            kick::ChatEmoteMode::Animated
                         ? "Animated chat emotes enabled"
                         : "Static chat emotes enabled");
             });
 
-        btnTwitchChatOverlaySize->init(
+        btnKickChatOverlaySize->init(
             "Overlay chat size",
             chatOverlaySizeLabels(),
             static_cast<int>(chat.overlaySize),
             [](int selected) {
-                auto preferences = twitch::loadChatPreferences();
+                auto preferences = kick::loadChatPreferences();
                 preferences.overlaySize =
                     selected == 1
-                        ? twitch::ChatOverlaySize::Compact
-                        : twitch::ChatOverlaySize::FullHeight;
-                if (!twitch::saveChatPreferences(preferences))
+                        ? kick::ChatOverlaySize::Compact
+                        : kick::ChatOverlaySize::FullHeight;
+                if (!kick::saveChatPreferences(preferences))
                     brls::Application::notify(
-                        "twiNX: could not save overlay chat size");
+                        "kickNX: could not save overlay chat size");
             });
 
-        btnTwitchChatOverlayPosition->init(
+        btnKickChatOverlayPosition->init(
             "Overlay chat position",
             chatOverlayPositionLabels(),
             static_cast<int>(chat.overlayPosition),
             [](int selected) {
-                auto preferences = twitch::loadChatPreferences();
+                auto preferences = kick::loadChatPreferences();
                 preferences.overlayPosition =
-                    static_cast<twitch::ChatOverlayPosition>(
+                    static_cast<kick::ChatOverlayPosition>(
                         std::clamp(selected, 0, 3));
-                if (!twitch::saveChatPreferences(preferences))
+                if (!kick::saveChatPreferences(preferences))
                     brls::Application::notify(
-                        "twiNX: could not save overlay chat position");
+                        "kickNX: could not save overlay chat position");
             });
 
-        btnTwitchChatDockedWidth->init(
+        btnKickChatDockedWidth->init(
             "Right chat panel width",
             chatDockedWidthLabels(),
             closestIndex(
@@ -527,15 +504,15 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
                     static_cast<size_t>(selected) >=
                         chatDockedWidthValues().size())
                     return;
-                auto preferences = twitch::loadChatPreferences();
+                auto preferences = kick::loadChatPreferences();
                 preferences.dockedWidth =
                     chatDockedWidthValues().at(selected);
-                if (!twitch::saveChatPreferences(preferences))
+                if (!kick::saveChatPreferences(preferences))
                     brls::Application::notify(
-                        "twiNX: could not save docked chat width");
+                        "kickNX: could not save docked chat width");
             });
 
-        btnTwitchChatOverlayWidth->init(
+        btnKickChatOverlayWidth->init(
             "Overlay chat width",
             chatOverlayWidthLabels(),
             closestIndex(
@@ -546,15 +523,15 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
                     static_cast<size_t>(selected) >=
                         chatOverlayWidthValues().size())
                     return;
-                auto preferences = twitch::loadChatPreferences();
+                auto preferences = kick::loadChatPreferences();
                 preferences.overlayWidth =
                     chatOverlayWidthValues().at(selected);
-                if (!twitch::saveChatPreferences(preferences))
+                if (!kick::saveChatPreferences(preferences))
                     brls::Application::notify(
-                        "twiNX: could not save overlay chat width");
+                        "kickNX: could not save overlay chat width");
             });
 
-        btnTwitchChatFont->init(
+        btnKickChatFont->init(
             "Chat text size",
             chatFontLabels(),
             closestIndex(chatFontValues(), chat.fontSize),
@@ -562,13 +539,13 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
                 if (selected < 0 ||
                     static_cast<size_t>(selected) >= chatFontValues().size())
                     return;
-                auto preferences = twitch::loadChatPreferences();
+                auto preferences = kick::loadChatPreferences();
                 preferences.fontSize = chatFontValues().at(selected);
-                if (!twitch::saveChatPreferences(preferences))
-                    brls::Application::notify("twiNX: could not save chat text size");
+                if (!kick::saveChatPreferences(preferences))
+                    brls::Application::notify("kickNX: could not save chat text size");
             });
 
-        btnTwitchChatOpacity->init(
+        btnKickChatOpacity->init(
             "Chat background",
             chatOpacityLabels(),
             closestIndex(chatOpacityValues(), chat.opacity),
@@ -576,20 +553,20 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
                 if (selected < 0 ||
                     static_cast<size_t>(selected) >= chatOpacityValues().size())
                     return;
-                auto preferences = twitch::loadChatPreferences();
+                auto preferences = kick::loadChatPreferences();
                 preferences.opacity = chatOpacityValues().at(selected);
-                if (!twitch::saveChatPreferences(preferences))
-                    brls::Application::notify("twiNX: could not save chat opacity");
+                if (!kick::saveChatPreferences(preferences))
+                    brls::Application::notify("kickNX: could not save chat opacity");
             });
 
-        btnTwitchChatTimestamps->init(
+        btnKickChatTimestamps->init(
             "Chat timestamps",
             chat.timestamps,
             [](bool enabled) {
-                auto preferences = twitch::loadChatPreferences();
+                auto preferences = kick::loadChatPreferences();
                 preferences.timestamps = enabled;
-                if (!twitch::saveChatPreferences(preferences))
-                    brls::Application::notify("twiNX: could not save timestamp preference");
+                if (!kick::saveChatPreferences(preferences))
+                    brls::Application::notify("kickNX: could not save timestamp preference");
             });
     }
 
@@ -609,8 +586,10 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
     std::vector<std::string> audioTrack, audioSource;
     std::vector<int> audioStream;
     std::vector<std::string> subTrack = {"main/player/none"_i18n};
+    std::vector<int64_t> subTrackIds = {0};
     std::vector<std::string> subSource = {"main/player/none"_i18n};
     std::vector<int> subStream = {0};
+    int currentSubIndex = 0;
 
     int64_t count = mpv.getInt("track-list/count");
     for (int64_t n = 0; n < count; n++) {
@@ -618,10 +597,16 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
         std::string title = mpv.getString(fmt::format("track-list/{}/title", n));
         if (title.empty()) title = mpv.getString(fmt::format("track-list/{}/lang", n));
         if (title.empty()) title = fmt::format("{} track {}", type, n);
-        if (type == "sub")
+        if (type == "sub") {
             subTrack.push_back(title);
-        else if (type == "audio")
+            int64_t trackId = mpv.getInt(fmt::format("track-list/{}/id", n));
+            subTrackIds.push_back(trackId);
+            if (mpv.getString(fmt::format("track-list/{}/selected", n)) == "yes") {
+                currentSubIndex = static_cast<int>(subTrack.size() - 1);
+            }
+        } else if (type == "audio") {
             audioTrack.push_back(title);
+        }
     }
 
     if (src != nullptr) {
@@ -635,14 +620,19 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
             }
         }
     }
-    // 字幕选择
+    // Subtitle selection
     if (subTrack.size() > 1) {
-        int64_t value = mpv.getInt("sid");
-        this->subtitleTrack->init("main/player/subtitle"_i18n, subTrack, value, [&mpv](int selected) {
+        this->subtitleTrack->setVisibility(brls::Visibility::VISIBLE);
+        this->subtitleTrack->init("main/player/subtitle"_i18n, subTrack, currentSubIndex, [&mpv, subTrackIds](int selected) {
             selectedSubtitle = selected;
-            mpv.setInt("sid", selected);
+            if (selected <= 0 || static_cast<size_t>(selected) >= subTrackIds.size() || subTrackIds[selected] <= 0) {
+                mpv.command("set", "sid", "no");
+            } else {
+                mpv.setInt("sid", subTrackIds[selected]);
+            }
         });
     } else if (subSource.size() > 1) {
+        this->subtitleTrack->setVisibility(brls::Visibility::VISIBLE);
         int value = 0;
         for (size_t i = 0; i < subStream.size(); i++)
             if (subStream[i] == selectedSubtitle) value = i;
@@ -651,9 +641,13 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
             MPVCore::instance().getCustomEvent()->fire(QUALITY_CHANGE, nullptr);
         });
     } else {
-        this->subtitleTrack->setVisibility(brls::Visibility::GONE);
+        std::vector<std::string> defaultSub = {"main/player/none"_i18n};
+        this->subtitleTrack->setVisibility(brls::Visibility::VISIBLE);
+        this->subtitleTrack->init("main/player/subtitle"_i18n, defaultSub, 0, [&mpv](int selected) {
+            mpv.command("set", "sid", "no");
+        });
     }
-    // 音轨选择
+    // Audio track selection
     if (audioTrack.size() > 1) {
         int64_t value = mpv.getInt("aid", 1) - 1;
         this->audioTrack->init("main/player/audio"_i18n, audioTrack, value, [&mpv](int selected) {
@@ -674,104 +668,6 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string twitchChan
     }
 
     auto& conf = AppConfig::instance();
-
-/// Fullscreen
-#if (defined(__APPLE__) || defined(__linux__) || defined(_WIN32)) && !defined(ANDROID)
-    btnFullscreen->init(
-        "main/setting/others/fullscreen"_i18n, conf.getItem(AppConfig::FULLSCREEN, false), [](bool value) {
-            VideoContext::FULLSCREEN = value;
-            AppConfig::instance().setItem(AppConfig::FULLSCREEN, value);
-            brls::Application::getPlatform()->getVideoContext()->fullScreen(value);
-        });
-
-    btnAlwaysOnTop->init(
-        "main/setting/others/always_on_top"_i18n, conf.getItem(AppConfig::ALWAYS_ON_TOP, false), [](bool value) {
-            AppConfig::instance().setItem(AppConfig::ALWAYS_ON_TOP, value);
-            brls::Application::getPlatform()->setWindowAlwaysOnTop(value);
-        });
-#else
-    btnFullscreen->setVisibility(brls::Visibility::GONE);
-    btnAlwaysOnTop->setVisibility(brls::Visibility::GONE);
-#endif
-
-    btnBottomBar->init(
-        "main/setting/playback/bottom_bar"_i18n, conf.getItem(AppConfig::PLAYER_BOTTOM_BAR, true), [&conf](bool value) {
-            MPVCore::BOTTOM_BAR = value;
-            conf.setItem(AppConfig::PLAYER_BOTTOM_BAR, value);
-        });
-
-    btnOSDOnToggle->init(
-        "main/setting/playback/osd_on_toggle"_i18n, conf.getItem(AppConfig::OSD_ON_TOGGLE, true), [&conf](bool value) {
-            MPVCore::OSD_ON_TOGGLE = value;
-            conf.setItem(AppConfig::OSD_ON_TOGGLE, value);
-        });
-
-    /// Player mirror
-    btnVideoMirror->init("main/setting/filter/mirror"_i18n,
-        {
-            "hints/off"_i18n,
-            "main/setting/filter/hflip"_i18n,
-            "main/setting/filter/vflip"_i18n,
-        },
-        MPVCore::VIDEO_FILTER, [&mpv](int value) {
-            MPVCore::VIDEO_FILTER = value;
-            switch (value) {
-            case 1:
-                mpv.command("set", "vf", "hflip");
-                break;
-            case 2:
-                mpv.command("set", "vf", "vflip");
-                break;
-            default:
-                mpv.command("set", "vf", "");
-            }
-            // 如果正在使用硬解，那么将硬解更新为 auto-copy，避免直接硬解因为不经过 cpu 处理导致镜像翻转无效
-            if (MPVCore::HARDWARE_DEC) {
-                const char* hwdec = value > 0 ? "auto-copy" : MPVCore::PLAYER_HWDEC_METHOD.c_str();
-                mpv.command("set", "hwdec", hwdec);
-                brls::Logger::info("MPV hardware decode: {}", hwdec);
-            }
-        });
-
-    btnVideoRotation->init("main/setting/filter/rotation"_i18n,
-        {
-            "hints/off"_i18n,
-            "90",
-            "180",
-            "270",
-        },
-        MPVCore::VIDEO_ROTATION, [&mpv](int value) {
-            MPVCore::VIDEO_ROTATION = value;
-            switch (value) {
-            case 1:
-                mpv.command("set", "video-rotate", "90");
-                return;
-            case 2:
-                mpv.command("set", "video-rotate", "180");
-                return;
-            case 3:
-                mpv.command("set", "video-rotate", "270");
-                return;
-            default:
-                mpv.command("set", "video-rotate", "0");
-            }
-        });
-
-    /// Player aspect
-    btnVideoAspect->init("main/setting/aspect/header"_i18n,
-        {
-            "main/setting/aspect/auto"_i18n,
-            "main/setting/aspect/stretch"_i18n,
-            "main/setting/aspect/crop"_i18n,
-            "4:3",
-            "16:9",
-        },
-        conf.getOptionIndex(AppConfig::PLAYER_ASPECT), [&mpv, &conf](int value) {
-            auto& opt = conf.getOptions(AppConfig::PLAYER_ASPECT);
-            MPVCore::VIDEO_ASPECT = opt.options.at(value);
-            mpv.setAspect(MPVCore::VIDEO_ASPECT);
-            conf.setItem(AppConfig::PLAYER_ASPECT, MPVCore::VIDEO_ASPECT);
-        });
 
     /// Subsync
     double subDelay = mpv.getDouble("sub-delay");

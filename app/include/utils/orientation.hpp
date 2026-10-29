@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 
-namespace twinx::portrait {
+namespace kicknx::portrait {
 
 enum class OrientationMode {
     Auto = 0,
@@ -45,7 +45,7 @@ private:
     bool save() const;
     std::string settingsPath() const;
 
-    OrientationMode selectedMode = OrientationMode::Auto;
+    OrientationMode selectedMode = OrientationMode::Landscape;
     DisplayOrientation currentOrientation = DisplayOrientation::Landscape;
     DisplayOrientation candidateOrientation = DisplayOrientation::Landscape;
     float filteredX = 0.0f;
@@ -59,4 +59,4 @@ private:
     brls::Event<DisplayOrientation> orientationChanged;
 };
 
-}  // namespace twinx::portrait
+}  // namespace kicknx::portrait

@@ -40,11 +40,19 @@ class ProgressSpinner : public View
 
     void animate(bool animate);
 
+    void setColor(NVGcolor color)
+    {
+        this->customColor = color;
+        this->hasCustomColor = true;
+    }
+
     static brls::View* create();
 
   private:
     Animatable animationValue = 0.0f;
     ProgressSpinnerSize size;
+    bool hasCustomColor = false;
+    NVGcolor customColor{};
     void setSize(ProgressSpinnerSize size)
     {
         this->size = size;

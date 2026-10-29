@@ -12,7 +12,7 @@ class ButtonClose;
 
 class PlayerSetting : public brls::Box {
 public:
-    PlayerSetting(const jellyfin::Source* src = nullptr, std::string twitchChannel = "");
+    PlayerSetting(const jellyfin::Source* src = nullptr, std::string kickChannel = "");
     ~PlayerSetting() override;
 
     bool isTranslucent() override { return true; }
@@ -36,30 +36,21 @@ private:
 
     BRLS_BIND(brls::SelectorCell, subtitleTrack, "setting/track/subtitle");
     BRLS_BIND(brls::SelectorCell, audioTrack, "setting/track/audio");
-    BRLS_BIND(brls::SelectorCell, btnTwitchQuality, "setting/twitch/quality");
-    BRLS_BIND(brls::SelectorCell, btnTwitchDecoder, "setting/twitch/decoder");
+    BRLS_BIND(brls::SelectorCell, btnKickQuality, "setting/kick/quality");
+    BRLS_BIND(brls::SelectorCell, btnKickDecoder, "setting/kick/decoder");
     BRLS_BIND(brls::SelectorCell, btnPortraitOrientation, "setting/portrait/orientation");
     BRLS_BIND(brls::SelectorCell, btnKeyboardHaptic, "setting/portrait/keyboard_haptic");
-    BRLS_BIND(brls::BooleanCell, btnAudioReactiveHaptics, "setting/twitch/audio_reactive_haptics");
-    BRLS_BIND(brls::SelectorCell, btnAudioReactiveProfile, "setting/twitch/audio_reactive_profile");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatMode, "setting/twitch/chat_mode");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatParticipation, "setting/twitch/chat_participation");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatComposer, "setting/twitch/chat_composer");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatEmotes, "setting/twitch/chat_emotes");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatOverlaySize, "setting/twitch/chat_overlay_size");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatOverlayPosition, "setting/twitch/chat_overlay_position");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatDockedWidth, "setting/twitch/chat_docked_width");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatOverlayWidth, "setting/twitch/chat_overlay_width");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatFont, "setting/twitch/chat_font");
-    BRLS_BIND(brls::SelectorCell, btnTwitchChatOpacity, "setting/twitch/chat_opacity");
-    BRLS_BIND(brls::BooleanCell, btnTwitchChatTimestamps, "setting/twitch/chat_timestamps");
-    BRLS_BIND(brls::BooleanCell, btnBottomBar, "setting/player/bottom_bar");
-    BRLS_BIND(brls::BooleanCell, btnOSDOnToggle, "setting/player/osd_on_toggle");
-    BRLS_BIND(brls::BooleanCell, btnFullscreen, "setting/fullscreen");
-    BRLS_BIND(brls::BooleanCell, btnAlwaysOnTop, "setting/always_on_top");
-    BRLS_BIND(brls::SelectorCell, btnVideoMirror, "setting/video/mirror");
-    BRLS_BIND(brls::SelectorCell, btnVideoRotation, "setting/video/rotation");
-    BRLS_BIND(brls::SelectorCell, btnVideoAspect, "setting/video/aspect");
+    BRLS_BIND(brls::SelectorCell, btnKickChatMode, "setting/kick/chat_mode");
+    BRLS_BIND(brls::SelectorCell, btnKickChatParticipation, "setting/kick/chat_participation");
+    BRLS_BIND(brls::SelectorCell, btnKickChatComposer, "setting/kick/chat_composer");
+    BRLS_BIND(brls::SelectorCell, btnKickChatEmotes, "setting/kick/chat_emotes");
+    BRLS_BIND(brls::SelectorCell, btnKickChatOverlaySize, "setting/kick/chat_overlay_size");
+    BRLS_BIND(brls::SelectorCell, btnKickChatOverlayPosition, "setting/kick/chat_overlay_position");
+    BRLS_BIND(brls::SelectorCell, btnKickChatDockedWidth, "setting/kick/chat_docked_width");
+    BRLS_BIND(brls::SelectorCell, btnKickChatOverlayWidth, "setting/kick/chat_overlay_width");
+    BRLS_BIND(brls::SelectorCell, btnKickChatFont, "setting/kick/chat_font");
+    BRLS_BIND(brls::SelectorCell, btnKickChatOpacity, "setting/kick/chat_opacity");
+    BRLS_BIND(brls::BooleanCell, btnKickChatTimestamps, "setting/kick/chat_timestamps");
     BRLS_BIND(brls::SliderCell, btnSubsync, "setting/video/subsync");
     // equalizer setting
     BRLS_BIND(brls::RadioCell, btnEqualizerReset, "setting/equalizer/reset");

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "api/twitch.hpp"
+#include "api/kick.hpp"
 
 #include <borealis.hpp>
 
@@ -19,7 +19,7 @@
 #include <pthread.h>
 #endif
 
-namespace twitch {
+namespace kick {
 
 enum class ChatMode {
     Off = 0,
@@ -34,7 +34,7 @@ enum class ChatParticipation {
 
 enum class ChatComposerMode {
     NintendoKeyboard = 0,
-    TwiNXComposer = 1,
+    KickNXComposer = 1,
 };
 
 enum class ChatEmoteMode {
@@ -58,18 +58,17 @@ enum class ChatFragmentType {
     Text = 0,
     Emote = 1,
     Mention = 2,
-    Cheermote = 3,
 };
 
 struct ChatPreferences {
-    ChatMode mode = ChatMode::RightPanel;
+    ChatMode mode = ChatMode::Overlay;
     ChatParticipation participation = ChatParticipation::ReadOnly;
-    ChatComposerMode composerMode = ChatComposerMode::TwiNXComposer;
+    ChatComposerMode composerMode = ChatComposerMode::NintendoKeyboard;
     ChatEmoteMode emoteMode = ChatEmoteMode::Static;
     ChatOverlaySize overlaySize = ChatOverlaySize::FullHeight;
     ChatOverlayPosition overlayPosition = ChatOverlayPosition::TopRight;
     int fontSize = 16;
-    int opacity = 82;
+    int opacity = 40;
     int dockedWidth = 330;
     int overlayWidth = 360;
     bool timestamps = false;
@@ -83,26 +82,19 @@ struct ChatFragment {
     std::string animatedEmoteUrl;
 };
 
-struct ChatBadge {
-    std::string setId;
-    std::string id;
-    std::string info;
-    std::string imageUrl;
-};
-
 struct ChatMessage {
     std::string id;
     std::string userName;
     std::string text;
     std::string color;
     std::string timestamp;
-    std::vector<ChatBadge> badges;
     std::vector<ChatFragment> fragments;
 };
 
 using ChatMessageCallback = std::function<void(ChatMessage)>;
 using ChatStatusCallback = std::function<void(const std::string&)>;
 using ChatSendCallback = std::function<void(const std::string&)>;
+using ChattersCountCallback = std::function<void(int count)>;
 
 struct UserEmote {
     std::string id;
@@ -143,12 +135,15 @@ void sendChatMessageAsync(
     ChatSendCallback success,
     ErrorCallback failure);
 
+int fetchActiveChattersCount(const std::string& channelIdOrSlug);
+
 class ChatClient {
 public:
     ChatClient(
         std::string channel,
         ChatMessageCallback message,
-        ChatStatusCallback status);
+        ChatStatusCallback status,
+        ChattersCountCallback chatters = nullptr);
     ~ChatClient();
 
     ChatClient(const ChatClient&) = delete;
@@ -158,19 +153,27 @@ public:
 
 private:
     static void* threadEntry(void* context);
+    static void* chattersThreadEntry(void* context);
     void run();
+    void chattersRun();
 
     std::string channel;
     ChatMessageCallback messageCallback;
     ChatStatusCallback statusCallback;
+    ChattersCountCallback chattersCallback;
     std::atomic_bool stopRequested{false};
+    std::mutex channelIdMutex;
+    std::string resolvedChannelId;
 
 #ifdef BOREALIS_USE_STD_THREAD
     std::shared_ptr<std::thread> thread;
+    std::shared_ptr<std::thread> chattersThread;
 #else
     pthread_t thread{};
     bool threadStarted = false;
+    pthread_t chattersThread{};
+    bool chattersThreadStarted = false;
 #endif
 };
 
-}  // namespace twitch
+}  // namespace kick

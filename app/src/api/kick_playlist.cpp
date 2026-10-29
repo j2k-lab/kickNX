@@ -1,4 +1,4 @@
-#include "api/twitch_playlist.hpp"
+#include "api/kick_playlist.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -6,7 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace twitch {
+namespace kick {
 namespace {
 
 std::string trim(std::string value) {
@@ -65,28 +65,38 @@ std::map<std::string, std::string> parseAttributes(const std::string& line) {
 }
 
 std::string absoluteUrl(const std::string& masterUrl, const std::string& candidate) {
+    std::string query;
+    const auto masterQueryPos = masterUrl.find('?');
+    if (masterQueryPos != std::string::npos && candidate.find('?') == std::string::npos) {
+        query = masterUrl.substr(masterQueryPos);
+    }
+
     if (candidate.rfind("http://", 0) == 0 || candidate.rfind("https://", 0) == 0)
-        return candidate;
+        return query.empty() ? candidate : candidate + query;
     if (candidate.empty()) return {};
 
-    const auto scheme = masterUrl.find("://");
-    if (scheme == std::string::npos) return candidate;
+    const std::string baseUrl = (masterQueryPos == std::string::npos)
+        ? masterUrl
+        : masterUrl.substr(0, masterQueryPos);
 
-    const auto firstPath = masterUrl.find('/', scheme + 3);
+    const auto scheme = baseUrl.find("://");
+    if (scheme == std::string::npos) return candidate + query;
+
+    const auto firstPath = baseUrl.find('/', scheme + 3);
     const std::string origin =
-        firstPath == std::string::npos ? masterUrl : masterUrl.substr(0, firstPath);
+        firstPath == std::string::npos ? baseUrl : baseUrl.substr(0, firstPath);
 
-    if (candidate.front() == '/') return origin + candidate;
+    if (candidate.front() == '/') return origin + candidate + query;
 
-    const auto slash = masterUrl.rfind('/');
-    if (slash == std::string::npos) return candidate;
+    const auto slash = baseUrl.rfind('/');
+    if (slash == std::string::npos) return candidate + query;
 
-    const std::string combined = masterUrl.substr(0, slash + 1) + candidate;
+    const std::string combined = baseUrl.substr(0, slash + 1) + candidate;
     const auto combinedScheme = combined.find("://");
-    if (combinedScheme == std::string::npos) return combined;
+    if (combinedScheme == std::string::npos) return combined + query;
 
     const auto combinedPath = combined.find('/', combinedScheme + 3);
-    if (combinedPath == std::string::npos) return combined;
+    if (combinedPath == std::string::npos) return combined + query;
 
     const std::string combinedOrigin = combined.substr(0, combinedPath);
     std::vector<std::string> segments;
@@ -105,7 +115,7 @@ std::string absoluteUrl(const std::string& masterUrl, const std::string& candida
         if (index) normalized += "/";
         normalized += segments[index];
     }
-    return normalized;
+    return query.empty() ? normalized : normalized + query;
 }
 
 std::string fallbackName(const std::map<std::string, std::string>& attrs) {
@@ -192,10 +202,56 @@ std::vector<Quality> parseMasterPlaylist(
     return result;
 }
 
+std::vector<SubtitleTrack> parseMasterSubtitles(
+    const std::string& masterUrl,
+    const std::string& playlistText) {
+    std::vector<SubtitleTrack> result;
+    std::istringstream input(playlistText);
+    std::string line;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        line = trim(line);
+        if (line.rfind("#EXT-X-MEDIA:", 0) != 0) continue;
+
+        const auto attrs = parseAttributes(line);
+        auto typeIt = attrs.find("TYPE");
+        if (typeIt == attrs.end() || typeIt->second != "SUBTITLES") continue;
+
+        auto uriIt = attrs.find("URI");
+        if (uriIt == attrs.end() || uriIt->second.empty()) continue;
+
+        const std::string url = absoluteUrl(masterUrl, uriIt->second);
+        if (url.empty()) continue;
+
+        std::string name;
+        auto nameIt = attrs.find("NAME");
+        if (nameIt != attrs.end()) name = nameIt->second;
+
+        std::string lang;
+        auto langIt = attrs.find("LANGUAGE");
+        if (langIt != attrs.end()) lang = langIt->second;
+
+        if (name.empty()) name = lang.empty() ? "Subtitles" : lang;
+
+        bool isDefault = false;
+        auto defIt = attrs.find("DEFAULT");
+        if (defIt != attrs.end() && defIt->second == "YES") {
+            isDefault = true;
+        }
+
+        const auto duplicate = std::find_if(result.begin(), result.end(),
+            [&](const SubtitleTrack& track) { return track.url == url; });
+        if (duplicate == result.end()) {
+            result.push_back({name, lang, url, isDefault});
+        }
+    }
+    return result;
+}
+
 Quality selectQuality(
     const std::vector<Quality>& qualities,
     const std::string& preferred) {
-    if (qualities.empty()) throw std::runtime_error("Twitch returned no playable qualities");
+    if (qualities.empty()) throw std::runtime_error("Kick returned no playable qualities");
 
     const std::string wanted = lower(preferred);
     const std::string wantedToken = qualityToken(preferred);
@@ -214,12 +270,18 @@ Quality selectQuality(
     });
     if (exact != qualities.end()) return *exact;
 
-    if (wantedToken == "source" || wantedToken == "chunked") {
+    if (wantedToken == "source") {
         auto source = std::find_if(qualities.begin(), qualities.end(), [](const Quality& quality) {
-            return qualityToken(quality.id) == "chunked" ||
-                   qualityToken(quality.name).find("source") != std::string::npos;
+            return qualityToken(quality.name).find("source") != std::string::npos;
         });
         if (source != qualities.end()) return *source;
+
+        // Kick AWS IVS playlists list the highest quality ("1080p60") as the first
+        // concrete variant after "auto".
+        auto highest = std::find_if(qualities.begin(), qualities.end(), [](const Quality& quality) {
+            return lower(quality.id) != "auto";
+        });
+        if (highest != qualities.end()) return *highest;
     }
 
     if (wantedToken == "audioonly") {
@@ -234,7 +296,8 @@ Quality selectQuality(
     // resolution before falling back to the first concrete variant.
     std::string resolutionToken = wantedToken;
     if (resolutionToken.size() > 2 &&
-        resolutionToken.compare(resolutionToken.size() - 2, 2, "60") == 0)
+        (resolutionToken.compare(resolutionToken.size() - 2, 2, "60") == 0 ||
+         resolutionToken.compare(resolutionToken.size() - 2, 2, "30") == 0))
         resolutionToken.erase(resolutionToken.size() - 2);
     if (!resolutionToken.empty()) {
         auto sameResolution = std::find_if(qualities.begin(), qualities.end(), [&](const Quality& quality) {
@@ -271,19 +334,30 @@ std::string percentEncode(const std::string& value) {
 
 std::string normalizeChannel(std::string value) {
     value = trim(value);
-    const std::string prefix1 = "https://www.twitch.tv/";
-    const std::string prefix2 = "https://twitch.tv/";
-    if (value.rfind(prefix1, 0) == 0) value.erase(0, prefix1.size());
-    else if (value.rfind(prefix2, 0) == 0) value.erase(0, prefix2.size());
+    static constexpr const char* PREFIXES[] = {
+        "https://www.kick.com/",
+        "https://kick.com/",
+        "http://www.kick.com/",
+        "http://kick.com/",
+        "https://www.kick.tv/",
+        "https://kick.tv/",
+    };
+    for (const char* prefix : PREFIXES) {
+        const std::string prefixStr(prefix);
+        if (value.rfind(prefixStr, 0) == 0) {
+            value.erase(0, prefixStr.size());
+            break;
+        }
+    }
 
     const auto query = value.find_first_of("?#/");
     if (query != std::string::npos) value.erase(query);
 
     value = lower(trim(value));
     value.erase(std::remove_if(value.begin(), value.end(), [](unsigned char c) {
-        return !(std::isalnum(c) || c == '_');
+        return !(std::isalnum(c) || c == '_' || c == '-');
     }), value.end());
     return value;
 }
 
-}  // namespace twitch
+}  // namespace kick

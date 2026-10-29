@@ -231,11 +231,6 @@ void SettingTab::onCreate() {
             MPVCore::instance().restart();
         });
 
-    btnBottomBar->init("main/setting/playback/bottom_bar"_i18n, MPVCore::BOTTOM_BAR, [&conf](bool value) {
-        MPVCore::BOTTOM_BAR = value;
-        conf.setItem(AppConfig::PLAYER_BOTTOM_BAR, value);
-    });
-
     btnShowFPS->init("main/setting/ui/show_fps"_i18n, brls::Application::getFPSStatus(), [&conf](bool value) {
         brls::Application::setFPSStatus(value);
         conf.setItem(AppConfig::SHOW_FPS, value);
@@ -262,11 +257,6 @@ void SettingTab::onCreate() {
             brls::Application::setSwapInterval(selected);
             conf.setItem(AppConfig::SWAP_INTERVAL, selected);
         });
-
-    btnOSDOnToggle->init("main/setting/playback/osd_on_toggle"_i18n, MPVCore::OSD_ON_TOGGLE, [&conf](bool value) {
-        MPVCore::OSD_ON_TOGGLE = value;
-        conf.setItem(AppConfig::OSD_ON_TOGGLE, value);
-    });
 
     btnTouchGesture->init("main/setting/playback/touch_gesture"_i18n, MPVCore::TOUCH_GESTURE, [&conf](bool value) {
         MPVCore::TOUCH_GESTURE = value;
@@ -435,13 +425,6 @@ void SettingTab::onCreate() {
         AppConfig::instance().setItem(AppConfig::HTTP_PROXY, value);
     });
     inputProxy->setVisibility(HTTP::PROXY_STATUS ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
-
-    auto& dlQualityOpt = conf.getOptions(AppConfig::DOWNLOAD_QUALITY);
-    selectorDownloadQuality->init("main/download/quality"_i18n,
-        {"main/download/original"_i18n, "1080p", "720p", "480p"},
-        conf.getValueIndex(AppConfig::DOWNLOAD_QUALITY), [&dlQualityOpt](int selected) {
-            AppConfig::instance().setItem(AppConfig::DOWNLOAD_QUALITY, dlQualityOpt.values[selected]);
-        });
 
     btnSync->init("main/setting/others/sync"_i18n, AppConfig::SYNC, [](bool value) {
         AppConfig::SYNC = value;

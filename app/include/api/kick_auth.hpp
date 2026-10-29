@@ -1,19 +1,19 @@
 #pragma once
 
-#include "api/twitch.hpp"
+#include "api/kick.hpp"
+#include "api/http.hpp"
 
 #include <functional>
 #include <string>
 #include <vector>
 
-namespace twitch {
+namespace kick {
 
-struct DeviceAuthorization {
-    std::string deviceCode;
-    std::string userCode;
-    std::string verificationUri;
-    int expiresIn = 0;
-    int interval = 5;
+struct TVLinkSession {
+    std::string uuid;
+    std::string code;
+    std::string verificationUrl;
+    int intervalSeconds = 3;
 };
 
 struct OAuthSession {
@@ -29,7 +29,6 @@ struct OAuthSession {
     bool signedIn() const { return !accessToken.empty() && !userId.empty(); }
 };
 
-using DeviceCodeCallback = std::function<void(DeviceAuthorization)>;
 using AuthCallback = std::function<void(OAuthSession)>;
 
 OAuthSession loadOAuth();
@@ -37,10 +36,24 @@ void saveOAuth(const OAuthSession& session);
 void clearOAuth();
 OAuthSession ensureOAuth(const Config& config);
 
-void loginDeviceAsync(
+TVLinkSession createTVLinkSession();
+
+void pollTVLinkAuthAsync(
     const Config& config,
-    DeviceCodeCallback deviceCode,
+    const TVLinkSession& session,
+    AuthCallback success,
+    std::function<void(bool pending, const std::string& message)> statusCallback,
+    HTTP::Cancel cancel = nullptr);
+
+void loginWithTokenAsync(
+    const Config& config,
+    const std::string& bearerToken,
     AuthCallback success,
     ErrorCallback failure);
 
-}  // namespace twitch
+void logoutAsync(
+    const Config& config,
+    std::function<void()> complete = {});
+
+}  // namespace kick
+

@@ -1,15 +1,15 @@
 #pragma once
 
-#include "api/twitch_helix.hpp"
+#include "api/kick_helix.hpp"
 
 #include <borealis.hpp>
 
 #include <string>
 
-class TwiNXDetails : public brls::Box {
+class KickNXDetails : public brls::Box {
 public:
-    explicit TwiNXDetails(twitch::Stream stream);
-    ~TwiNXDetails() override;
+    explicit KickNXDetails(kick::Stream stream);
+    ~KickNXDetails() override;
 
 private:
     void chooseQuality();
@@ -17,7 +17,7 @@ private:
     void watchLive();
     void setBusy(bool value, const std::string& message = "");
 
-    twitch::Stream stream;
+    kick::Stream stream;
     std::string preferredQuality;
     bool busy = false;
 

@@ -16,17 +16,6 @@ const int VIDEO_SEEK_NODELAY = 0;
 
 using namespace brls::literals;
 
-#define CHECK_OSD(shake)                                                              \
-    if (this->isOsdLock) {                                                            \
-        if (this->isOsdShown) {                                                       \
-            brls::Application::giveFocus(this->osdLockBox);                           \
-            if (shake) this->osdLockBox->shakeHighlight(brls::FocusDirection::RIGHT); \
-        } else {                                                                      \
-            this->showOSD(true);                                                      \
-        }                                                                             \
-        return true;                                                                  \
-    }
-
 static int getSeekRange(int current) {
     current = abs(current);
     if (current < 60) return 5;
@@ -55,10 +44,6 @@ VideoView::VideoView() {
     this->registerAction(
         "hints/back"_i18n, brls::BUTTON_B,
         [this](brls::View* view) {
-            if (isOsdLock) {
-                this->toggleOSD();
-                return true;
-            }
             if (MPVCore::OSD_TV_MODE && this->isOsdShown) {
                 this->toggleOSD();
                 return true;
@@ -70,7 +55,6 @@ VideoView::VideoView() {
     this->registerActions(
         "\uE08F", brls::BUTTON_LB, KeyBind::getRewind(),
         [this](brls::View* view) -> bool {
-            CHECK_OSD(true);
             this->seekingRange -= getSeekRange(this->seekingRange);
             this->requestSeeking(seekingRange);
             return true;
@@ -80,7 +64,6 @@ VideoView::VideoView() {
     this->registerActions(
         "\uE08E", brls::BUTTON_RB, KeyBind::getForward(),
         [this](brls::View* view) -> bool {
-            CHECK_OSD(true);
             this->seekingRange += getSeekRange(this->seekingRange);
             this->requestSeeking(seekingRange);
             return true;
@@ -96,7 +79,7 @@ VideoView::VideoView() {
         },
         true);
 
-    /// Twitch channel page button (hidden for non-Twitch playback)
+    /// Kick channel page button (hidden for non-Kick playback)
     this->btnChannel->registerClickAction(
         [this](brls::View*) {
             this->channelEvent.fire();
@@ -115,7 +98,6 @@ VideoView::VideoView() {
     this->registerActions(
         "main/player/setting"_i18n, brls::BUTTON_X, KeyBind::getSetting(),
         [this](brls::View* view) {
-            CHECK_OSD(true);
             this->settingEvent.fire();
             return true;
         },
@@ -124,7 +106,6 @@ VideoView::VideoView() {
     this->registerActions(
         "volumeUp", brls::BUTTON_NAV_UP, KeyBind::getVolumeUp(),
         [this](brls::View* view) -> bool {
-            CHECK_OSD(true);
             auto& state = brls::Application::getControllerState();
             if (state.buttons[brls::BUTTON_RT]) {
                 this->requestVolume((int)MPVCore::instance().volume + 5, 400);
@@ -137,7 +118,6 @@ VideoView::VideoView() {
     this->registerActions(
         "volumeDown", brls::BUTTON_NAV_DOWN, KeyBind::getVolumeDown(),
         [this](brls::View* view) -> bool {
-            CHECK_OSD(true);
             auto& state = brls::Application::getControllerState();
             if (state.buttons[brls::BUTTON_RT]) {
                 this->requestVolume((int)MPVCore::instance().volume - 5, 400);
@@ -169,10 +149,36 @@ VideoView::VideoView() {
     osdSlider->getProgressSetEvent().subscribe([this](float progress) {
         brls::Logger::verbose("Set progress: {}", progress);
         this->showOSD(true);
+        if (this->isLiveMode) {
+            if (progress >= 0.98f) {
+                this->liveRewindSeconds = 0;
+                MPVCore::instance().seek(0, "absolute-percent");
+            } else {
+                double dvrWindow = std::max<double>(120.0, MPVCore::instance().duration);
+                int64_t targetRewind = static_cast<int64_t>((1.0f - progress) * dvrWindow);
+                if (targetRewind < 0) targetRewind = 0;
+                int64_t seekDiff = this->liveRewindSeconds - targetRewind;
+                this->liveRewindSeconds = targetRewind;
+                if (seekDiff != 0) {
+                    MPVCore::instance().seek(seekDiff, "relative");
+                }
+            }
+            this->updateLiveProgressUI();
+            return;
+        }
         MPVCore::instance().seek(progress * 100, "absolute-percent");
     });
 
-    osdSlider->getProgressEvent().subscribe([this](float progress) { this->showOSD(false); });
+    osdSlider->getProgressEvent().subscribe([this](float progress) {
+        this->showOSD(false);
+        if (this->isLiveMode) {
+            double dvrWindow = std::max<double>(120.0, MPVCore::instance().duration);
+            int64_t targetRewind = static_cast<int64_t>((1.0f - progress) * dvrWindow);
+            if (targetRewind < 0) targetRewind = 0;
+            this->liveRewindSeconds = targetRewind;
+            this->updateLiveProgressUI();
+        }
+    });
 
     /// 组件触摸事件
     /// 单击控制 OSD
@@ -190,14 +196,10 @@ VideoView::VideoView() {
 
         switch (status.osdGestureType) {
         case OsdGestureType::DOUBLE_TAP_END:
-            if (isOsdLock) {
-                this->toggleOSD();
-                break;
-            }
             mpv.togglePlay();
             break;
         case OsdGestureType::LONG_PRESS_START: {
-            if (isOsdLock) break;
+            if (this->isLiveMode) break;
             float cur = MPVCore::VIDEO_SPEED == 100 ? 2.0 : MPVCore::VIDEO_SPEED * 0.01f;
             MPVCore::instance().setSpeed(cur);
             // 绘制临时加速标识
@@ -207,37 +209,25 @@ VideoView::VideoView() {
         }
         case OsdGestureType::LONG_PRESS_CANCEL:
         case OsdGestureType::LONG_PRESS_END:
-            if (isOsdLock) {
-                this->toggleOSD();
-                break;
-            }
             mpv.setSpeed(1.0f);
             this->speedHintBox->setVisibility(brls::Visibility::GONE);
             break;
         case OsdGestureType::HORIZONTAL_PAN_START:
-            if (isOsdLock) break;
             infoIcon->setImageFromSVGRes("icon/ico-seeking.svg");
             osdInfoBox->setVisibility(brls::Visibility::VISIBLE);
             break;
         case OsdGestureType::HORIZONTAL_PAN_UPDATE:
-            if (isOsdLock) break;
             this->requestSeeking(fmin(120.0f, mpv.duration) * status.deltaX);
             break;
         case OsdGestureType::HORIZONTAL_PAN_CANCEL:
-            if (isOsdLock) break;
             // 立即取消
             this->requestSeeking(0, VIDEO_SEEK_NODELAY);
             break;
         case OsdGestureType::HORIZONTAL_PAN_END:
-            if (isOsdLock) {
-                this->toggleOSD();
-                break;
-            }
             // 立即跳转
             this->requestSeeking(fmin(120.0f, mpv.duration) * status.deltaX, VIDEO_SEEK_NODELAY);
             break;
         case OsdGestureType::LEFT_VERTICAL_PAN_START:
-            if (isOsdLock) break;
             if (brls::Application::getPlatform()->canSetBacklightBrightness()) {
                 this->brightnessInit = brls::Application::getPlatform()->getBacklightBrightness();
                 infoIcon->setImageFromSVGRes("icon/ico-sun-fill.svg");
@@ -245,37 +235,26 @@ VideoView::VideoView() {
                 break;
             }
         case OsdGestureType::RIGHT_VERTICAL_PAN_START:
-            if (isOsdLock) break;
             this->volumeInit = mpv.volume;
             infoIcon->setImageFromSVGRes("icon/ico-volume.svg");
             osdInfoBox->setVisibility(brls::Visibility::VISIBLE);
             break;
         case OsdGestureType::LEFT_VERTICAL_PAN_UPDATE:
-            if (isOsdLock) break;
             if (brls::Application::getPlatform()->canSetBacklightBrightness()) {
                 this->requestBrightness(this->brightnessInit + status.deltaY);
                 break;
             }
         case OsdGestureType::RIGHT_VERTICAL_PAN_UPDATE:
-            if (isOsdLock) break;
             this->requestVolume(this->volumeInit + status.deltaY * 100);
             break;
         case OsdGestureType::LEFT_VERTICAL_PAN_CANCEL:
         case OsdGestureType::LEFT_VERTICAL_PAN_END:
-            if (isOsdLock) {
-                this->toggleOSD();
-                break;
-            }
             if (brls::Application::getPlatform()->canSetBacklightBrightness()) {
                 osdInfoBox->setVisibility(brls::Visibility::GONE);
                 break;
             }
         case OsdGestureType::RIGHT_VERTICAL_PAN_CANCEL:
         case OsdGestureType::RIGHT_VERTICAL_PAN_END:
-            if (isOsdLock) {
-                this->toggleOSD();
-                break;
-            }
             osdInfoBox->setVisibility(brls::Visibility::GONE);
             break;
         default:
@@ -289,10 +268,6 @@ VideoView::VideoView() {
         return true;
     });
     this->btnToggle->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnToggle));
-
-    /// OSD 锁定按钮
-    this->osdLockBox->registerClickAction([this](...) { return this->toggleOSDLock(); });
-    this->osdLockBox->addGestureRecognizer(new brls::TapGestureRecognizer(this->osdLockBox));
 
     this->btnClose->registerClickAction([](...) {
         brls::sync([]() { close(); });
@@ -315,7 +290,6 @@ VideoView::VideoView() {
 
     this->registerActions(
         "main/player/toggle"_i18n, brls::BUTTON_A, KeyBind::getVideoPause(), [this](brls::View* view) {
-            CHECK_OSD(true);
             MPVCore::instance().togglePlay();
             if (MPVCore::OSD_ON_TOGGLE) {
                 this->showOSD(true);
@@ -353,7 +327,7 @@ void VideoView::setContentOverlay(brls::View* overlay) {
     if (contentOverlay == overlay) return;
 
     if (contentOverlay) {
-        this->removeView(contentOverlay);
+        this->removeView(contentOverlay, false);
         contentOverlay = nullptr;
     }
 
@@ -434,6 +408,40 @@ void VideoView::setList(const std::vector<std::string>& values, int index) {
 
 void VideoView::requestSeeking(int seek, int delay) {
     auto& mpv = MPVCore::instance();
+    if (this->isLiveMode) {
+        double dvrWindow = std::max<double>(120.0, mpv.duration);
+        int64_t targetRewind = this->liveRewindSeconds - seek;
+        if (targetRewind < 0) targetRewind = 0;
+        if (targetRewind > static_cast<int64_t>(dvrWindow)) targetRewind = static_cast<int64_t>(dvrWindow);
+        this->liveRewindSeconds = targetRewind;
+
+        showOSD(false);
+        if (osdInfoBox->getVisibility() != brls::Visibility::VISIBLE) {
+            osdInfoBox->setVisibility(brls::Visibility::VISIBLE);
+            infoIcon->setImageFromSVGRes("icon/ico-seeking.svg");
+        }
+        infoLabel->setText(this->liveRewindSeconds == 0 ? "LIVE" : fmt::format("{:+d} s", seek));
+        this->updateLiveProgressUI();
+
+        brls::cancelDelay(this->seekingIter);
+        if (delay <= VIDEO_SEEK_NODELAY) {
+            osdInfoBox->setVisibility(brls::Visibility::GONE);
+            this->seekingRange = 0;
+            if (seek == 0) return;
+            MPVCore::instance().seek(seek, "relative");
+        } else if (delay > 0) {
+            ASYNC_RETAIN
+            this->seekingIter = brls::delay(delay, [ASYNC_TOKEN, seek]() {
+                ASYNC_RELEASE
+                osdInfoBox->setVisibility(brls::Visibility::GONE);
+                this->seekingRange = 0;
+                if (seek == 0) return;
+                MPVCore::instance().seek(seek, "relative");
+            });
+        }
+        return;
+    }
+
     if (mpv.duration <= 0) {
         this->seekingRange = 0;
         return;
@@ -516,9 +524,9 @@ void VideoView::draw(NVGcontext* vg, float x, float y, float w, float h, brls::S
     if (MPVCore::BOTTOM_BAR) {
         NVGcontext* vg = brls::Application::getNVGContext();
         bottomBarColor.a = alpha;
-        float progress = mpv.playback_time / mpv.duration;
+        float progress = this->isLiveMode ? (this->liveRewindSeconds <= 0 ? 1.0f : this->osdSlider->getProgress()) : (mpv.playback_time / mpv.duration);
         progress = progress > 1.0f ? 1.0f : progress;
-        nvgFillColor(vg, bottomBarColor);
+        nvgFillColor(vg, this->isLiveMode ? a(nvgRGB(83, 252, 24)) : bottomBarColor);
         nvgBeginPath(vg);
         nvgRect(vg, x, y + h - 2, w * progress, 2);
         nvgFill(vg);
@@ -526,7 +534,7 @@ void VideoView::draw(NVGcontext* vg, float x, float y, float w, float h, brls::S
 
     if (enableDanmaku) DanmakuCore::instance().draw(vg, x, y, w, h, alpha);
 
-    // Twitch chat and other content overlays belong above the video but below
+    // Kick chat and other content overlays belong above the video but below
     // the player OSD, so buttons, gestures, and the progress bar remain usable.
     if (contentOverlay &&
         contentOverlay->getVisibility() == brls::Visibility::VISIBLE) {
@@ -540,16 +548,14 @@ void VideoView::draw(NVGcontext* vg, float x, float y, float w, float h, brls::S
             this->isOsdShown = true;
         }
 
-        // 当 osd 锁定时，只显示锁定按钮
-        if (!isOsdLock) {
-            osdTopBox->setVisibility(brls::Visibility::VISIBLE);
-            osdBottomBox->setVisibility(brls::Visibility::VISIBLE);
-            osdBottomBox->frame(ctx);
-            osdTopBox->frame(ctx);
+        osdTopBox->setVisibility(brls::Visibility::VISIBLE);
+        osdBottomBox->setVisibility(brls::Visibility::VISIBLE);
+        if (this->isLiveMode && (current - this->lastLiveProgressTick > 500000)) {
+            this->lastLiveProgressTick = current;
+            this->updateLiveProgressUI();
         }
-
-        osdLockBox->setVisibility(brls::Visibility::VISIBLE);
-        osdLockBox->frame(ctx);
+        osdBottomBox->frame(ctx);
+        osdTopBox->frame(ctx);
 
     } else if (this->isOsdShown) {
         this->isOsdShown = false;
@@ -557,7 +563,6 @@ void VideoView::draw(NVGcontext* vg, float x, float y, float w, float h, brls::S
         if (isChildFocused()) brls::Application::giveFocus(this);
         osdTopBox->setVisibility(brls::Visibility::INVISIBLE);
         osdBottomBox->setVisibility(brls::Visibility::INVISIBLE);
-        osdLockBox->setVisibility(brls::Visibility::INVISIBLE);
     }
 
     if (current > this->hintLastShowTime) {
@@ -613,10 +618,6 @@ void VideoView::invalidate() { View::invalidate(); }
 
 void VideoView::onChildFocusGained(View* directChild, View* focusedView) {
     Box::onChildFocusGained(directChild, focusedView);
-    if (isOsdLock) {
-        brls::Application::giveFocus(this->osdLockBox);
-        return;
-    }
     // 只有在全屏显示OSD时允许OSD组件获取焦点
     if (this->isOsdShown) {
         // 当弹幕按钮隐藏时不可获取焦点
@@ -626,7 +627,7 @@ void VideoView::onChildFocusGained(View* directChild, View* focusedView) {
         // 设定自定义导航
         if (focusedView == this->osdSettingIcon) {
             this->osdSettingIcon->setCustomNavigationRoute(brls::FocusDirection::DOWN,
-                lastFocusedView == this->btnToggle ? "video/osd/toggle" : "video/osd/lock/box");
+                this->isLiveMode ? "video/osd/toggle" : "video/speed/label");
         }
         lastFocusedView = focusedView;
         return;
@@ -653,9 +654,11 @@ void VideoView::registerMpvEvent() {
         // brls::Logger::info("mpv event => : {}", event);
         switch (event) {
         case MpvEventEnum::MPV_RESUME:
+            this->customLoadingNote.clear();
             if (MPVCore::OSD_ON_TOGGLE) {
                 this->showOSD(true);
             }
+            this->hideLoading(true);
             this->toggleIcon->setImageFromSVGRes("icon/ico-pause.svg");
             break;
         case MpvEventEnum::MPV_PAUSE:
@@ -678,14 +681,22 @@ void VideoView::registerMpvEvent() {
             break;
         case MpvEventEnum::UPDATE_DURATION:
             if (this->seekingRange == 0) {
-                this->rightStatusLabel->setText(misc::sec2Time(mpv.duration));
-                this->osdSlider->setProgress(mpv.playback_time / mpv.duration);
+                if (this->isLiveMode) {
+                    this->updateLiveProgressUI();
+                } else {
+                    this->rightStatusLabel->setText(misc::sec2Time(mpv.duration));
+                    this->osdSlider->setProgress(mpv.playback_time / mpv.duration);
+                }
             }
             break;
         case MpvEventEnum::UPDATE_PROGRESS:
             if (this->seekingRange == 0) {
-                this->leftStatusLabel->setText(misc::sec2Time(mpv.video_progress));
-                this->osdSlider->setProgress(mpv.playback_time / mpv.duration);
+                if (this->isLiveMode) {
+                    this->updateLiveProgressUI();
+                } else {
+                    this->leftStatusLabel->setText(misc::sec2Time(mpv.video_progress));
+                    this->osdSlider->setProgress(mpv.playback_time / mpv.duration);
+                }
             }
             break;
         case MpvEventEnum::VIDEO_SPEED_CHANGE:
@@ -698,7 +709,7 @@ void VideoView::registerMpvEvent() {
         case MpvEventEnum::END_OF_FILE:
             if (playbackRecoveryHandler &&
                 playbackRecoveryHandler(event)) {
-                // Twitch can briefly end the current HLS presentation while
+                // Kick can briefly end the current HLS presentation while
                 // switching from an inserted commercial back to the live feed.
                 this->showLoading();
                 break;
@@ -709,12 +720,7 @@ void VideoView::registerMpvEvent() {
             this->playIndexEvent.fire(++this->playIndex);
             break;
         case MpvEventEnum::CACHE_SPEED_CHANGE:
-            // 仅当加载圈已经开始转起的情况显示缓存
-            if (this->osdCenterBox->getVisibility() != brls::Visibility::GONE) {
-                if (this->centerLabel->getVisibility() != brls::Visibility::VISIBLE)
-                    this->centerLabel->setVisibility(brls::Visibility::VISIBLE);
-                this->centerLabel->setText(MPVCore::instance().getCacheSpeed());
-            }
+            // Download speed display removed per user preference; spinner only.
             break;
         case MpvEventEnum::VIDEO_MUTE:
             this->volumeIcon->setImageFromSVGRes("icon/ico-volume-off.svg");
@@ -747,13 +753,31 @@ void VideoView::unRegisterMpvEvent() {
 }
 
 // Loading
+void VideoView::setLoadingNote(const std::string& note) {
+    this->customLoadingNote = note;
+    if (!this->customLoadingNote.empty()) {
+        this->centerLabel->setText(this->customLoadingNote);
+        this->centerLabel->setVisibility(brls::Visibility::VISIBLE);
+        this->osdCenterBox->setVisibility(brls::Visibility::VISIBLE);
+    } else {
+        this->centerLabel->setVisibility(brls::Visibility::GONE);
+    }
+}
+
 void VideoView::showLoading() {
-    this->centerLabel->setVisibility(brls::Visibility::INVISIBLE);
+    if (!this->customLoadingNote.empty()) {
+        this->centerLabel->setText(this->customLoadingNote);
+        this->centerLabel->setVisibility(brls::Visibility::VISIBLE);
+    } else {
+        this->centerLabel->setVisibility(brls::Visibility::GONE);
+    }
     this->osdCenterBox->setVisibility(brls::Visibility::VISIBLE);
     disableDimming(false);
 }
 
 void VideoView::hideLoading(bool dimming) {
+    this->customLoadingNote.clear();
+    this->centerLabel->setVisibility(brls::Visibility::GONE);
     this->osdCenterBox->setVisibility(brls::Visibility::GONE);
     disableDimming(dimming);
 }
@@ -801,35 +825,17 @@ void VideoView::showHint(const std::string& value) {
 }
 
 void VideoView::setTvMode(bool state) {
-    btnToggle->setCustomNavigationRoute(brls::FocusDirection::RIGHT, state ? osdSlider : iconBox);
-    volumeIcon->setCustomNavigationRoute(brls::FocusDirection::UP, state ? osdSlider : osdLockBox);
-    danmakuSettingIcon->setCustomNavigationRoute(brls::FocusDirection::UP, state ? osdSlider : osdLockBox);
-    danmakuIcon->setCustomNavigationRoute(brls::FocusDirection::UP, state ? osdSlider : osdLockBox);
-    iconVideoQuality->setCustomNavigationRoute(brls::FocusDirection::UP, state ? osdSlider : osdLockBox);
-    iconVideoSpeed->setCustomNavigationRoute(brls::FocusDirection::UP, state ? osdSlider : osdLockBox);
-    osdLockBox->setCustomNavigationRoute(brls::FocusDirection::DOWN, state ? osdSlider : iconBox);
+    btnToggle->setCustomNavigationRoute(brls::FocusDirection::RIGHT, state ? (brls::View*)osdSlider : (brls::View*)iconBox);
+    volumeIcon->setCustomNavigationRoute(brls::FocusDirection::UP, state ? (brls::View*)osdSlider : (brls::View*)osdSettingIcon);
+    danmakuSettingIcon->setCustomNavigationRoute(brls::FocusDirection::UP, state ? (brls::View*)osdSlider : (brls::View*)osdSettingIcon);
+    danmakuIcon->setCustomNavigationRoute(brls::FocusDirection::UP, state ? (brls::View*)osdSlider : (brls::View*)osdSettingIcon);
+    iconVideoQuality->setCustomNavigationRoute(brls::FocusDirection::UP, state ? (brls::View*)osdSlider : (brls::View*)osdSettingIcon);
+    iconVideoSpeed->setCustomNavigationRoute(brls::FocusDirection::UP, state ? (brls::View*)osdSlider : (brls::View*)osdSettingIcon);
     osdSlider->setFocusable(state);
 }
 
-bool VideoView::toggleOSDLock() {
-    this->isOsdLock = !this->isOsdLock;
-    if (this->isOsdLock) {
-        this->osdLockIcon->setImageFromSVGRes("icon/player-lock.svg");
-        osdTopBox->setVisibility(brls::Visibility::GONE);
-        osdBottomBox->setVisibility(brls::Visibility::GONE);
-        // 锁定时上下按键不可用
-        osdLockBox->setCustomNavigationRoute(brls::FocusDirection::UP, "video/osd/lock/box");
-        osdLockBox->setCustomNavigationRoute(brls::FocusDirection::DOWN, "video/osd/lock/box");
-    } else {
-        this->osdLockIcon->setImageFromSVGRes("icon/player-unlock.svg");
-        // 手动设置上下按键的导航路线
-        osdLockBox->setCustomNavigationRoute(brls::FocusDirection::UP, "video/osd/setting");
-        osdLockBox->setCustomNavigationRoute(brls::FocusDirection::DOWN, "video/speed/box");
-    }
-    return true;
-}
-
 bool VideoView::toggleSpeed() {
+    if (this->isLiveMode) return false;
     brls::Dropdown* dropdown = new brls::Dropdown(
         "main/player/speed"_i18n, {"2.0x", "1.75x", "1.5x", "1.25x", "1.0x", "0.75x", "0.5x"},
         [](int selected) { MPVCore::instance().setSpeed((200 - selected * 25) / 100.0f); },
@@ -888,7 +894,19 @@ bool VideoView::toggleVolume(brls::View* view) {
     return true;
 }
 
+static VideoView::CloseHandler s_globalCloseHandler = nullptr;
+
+void VideoView::setGlobalCloseHandler(CloseHandler handler) {
+    s_globalCloseHandler = std::move(handler);
+}
+
 bool VideoView::close(bool quit) {
+    if (s_globalCloseHandler) {
+        s_globalCloseHandler();
+    }
+    MPVCore::instance().stop();
+    disableDimming(false);
+
     if (brls::Application::getActivitiesStack().size() > 1) {
         return brls::Application::popActivity(brls::TransitionAnimation::NONE);
     }
@@ -975,4 +993,67 @@ void VideoView::registerActions(const std::string& hintText, const brls::Control
     const brls::BrlsKeyCombination key, const brls::ActionListener& actionListener, bool hidden, bool allowRepeating) {
     this->registerAction(hintText, button, actionListener, hidden, allowRepeating);
     this->registerAction(key, actionListener, allowRepeating);
+}
+
+void VideoView::setLiveMode(bool live, int64_t uptimeSeconds) {
+    this->isLiveMode = live;
+    this->liveRewindSeconds = 0;
+    if (live) {
+        this->setStreamUptime(uptimeSeconds);
+        this->osdSlider->setProgress(1.0f);
+        this->leftStatusLabel->setVisibility(brls::Visibility::GONE);
+        if (this->centerStatusLabel) this->centerStatusLabel->setVisibility(brls::Visibility::GONE);
+        this->btnVideoSpeed->setVisibility(brls::Visibility::GONE);
+        this->btnVideoSpeed->setFocusable(false);
+        this->updateLiveProgressUI();
+        MPVCore::instance().setSpeed(1.0);
+    } else {
+        this->leftStatusLabel->setVisibility(brls::Visibility::VISIBLE);
+        if (this->centerStatusLabel) this->centerStatusLabel->setVisibility(brls::Visibility::VISIBLE);
+        this->btnVideoSpeed->setVisibility(brls::Visibility::VISIBLE);
+        this->btnVideoSpeed->setFocusable(true);
+    }
+}
+
+void VideoView::setStreamUptime(int64_t uptimeSeconds) {
+    this->streamUptimeBaseline = uptimeSeconds;
+    this->streamUptimeBaselineTime = std::chrono::steady_clock::now();
+    if (this->isLiveMode) {
+        this->updateLiveProgressUI();
+    }
+}
+
+int64_t VideoView::getCurrentStreamUptime() const {
+    if (streamUptimeBaseline <= 0) return 0;
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - streamUptimeBaselineTime).count();
+    return streamUptimeBaseline + std::max<int64_t>(0, elapsed);
+}
+
+void VideoView::updateLiveProgressUI() {
+    if (!this->isLiveMode) return;
+
+    const int64_t uptime = this->getCurrentStreamUptime();
+    const std::string uptimeStr = uptime > 0 ? misc::sec2Time(uptime) : "LIVE";
+
+    if (this->liveRewindSeconds <= 0) {
+        this->osdSlider->setProgress(1.0f);
+        this->leftStatusLabel->setVisibility(brls::Visibility::GONE);
+        if (this->centerStatusLabel) this->centerStatusLabel->setVisibility(brls::Visibility::GONE);
+        this->rightStatusLabel->setVisibility(brls::Visibility::VISIBLE);
+        this->rightStatusLabel->setText(uptimeStr);
+    } else {
+        auto& mpv = MPVCore::instance();
+        double dvrWindow = std::max<double>(120.0, mpv.duration);
+        float progress = 1.0f - static_cast<float>(static_cast<double>(this->liveRewindSeconds) / dvrWindow);
+        if (progress < 0.0f) progress = 0.0f;
+        if (progress > 1.0f) progress = 1.0f;
+        this->osdSlider->setProgress(progress);
+
+        this->leftStatusLabel->setVisibility(brls::Visibility::VISIBLE);
+        this->leftStatusLabel->setText(fmt::format("-{}", misc::sec2Time(this->liveRewindSeconds)));
+        if (this->centerStatusLabel) this->centerStatusLabel->setVisibility(brls::Visibility::VISIBLE);
+        this->rightStatusLabel->setVisibility(brls::Visibility::VISIBLE);
+        this->rightStatusLabel->setText(uptimeStr);
+    }
 }

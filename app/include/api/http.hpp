@@ -96,6 +96,16 @@ public:
         return s._post(url, s.encode_form(form));
     }
 
+    // Delete methods
+    template <typename... Ts>
+    static std::string del(const std::string& url, Ts&&... ts) {
+        HTTP s;
+        std::ostringstream body;
+        set_option(s, std::forward<Ts>(ts)...);
+        s._delete(url, &body);
+        return body.str();
+    }
+
     inline static long TIMEOUT = 3000L;
 
 private:

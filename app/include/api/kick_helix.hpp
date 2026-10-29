@@ -1,14 +1,14 @@
 #pragma once
 
 #include "api/http.hpp"
-#include "api/twitch.hpp"
-#include "api/twitch_auth.hpp"
+#include "api/kick.hpp"
+#include "api/kick_auth.hpp"
 
 #include <functional>
 #include <string>
 #include <vector>
 
-namespace twitch {
+namespace kick {
 
 struct UserProfile {
     std::string id;
@@ -19,6 +19,7 @@ struct UserProfile {
     std::string profileImageUrl;
     std::string offlineImageUrl;
     std::string createdAt;
+    int64_t uptimeSeconds = 0;
 };
 
 struct ChannelInformation {
@@ -63,17 +64,8 @@ struct ChannelClip {
 struct MediaPlayback {
     std::string url;
     std::string quality;
+    std::vector<SubtitleTrack> subtitles;
 };
-
-struct ScheduleSegment {
-    std::string id;
-    std::string startTime;
-    std::string endTime;
-    std::string title;
-    std::string categoryName;
-    bool recurring = false;
-};
-
 
 struct Stream {
     std::string id;
@@ -85,7 +77,10 @@ struct Stream {
     std::string title;
     std::string thumbnailUrl;
     std::string language;
+    std::string createdAt;
+    int64_t uptimeSeconds = 0;
     int viewerCount = 0;
+    int followersCount = 0;
     bool isLive = true;
 };
 
@@ -100,13 +95,12 @@ struct ChannelPageData {
     ChannelInformation information;
     Stream liveStream;
     bool live = false;
+    bool isFollowing = false;
     std::vector<ChannelVideo> videos;
     std::vector<ChannelClip> clips;
     std::vector<Category> categories;
-    std::vector<ScheduleSegment> schedule;
     std::string videosError;
     std::string clipsError;
-    std::string scheduleError;
 };
 
 
@@ -135,13 +129,17 @@ struct HomeData {
     std::string categoriesError;
 
     bool hasErrors() const {
-        return !followedError.empty() || !offlineFollowedError.empty() ||
-               !popularError.empty() || !categoriesError.empty();
+        return !followedError.empty() ||
+               !offlineFollowedError.empty() ||
+               !popularError.empty() ||
+               !categoriesError.empty();
     }
 
     bool hasAnySection() const {
-        return followed.loaded || offlineFollowed.loaded ||
-               popular.loaded || categories.loaded;
+        return followed.loaded ||
+               offlineFollowed.loaded ||
+               popular.loaded ||
+               categories.loaded;
     }
 };
 
@@ -150,8 +148,7 @@ using UserProfileCallback =
     std::function<void(UserProfile)>;
 using ChannelPageCallback =
     std::function<void(ChannelPageData)>;
-using StreamsCallback = std::function<void(std::vector<Stream>)>;
-using CategoriesCallback = std::function<void(std::vector<Category>)>;
+using FollowCallback = std::function<void(bool isFollowing)>;
 using StreamPageCallback = std::function<void(StreamPage)>;
 using CategoryPageCallback = std::function<void(CategoryPage)>;
 using MediaPlaybackCallback = std::function<void(MediaPlayback)>;
@@ -169,6 +166,13 @@ void loadChannelPageAsync(
     ChannelPageCallback success,
     ErrorCallback failure,
     HTTP::Cancel cancel = nullptr);
+
+void setChannelFollowAsync(
+    const Config& config,
+    const std::string& channelSlug,
+    bool follow,
+    FollowCallback success,
+    ErrorCallback failure);
 
 void resolveVodAsync(
     const std::string& videoId,
@@ -188,28 +192,7 @@ void loadHomeAsync(
     ErrorCallback failure,
     HTTP::Cancel cancel = nullptr);
 
-void searchChannelsAsync(
-    const Config& config,
-    const std::string& query,
-    StreamsCallback success,
-    ErrorCallback failure,
-    HTTP::Cancel cancel = nullptr);
-
-void loadCategoryStreamsAsync(
-    const Config& config,
-    const std::string& gameId,
-    StreamsCallback success,
-    ErrorCallback failure,
-    HTTP::Cancel cancel = nullptr);
-
 void loadFollowedPageAsync(
-    const Config& config,
-    const std::string& cursor,
-    StreamPageCallback success,
-    ErrorCallback failure,
-    HTTP::Cancel cancel = nullptr);
-
-void loadOfflineFollowedPageAsync(
     const Config& config,
     const std::string& cursor,
     StreamPageCallback success,
@@ -253,4 +236,7 @@ std::string mediaThumbnail(
 std::string streamThumbnail(const std::string& pattern, int width = 320, int height = 180);
 std::string categoryThumbnail(const std::string& pattern, int width = 188, int height = 250);
 
-}  // namespace twitch
+bool isFollowedChannelsDirty();
+void clearFollowedChannelsDirty();
+
+}  // namespace kick

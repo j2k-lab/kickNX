@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <fstream>
 
-namespace twinx::portrait {
+namespace kicknx::portrait {
 namespace {
 
 constexpr float FILTER_ALPHA = 0.18f;
@@ -28,15 +28,15 @@ void OrientationController::init() {
     initialized = true;
     load();
 
-    if (selectedMode != OrientationMode::Auto) {
-        applyOrientation(
-            selectedMode == OrientationMode::Landscape
-                ? DisplayOrientation::Landscape
-                : selectedMode == OrientationMode::PortraitClockwise
-                    ? DisplayOrientation::PortraitClockwise
-                    : DisplayOrientation::PortraitCounterClockwise,
-            false);
-    }
+    applyOrientation(
+        selectedMode == OrientationMode::Landscape
+            ? DisplayOrientation::Landscape
+            : selectedMode == OrientationMode::PortraitClockwise
+                ? DisplayOrientation::PortraitClockwise
+                : selectedMode == OrientationMode::PortraitCounterClockwise
+                    ? DisplayOrientation::PortraitCounterClockwise
+                    : DisplayOrientation::Landscape,
+        false);
 
 #if defined(__SWITCH__)
     sensorEvent = brls::Application::getPlatform()
@@ -47,7 +47,7 @@ void OrientationController::init() {
 #endif
 
     brls::Logger::info(
-        "twiNX orientation initialized: mode={} orientation={}",
+        "kickNX orientation initialized: mode={} orientation={}",
         static_cast<int>(selectedMode),
         orientationName(currentOrientation));
 }
@@ -157,7 +157,7 @@ void OrientationController::applyOrientation(
     candidateOrientation = orientation;
     orientationChanged.fire(orientation);
     brls::Logger::info(
-        "twiNX orientation changed: {}",
+        "kickNX orientation changed: {}",
         orientationName(orientation));
 }
 
@@ -175,7 +175,7 @@ const char* OrientationController::orientationName(
 
 std::string OrientationController::settingsPath() const {
 #if defined(__SWITCH__)
-    return "sdmc:/config/TwiNX/orientation.json";
+    return "sdmc:/config/KickNX/orientation.json";
 #else
     return "orientation.json";
 #endif
@@ -187,13 +187,13 @@ void OrientationController::load() {
         if (!input.is_open()) return;
         nlohmann::json root;
         input >> root;
-        const int value = root.value("mode", 0);
+        const int value = root.value("mode", static_cast<int>(OrientationMode::Landscape));
         if (value >= static_cast<int>(OrientationMode::Auto) &&
             value <= static_cast<int>(OrientationMode::PortraitCounterClockwise))
             selectedMode = static_cast<OrientationMode>(value);
     } catch (const std::exception& error) {
         brls::Logger::warning(
-            "twiNX could not load orientation setting: {}",
+            "kickNX could not load orientation setting: {}",
             error.what());
     }
 }
@@ -208,10 +208,10 @@ bool OrientationController::save() const {
         return output.good();
     } catch (const std::exception& error) {
         brls::Logger::warning(
-            "twiNX could not save orientation setting: {}",
+            "kickNX could not save orientation setting: {}",
             error.what());
         return false;
     }
 }
 
-}  // namespace twinx::portrait
+}  // namespace kicknx::portrait

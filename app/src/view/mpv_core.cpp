@@ -114,8 +114,8 @@ MPVCore::MPVCore() {
 
 void MPVCore::init() {
     std::setlocale(LC_NUMERIC, "C");
-#if defined(TWINX_PLAYBACK_DEBUG)
-    twinx::debug::log(
+#if defined(KICKNX_PLAYBACK_DEBUG)
+    kicknx::debug::log(
         "MPV_INIT",
         "begin HARDWARE_DEC=%d hwdec_method=%s vo=%s cache_mb=%d",
         MPVCore::HARDWARE_DEC ? 1 : 0,
@@ -142,11 +142,25 @@ void MPVCore::init() {
     mpv_set_option_string(mpv, "watch-later-dir", fmt::format("{}/watch-later", confDir).c_str());
     mpv_set_option_string(mpv, "gpu-shader-cache-dir", fmt::format("{}/cache", confDir).c_str());
     mpv_set_option_string(mpv, "ytdl", "no");
-    mpv_set_option_string(mpv, "referrer", conf.getUrl().c_str());
+    mpv_set_option_string(mpv, "referrer", "https://kick.com/");
+    mpv_set_option_string(mpv, "user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36");
+    mpv_set_option_string(mpv, "http-header-fields", "Origin: https://kick.com,Referer: https://kick.com/");
+    mpv_set_option_string(mpv, "tls-verify", "no");
+#if defined(__SWITCH__)
+    mpv_set_option_string(mpv, "tls-ca-file", "romfs:/cert/cacert.pem");
+#endif
+    mpv_set_option_string(mpv, "network-timeout", "15");
     mpv_set_option_string(mpv, "osd-level", "0");
     mpv_set_option_string(mpv, "video-timing-offset", "0");  // 60fps
     mpv_set_option_string(mpv, "reset-on-next-file", "speed,pause");
     mpv_set_option_string(mpv, "subs-fallback", SUBS_FALLBACK ? "yes" : "no");
+    mpv_set_option_string(mpv, "sub-font-size", "42");
+    mpv_set_option_string(mpv, "sub-color", "#FFFFFFFF");
+    mpv_set_option_string(mpv, "sub-border-color", "#FF000000");
+    mpv_set_option_string(mpv, "sub-border-size", "3");
+    mpv_set_option_string(mpv, "sub-margin-y", "40");
+    mpv_set_option_string(mpv, "sub-auto", "all");
+    mpv_set_option_string(mpv, "sid", "no");
     mpv_set_option_string(mpv, "vo", MPVCore::VO.c_str());
 #if defined(__PS4__) || defined(__PSV__) || defined(TRIMUI)
     mpv_set_option_string(mpv, "audio-channels", "stereo");
@@ -172,6 +186,7 @@ void MPVCore::init() {
     } else {
         mpv_set_option_string(mpv, "cache", "no");
     }
+
     // Making the loading process faster
 #if defined(__SWITCH__)
     mpv_set_option_string(mpv, "vd-lavc-dr", "yes");
@@ -186,6 +201,8 @@ void MPVCore::init() {
         mpv_set_option_string(mpv, "sub-font", "nintendo_udjxh-db_zh-tw_003");
     else if (locale == brls::LOCALE_Ko)
         mpv_set_option_string(mpv, "sub-font", "nintendo_udsg-r_ko_003");
+    else
+        mpv_set_option_string(mpv, "sub-font", "nintendo_udsg-r_std_003");
 #elif defined(__PS4__)
     mpv_set_option_string(mpv, "vd-lavc-threads", "6");
 #elif defined(__PSV__)
@@ -221,21 +238,21 @@ void MPVCore::init() {
 #endif
 
     if (mpv_initialize(mpv) < 0) {
-#if defined(TWINX_PLAYBACK_DEBUG)
-        twinx::debug::log("MPV_INIT", "mpv_initialize failed");
+#if defined(KICKNX_PLAYBACK_DEBUG)
+        kicknx::debug::log("MPV_INIT", "mpv_initialize failed");
 #endif
         mpv_terminate_destroy(mpv);
         brls::fatal("Could not initialize mpv context");
     }
 
-#if defined(TWINX_PLAYBACK_DEBUG)
-    mpv_request_log_messages(mpv, "info");
-    twinx::debug::log(
+#if defined(KICKNX_PLAYBACK_DEBUG)
+    mpv_request_log_messages(mpv, "v");
+    kicknx::debug::log(
         "MPV_INIT",
         "initialized client_api=0x%llx",
         static_cast<unsigned long long>(mpv_client_api_version()));
 #endif
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
     // Warnings include HLS corruption and NVTEGRA guard failures without the
     // high-volume informational stream used by the crash diagnostic build.
     mpv_request_log_messages(mpv, "warn");
@@ -562,12 +579,12 @@ std::string MPVCore::getCacheSpeed() const {
 void MPVCore::eventMainLoop() {
     while (true) {
         mpv_event *event = mpv_wait_event(this->mpv, 0);
-#if defined(TWINX_PLAYBACK_DEBUG)
+#if defined(KICKNX_PLAYBACK_DEBUG)
         if (event->event_id != MPV_EVENT_NONE &&
             event->event_id != MPV_EVENT_PROPERTY_CHANGE) {
             const char* eventName =
                 mpv_event_name(event->event_id);
-            twinx::debug::log(
+            kicknx::debug::log(
                 "MPV_EVT",
                 "id=%d name=%s error=%d",
                 static_cast<int>(event->event_id),
@@ -580,8 +597,8 @@ void MPVCore::eventMainLoop() {
             return;
         case MPV_EVENT_LOG_MESSAGE: {
             auto log = (mpv_event_log_message *)event->data;
-#if defined(TWINX_PLAYBACK_DEBUG)
-            twinx::debug::log(
+#if defined(KICKNX_PLAYBACK_DEBUG)
+            kicknx::debug::log(
                 "MPV_LOG",
                 "level=%s prefix=%s text=%s",
                 log->level ? log->level : "?",
@@ -606,10 +623,10 @@ void MPVCore::eventMainLoop() {
             return;
         case MPV_EVENT_FILE_LOADED:
             brls::Logger::info("MPVCore => EVENT_FILE_LOADED");
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
             this->logHardwareDecoderState("file-loaded");
 #endif
-#if defined(TWINX_PLAYBACK_DEBUG)
+#if defined(KICKNX_PLAYBACK_DEBUG)
             this->logPlaybackSnapshot("file-loaded");
 #endif
             // event 8: 文件预加载结束，准备解码
@@ -618,7 +635,7 @@ void MPVCore::eventMainLoop() {
         case MPV_EVENT_START_FILE:
             // event 6: 开始加载文件
             brls::Logger::info("MPVCore => EVENT_START_FILE");
-#if defined(TWINX_PLAYBACK_DEBUG)
+#if defined(KICKNX_PLAYBACK_DEBUG)
             this->logPlaybackSnapshot("start-file");
 #endif
             mpvCoreEvent.fire(MpvEventEnum::START_FILE);
@@ -627,10 +644,10 @@ void MPVCore::eventMainLoop() {
         case MPV_EVENT_PLAYBACK_RESTART:
             // event 21: 开始播放文件（一般是播放或调整进度结束之后触发）
             brls::Logger::info("MPVCore => EVENT_PLAYBACK_RESTART");
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
             this->logPlaybackPerformance("playback-restart");
 #endif
-#if defined(TWINX_PLAYBACK_DEBUG)
+#if defined(KICKNX_PLAYBACK_DEBUG)
             this->logPlaybackSnapshot("playback-restart");
 #endif
             this->video_stopped = false;
@@ -641,10 +658,10 @@ void MPVCore::eventMainLoop() {
             break;
         case MPV_EVENT_VIDEO_RECONFIG:
             brls::Logger::warning("MPVCore => VIDEO_RECONFIG");
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
             this->logHardwareDecoderState("video-reconfig");
 #endif
-#if defined(TWINX_PLAYBACK_DEBUG)
+#if defined(KICKNX_PLAYBACK_DEBUG)
             this->logPlaybackSnapshot("video-reconfig");
 #endif
             mpvCoreEvent.fire(MpvEventEnum::VIDEO_RECONFIG);
@@ -653,8 +670,8 @@ void MPVCore::eventMainLoop() {
             // event 7: 文件播放结束
             this->video_stopped = true;
             auto node = (mpv_event_end_file *)event->data;
-#if defined(TWINX_PLAYBACK_DEBUG)
-            twinx::debug::log(
+#if defined(KICKNX_PLAYBACK_DEBUG)
+            kicknx::debug::log(
                 "MPV_END",
                 "reason=%d error=%d playlist_entry_id=%lld playlist_insert_id=%lld playlist_insert_num_entries=%d",
                 static_cast<int>(node->reason),
@@ -670,7 +687,7 @@ void MPVCore::eventMainLoop() {
                     mpv_error_string(node->error),
                     LIVE_STREAM_RECOVERY ? "enabled" : "disabled");
 
-                // This must happen before stop(). Twitch can emit a transient
+                // This must happen before stop(). Kick can emit a transient
                 // HLS error while switching from an inserted commercial back
                 // to the live presentation. Calling stop() here tears down MPV
                 // before the upper recovery layer can replace the URL.
@@ -710,10 +727,10 @@ void MPVCore::eventMainLoop() {
             mpv_event_property *prop = (mpv_event_property *)event->data;
             if (prop->format == MPV_FORMAT_NONE) break;
 
-#if defined(TWINX_PLAYBACK_DEBUG)
+#if defined(KICKNX_PLAYBACK_DEBUG)
             if (event->reply_userdata != 4 &&
                 event->reply_userdata != 5) {
-                twinx::debug::log(
+                kicknx::debug::log(
                     "MPV_PROP",
                     "userdata=%llu name=%s format=%d",
                     static_cast<unsigned long long>(event->reply_userdata),
@@ -752,7 +769,7 @@ void MPVCore::eventMainLoop() {
                 this->playback_time = *(double *)prop->data;
                 if (video_progress != (int64_t)playback_time) {
                     video_progress = (int64_t)playback_time;
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
                     const int64_t bucket = video_progress >= 0 ? video_progress / 10 : -1;
                     if (bucket >= 0 && bucket != performanceLogBucket) {
                         performanceLogBucket = bucket;
@@ -788,10 +805,10 @@ void MPVCore::eventMainLoop() {
     }
 }
 
-#if defined(TWINX_PLAYBACK_DEBUG)
+#if defined(KICKNX_PLAYBACK_DEBUG)
 void MPVCore::logPlaybackSnapshot(const char* reason) {
     if (!mpv) {
-        twinx::debug::log("MPV_SNAP", "reason=%s mpv=null", reason);
+        kicknx::debug::log("MPV_SNAP", "reason=%s mpv=null", reason);
         return;
     }
 
@@ -827,7 +844,7 @@ void MPVCore::logPlaybackSnapshot(const char* reason) {
             *cursor = ' ';
     }
 
-    twinx::debug::log(
+    kicknx::debug::log(
         "MPV_SNAP",
         "reason=%s path_len=%zu path_hash=%016llx title=%s "
         "file_format=%s vcodec=%s vformat=%s pixel=%s hw_pixel=%s "
@@ -835,7 +852,7 @@ void MPVCore::logPlaybackSnapshot(const char* reason) {
         "playlist=%lld/%lld pause=%lld idle=%lld eof=%lld seeking=%lld",
         reason,
         path.size(),
-        static_cast<unsigned long long>(twinx::debug::hashText(path)),
+        static_cast<unsigned long long>(kicknx::debug::hashText(path)),
         safeTitle[0] ? safeTitle : "<empty>",
         fileFormat.c_str(),
         videoCodec.c_str(),
@@ -857,7 +874,7 @@ void MPVCore::logPlaybackSnapshot(const char* reason) {
 }
 #endif
 
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
 void MPVCore::logHardwareDecoderState(const std::string& reason) {
     if (!mpv) return;
 
@@ -869,7 +886,7 @@ void MPVCore::logHardwareDecoderState(const std::string& reason) {
     const int64_t height = getInt("video-params/h");
 
     brls::Logger::warning(
-        "twiNX HWDEC [{}]: current='{}' interop='{}' "
+        "kickNX HWDEC [{}]: current='{}' interop='{}' "
         "pixel='{}' hw-pixel='{}' size={}x{}",
         reason,
         hwdec.empty() ? "unavailable" : hwdec,
@@ -892,7 +909,7 @@ void MPVCore::logPlaybackPerformance(const char* reason) {
     const int64_t delayed = getInt("vo-delayed-frame-count");
 
     brls::Logger::warning(
-        "twiNX PERF [{}]: hwdec='{}' pixel='{}' hw-pixel='{}' "
+        "kickNX PERF [{}]: hwdec='{}' pixel='{}' hw-pixel='{}' "
         "decoder-drops={} output-drops={} mistimed={} delayed={}",
         reason ? reason : "unknown",
         hwdec.empty() ? "NONE" : hwdec,
@@ -909,7 +926,7 @@ void MPVCore::prepareHardwareDecoderRecovery() {
     if (!mpv) return;
 
     brls::Logger::warning(
-        "twiNX: flushing Twitch buffers and rebuilding hardware decoder");
+        "kickNX: flushing Kick buffers and rebuilding hardware decoder");
 
     // Stop frame delivery while the old HLS presentation and its hardware
     // frames are being discarded.
@@ -917,7 +934,7 @@ void MPVCore::prepareHardwareDecoderRecovery() {
     mpv_command_string(mpv, "drop-buffers");
 
     // Direct rendering is independent from hardware decoding. Disabling it
-    // avoids decoder-owned staging buffers across Twitch presentation changes
+    // avoids decoder-owned staging buffers across Kick presentation changes
     // while keeping hardware decode enabled.
     mpv_set_property_string(mpv, "vd-lavc-dr", "no");
 
@@ -930,7 +947,7 @@ void MPVCore::prepareHardwareDecoderRecovery() {
         "hwdec",
         MPVCore::PLAYER_HWDEC_METHOD.c_str());
 
-#if defined(TWINX_PLAYBACK_PERF_DEBUG)
+#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
     this->logHardwareDecoderState("decoder-reset-requested");
 #endif
 }
@@ -950,18 +967,21 @@ void MPVCore::reset() {
 }
 
 void MPVCore::setUrl(const std::string &url, const std::string &extra, const std::string &method, uint64_t userdata) {
-#if defined(TWINX_PLAYBACK_DEBUG)
-    twinx::debug::log(
+#if defined(KICKNX_PLAYBACK_DEBUG)
+    kicknx::debug::log(
         "MPV_CMD",
         "loadfile method=%s userdata=%llu url_len=%zu url_hash=%016llx extra_len=%zu",
         method.c_str(),
         static_cast<unsigned long long>(userdata),
         url.size(),
-        static_cast<unsigned long long>(twinx::debug::hashText(url)),
+        static_cast<unsigned long long>(kicknx::debug::hashText(url)),
         extra.size());
 #endif
     brls::Logger::debug("MPVCore {} ({}) extra: ({})", method, url, extra);
-    if (mpv_client_api_version() >= MPV_MAKE_VERSION(2, 3)) {
+    if (extra.empty()) {
+        const char *cmd[] = {"loadfile", url.c_str(), method.c_str(), nullptr};
+        mpv_command_async(this->mpv, userdata, cmd);
+    } else if (mpv_client_api_version() >= MPV_MAKE_VERSION(2, 3)) {
         const char *cmd[] = {"loadfile", url.c_str(), method.c_str(), "0", extra.c_str(), nullptr};
         mpv_command_async(this->mpv, userdata, cmd);
     } else {
@@ -973,8 +993,8 @@ void MPVCore::setUrl(const std::string &url, const std::string &extra, const std
 void MPVCore::togglePlay() { this->command("cycle", "pause"); }
 
 void MPVCore::stop() {
-#if defined(TWINX_PLAYBACK_DEBUG)
-    twinx::debug::log("MPV_CMD", "stop requested");
+#if defined(KICKNX_PLAYBACK_DEBUG)
+    kicknx::debug::log("MPV_CMD", "stop requested");
 #endif
     this->command("stop");
 }

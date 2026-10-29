@@ -50,8 +50,8 @@ VideoProgressSlider::VideoProgressSlider() {
 
     Theme theme = Application::getTheme();
 
-    line->setColor(theme["brls/slider/line_filled"]);
-    lineEmpty->setColor(theme["brls/slider/line_empty"]);
+    line->setColor(nvgRGB(83, 252, 24));
+    lineEmpty->setColor(nvgRGBA(255, 255, 255, 60));
 
     pointer->addGestureRecognizer(new PanGestureRecognizer(
         [this](PanGestureStatus status, Sound* soundToPlay) {
@@ -82,7 +82,10 @@ VideoProgressSlider::VideoProgressSlider() {
             if (status.state == GestureState::END) {
                 Application::getPlatform()->getAudioPlayer()->play(SOUND_SLIDER_RELEASE);
                 progressSetEvent.fire(this->progress);
-                Application::giveFocus(this->getParentActivity()->getContentView());
+                // The player may have been closed (B pressed) mid-drag; the
+                // slider is then detached and has no parent activity.
+                if (auto* activity = this->getParentActivity())
+                    Application::giveFocus(activity->getContentView());
             }
         },
         PanAxis::HORIZONTAL));
@@ -94,7 +97,8 @@ VideoProgressSlider::VideoProgressSlider() {
             float delta = status.position.x - pointer->getWidth() / 2 - pointer->getX();
             setProgress(progress + delta / paddingWidth);
             progressSetEvent.fire(this->progress);
-            Application::giveFocus(this->getParentActivity()->getContentView());
+            if (auto* activity = this->getParentActivity())
+                Application::giveFocus(activity->getContentView());
         }));
 
     progress = 0;

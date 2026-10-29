@@ -1,25 +1,38 @@
 #pragma once
 
-#include "api/twitch_chat.hpp"
+#include "api/kick_chat.hpp"
+#include "utils/orientation.hpp"
 
 #include <borealis.hpp>
 
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 class RecyclingGrid;
-class TwitchDraftPreview;
+class KickDraftPreview;
 
-class TwitchChatComposer : public brls::Box {
+class KickChatComposer : public brls::Box {
 public:
-    explicit TwitchChatComposer(std::string channel);
-    ~TwitchChatComposer() override;
+    explicit KickChatComposer(std::string channel);
+    ~KickChatComposer() override;
+
+    bool isTranslucent() override {
+        return true;
+    }
 
     brls::View* getDefaultFocus() override {
         return draftButton ? draftButton : this;
     }
 
 private:
+    // Closes this overlay when the display rotates, since its fixed-size
+    // layout would otherwise be left covering the portrait keyboard.
+    std::optional<brls::Event<kicknx::portrait::DisplayOrientation>::Subscription>
+        orientationSubscription;
+    std::shared_ptr<bool> aliveToken = std::make_shared<bool>(true);
+
     enum class Tab {
         Recent = 0,
         Channel = 1,
@@ -27,7 +40,7 @@ private:
     };
 
     void openKeyboard();
-    void insertEmote(const twitch::UserEmote& emote);
+    void insertEmote(const kick::UserEmote& emote);
     void sendMessage();
     void setTab(Tab value);
     void cycleTab(int direction);
@@ -36,12 +49,12 @@ private:
     void updateTabs();
     void updateChannelTabVisibility();
     void reconcileRecentEmotes();
-    std::vector<twitch::UserEmote> visibleEmotes() const;
+    std::vector<kick::UserEmote> visibleEmotes() const;
 
     std::string channel;
     std::string draft;
-    std::vector<twitch::UserEmote> emotes;
-    std::vector<twitch::UserEmote> recentEmotes;
+    std::vector<kick::UserEmote> emotes;
+    std::vector<kick::UserEmote> recentEmotes;
     Tab tab = Tab::Recent;
     bool loading = true;
     bool sending = false;
@@ -49,7 +62,7 @@ private:
     bool subscriptionPermissionGranted = false;
 
     brls::Label* statusLabel = nullptr;
-    TwitchDraftPreview* draftPreview = nullptr;
+    KickDraftPreview* draftPreview = nullptr;
     brls::Label* counterLabel = nullptr;
     brls::Label* focusedEmoteLabel = nullptr;
     brls::Label* sendLabel = nullptr;

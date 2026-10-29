@@ -5,10 +5,12 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
+#include <string>
 #include <thread>
 
-namespace twinx::debug {
+namespace kicknx::debug {
 namespace {
 
 std::mutex logMutex;
@@ -17,6 +19,26 @@ std::chrono::steady_clock::time_point startedAt =
     std::chrono::steady_clock::now();
 FILE* logFile = nullptr;
 bool initialized = false;
+std::string activeLogPath;
+size_t bytesWritten = 0;
+constexpr size_t MAX_LOG_SIZE = 1024 * 1024;  // 1 MB cap per log file
+
+void rotateLocked() {
+    if (logFile) {
+        std::fclose(logFile);
+        logFile = nullptr;
+    }
+    if (!activeLogPath.empty()) {
+        const std::string previousPath = activeLogPath + ".previous";
+        std::remove(previousPath.c_str());
+        std::rename(activeLogPath.c_str(), previousPath.c_str());
+        logFile = std::fopen(activeLogPath.c_str(), "w");
+        if (logFile) {
+            std::setvbuf(logFile, nullptr, _IONBF, 0);
+        }
+    }
+    bytesWritten = 0;
+}
 
 void writeLineLocked(const char* line) {
     std::fputs(line, stderr);
@@ -24,13 +46,49 @@ void writeLineLocked(const char* line) {
     std::fflush(stderr);
 
     if (logFile) {
-        std::fputs(line, logFile);
-        std::fputc('\n', logFile);
-        std::fflush(logFile);
+        const size_t lineLen = std::strlen(line) + 1;
+        if (bytesWritten + lineLen > MAX_LOG_SIZE) {
+            rotateLocked();
+            const char* rotated =
+                "[KICKNX-DBG][ROTATED] Log reached 1MB cap, rotated to .previous";
+            if (logFile) {
+                std::fputs(rotated, logFile);
+                std::fputc('\n', logFile);
+                std::fflush(logFile);
+                bytesWritten += std::strlen(rotated) + 1;
+            }
+        }
+        if (logFile) {
+            std::fputs(line, logFile);
+            std::fputc('\n', logFile);
+            std::fflush(logFile);
+            bytesWritten += lineLen;
+        }
     }
 }
 
 }  // namespace
+
+void cleanStaleLogs(const std::string& directory) {
+    try {
+        namespace fs = std::filesystem;
+        if (!fs::exists(directory) || !fs::is_directory(directory)) return;
+
+        for (const auto& entry : fs::directory_iterator(directory)) {
+            if (!entry.is_regular_file()) continue;
+            const std::string filename = entry.path().filename().string();
+            if (filename.find(".log") != std::string::npos ||
+                filename.find(".previous") != std::string::npos) {
+                std::error_code ec;
+                const auto size = entry.file_size(ec);
+                if (!ec && size > MAX_LOG_SIZE) {
+                    fs::remove(entry.path(), ec);
+                }
+            }
+        }
+    } catch (...) {
+    }
+}
 
 void init(const std::string& path) {
     std::lock_guard<std::mutex> lock(logMutex);
@@ -40,6 +98,8 @@ void init(const std::string& path) {
         logFile = nullptr;
     }
 
+    activeLogPath = path;
+    bytesWritten = 0;
     startedAt = std::chrono::steady_clock::now();
     sequence.store(0);
     initialized = true;
@@ -56,7 +116,7 @@ void init(const std::string& path) {
     std::snprintf(
         line,
         sizeof(line),
-        "[TWINX-DBG][000000][+00000000ms][BOOT] logger initialized; "
+        "[KICKNX-DBG][000000][+00000000ms][BOOT] logger initialized; "
         "sd_log=%s path=%s",
         logFile ? "yes" : "no",
         path.c_str());
@@ -70,7 +130,7 @@ void shutdown() {
         return;
 
     writeLineLocked(
-        "[TWINX-DBG][999999][SHUTDOWN] logger closing cleanly");
+        "[KICKNX-DBG][999999][SHUTDOWN] logger closing cleanly");
 
     if (logFile) {
         std::fclose(logFile);
@@ -110,7 +170,7 @@ void log(const char* category, const char* format, ...) {
     std::snprintf(
         line,
         sizeof(line),
-        "[TWINX-DBG][%06llu][+%08lldms][T%08zx][%s] %s",
+        "[KICKNX-DBG][%06llu][+%08lldms][T%08zx][%s] %s",
         static_cast<unsigned long long>(id),
         static_cast<long long>(elapsed),
         threadId & 0xffffffffu,
@@ -154,4 +214,4 @@ const char* playerEventName(int event) {
     }
 }
 
-}  // namespace twinx::debug
+}  // namespace kicknx::debug

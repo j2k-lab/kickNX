@@ -169,11 +169,8 @@ void Image::doRequest(HTTP& s) {
         int imageW = 0, imageH = 0;
         bool isWebp = false;
 #ifdef USE_WEBP
-        char* ct = nullptr;
-        if (urlCopy.find("Webp") != std::string::npos ||
-            (s.getinfo(&ct) &&
-             ct != nullptr &&
-             strcmp(ct, "image/webp") == 0)) {
+        if (data.size() >= 12 &&
+            WebPGetInfo((const uint8_t*)data.c_str(), data.size(), &imageW, &imageH)) {
             imageData = WebPDecodeRGBA((const uint8_t*)data.c_str(), data.size(), &imageW, &imageH);
             isWebp = true;
         } else

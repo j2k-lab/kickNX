@@ -1,4 +1,4 @@
-#include "view/twitch_chat_composer.hpp"
+#include "view/kick_chat_composer.hpp"
 
 #include "utils/image.hpp"
 #include "view/recycling_grid.hpp"
@@ -43,17 +43,17 @@ private:
         brls::Image*> entries;
 };
 
-class TwitchDraftPreview : public brls::View {
+class KickDraftPreview : public brls::View {
 public:
     void configure(
         const std::string& value,
-        const std::vector<twitch::UserEmote>& emotes) {
+        const std::vector<kick::UserEmote>& emotes) {
         draft = value;
         segments.clear();
 
         std::unordered_map<
             std::string,
-            const twitch::UserEmote*> byName;
+            const kick::UserEmote*> byName;
         byName.reserve(emotes.size());
         for (const auto& emote : emotes) {
             if (!emote.name.empty())
@@ -278,17 +278,17 @@ brls::Box* makeActionButton(
     auto* button = new brls::Box();
     button->setFocusable(true);
     button->setAxis(brls::Axis::ROW);
-    button->setPadding(12, 22, 12, 22);
+    button->setPadding(8, 16, 8, 16);
     button->setCornerRadius(8);
     button->setBackgroundColor(
-        nvgRGB(45, 50, 65));
-    button->setMarginRight(12);
+        nvgRGBA(45, 50, 65, 170));
+    button->setMarginRight(10);
     button->addGestureRecognizer(
         new brls::TapGestureRecognizer(button));
 
     auto* label = new brls::Label();
     label->setText(text);
-    label->setFontSize(18);
+    label->setFontSize(16);
     label->setTextColor(
         nvgRGB(245, 246, 250));
     button->addView(label);
@@ -322,26 +322,26 @@ public:
             brls::AlignItems::CENTER);
         this->setJustifyContent(
             brls::JustifyContent::CENTER);
-        this->setPadding(7, 7, 7, 7);
+        this->setPadding(6, 6, 6, 6);
         this->setCornerRadius(8);
         this->setBackgroundColor(
-            nvgRGB(31, 35, 46));
+            nvgRGBA(31, 35, 46, 150));
 
         picture = new brls::Image();
-        picture->setWidth(52);
-        picture->setHeight(52);
+        picture->setWidth(48);
+        picture->setHeight(48);
         picture->setImageFromRes(
             "img/video-card-bg.png");
         this->addView(picture);
 
         name = new brls::Label();
-        name->setFontSize(13);
+        name->setFontSize(12);
         name->setSingleLine(true);
         name->setHorizontalAlign(
             brls::HorizontalAlign::CENTER);
         name->setTextColor(
             nvgRGB(229, 231, 238));
-        name->setMarginTop(4);
+        name->setMarginTop(3);
         name->setWidthPercentage(100);
         this->addView(name);
 
@@ -371,9 +371,9 @@ public:
     }
 
     void configure(
-        const twitch::UserEmote& emote,
+        const kick::UserEmote& emote,
         std::function<void(
-            const twitch::UserEmote&)> onFocus) {
+            const kick::UserEmote&)> onFocus) {
         value = emote;
         focused = std::move(onFocus);
         name->setText(value.name);
@@ -386,20 +386,20 @@ public:
 private:
     brls::Image* picture = nullptr;
     brls::Label* name = nullptr;
-    twitch::UserEmote value;
+    kick::UserEmote value;
     std::function<void(
-        const twitch::UserEmote&)> focused;
+        const kick::UserEmote&)> focused;
 };
 
 class EmoteDataSource :
     public RecyclingGridDataSource {
 public:
     using Selection = std::function<void(
-        const twitch::UserEmote&)>;
+        const kick::UserEmote&)>;
     using Focus = std::function<void(
-        const twitch::UserEmote&)>;
+        const kick::UserEmote&)>;
     EmoteDataSource(
-        std::vector<twitch::UserEmote> values,
+        std::vector<kick::UserEmote> values,
         Selection selected,
         Focus focused)
         : items(std::move(values)),
@@ -415,7 +415,7 @@ public:
         size_t index) override {
         auto* cell = dynamic_cast<EmoteCell*>(
             recycler->dequeueReusableCell(
-                "TwitchEmote"));
+                "KickEmote"));
         cell->configure(
             items.at(index),
             focused);
@@ -434,37 +434,82 @@ public:
     }
 
 private:
-    std::vector<twitch::UserEmote> items;
+    std::vector<kick::UserEmote> items;
     Selection selected;
     Focus focused;
 };
 
 }  // namespace
 
-TwitchChatComposer::TwitchChatComposer(
+KickChatComposer::KickChatComposer(
     std::string channel)
     : channel(std::move(channel)),
       recentEmotes(
-          twitch::loadRecentEmotes()) {
+          kick::loadRecentEmotes()) {
     this->setAxis(brls::Axis::COLUMN);
     this->setDimensions(
         brls::Application::contentWidth,
         brls::Application::contentHeight);
+    this->setJustifyContent(
+        brls::JustifyContent::FLEX_END);
     this->setBackgroundColor(
-        nvgRGB(15, 17, 23));
-    this->setPadding(24, 34, 18, 34);
+        nvgRGBA(0, 0, 0, 0));
+
+    // Top translucent backdrop that dismisses the composer when tapped/clicked
+    auto* dismissArea = new brls::Box();
+    dismissArea->setGrow(1.0f);
+    dismissArea->setWidthPercentage(100.0f);
+    dismissArea->setBackgroundColor(
+        nvgRGBA(0, 0, 0, 90));
+    dismissArea->addGestureRecognizer(
+        new brls::TapGestureRecognizer(dismissArea));
+    dismissArea->registerClickAction(
+        [](brls::View*) {
+            brls::Application::popActivity();
+            return true;
+        });
+    this->addView(dismissArea);
+
+    // Bottom sheet container
+    auto* sheet = new brls::Box();
+    sheet->setAxis(brls::Axis::COLUMN);
+    sheet->setWidthPercentage(100.0f);
+    sheet->setHeight(460.0f);
+    sheet->setCornerRadius(16);
+    sheet->setBackgroundColor(
+        nvgRGBA(15, 17, 23, 90));
+    sheet->setPadding(12, 32, 10, 32);
+    this->addView(sheet);
+
+    auto* handleBox = new brls::Box();
+    handleBox->setAxis(brls::Axis::ROW);
+    handleBox->setJustifyContent(
+        brls::JustifyContent::CENTER);
+    handleBox->setAlignItems(
+        brls::AlignItems::CENTER);
+    handleBox->setWidthPercentage(100.0f);
+    handleBox->setMarginBottom(6);
+
+    auto* handleBar = new brls::Box();
+    handleBar->setWidth(48);
+    handleBar->setHeight(4);
+    handleBar->setCornerRadius(2);
+    handleBar->setBackgroundColor(
+        nvgRGBA(160, 170, 195, 140));
+    handleBox->addView(handleBar);
+    sheet->addView(handleBox);
 
     auto* headingRow = new brls::Box();
     headingRow->setAxis(brls::Axis::ROW);
     headingRow->setAlignItems(
         brls::AlignItems::CENTER);
-    headingRow->setMarginBottom(12);
-    this->addView(headingRow);
+    headingRow->setMarginBottom(8);
+    sheet->addView(headingRow);
 
     auto* heading = new brls::Label();
     heading->setText(
-        "Twitch chat composer");
-    heading->setFontSize(30);
+        "Kick chat composer");
+    heading->setFontSize(22);
     heading->setTextColor(
         nvgRGB(245, 246, 250));
     heading->setGrow(1.0f);
@@ -473,7 +518,7 @@ TwitchChatComposer::TwitchChatComposer(
     statusLabel = new brls::Label();
     statusLabel->setText(
         "Loading available emotes…");
-    statusLabel->setFontSize(16);
+    statusLabel->setFontSize(14);
     statusLabel->setTextColor(
         nvgRGB(160, 170, 190));
     headingRow->addView(statusLabel);
@@ -481,20 +526,20 @@ TwitchChatComposer::TwitchChatComposer(
     auto* composerRow = new brls::Box();
     composerRow->setAxis(brls::Axis::ROW);
     composerRow->setWidthPercentage(100);
-    composerRow->setHeight(112);
+    composerRow->setHeight(92);
     composerRow->setAlignItems(brls::AlignItems::CENTER);
-    composerRow->setMarginBottom(12);
-    this->addView(composerRow);
+    composerRow->setMarginBottom(8);
+    sheet->addView(composerRow);
 
     draftButton = new brls::Box();
     draftButton->setFocusable(true);
     draftButton->setAxis(brls::Axis::COLUMN);
     draftButton->setGrow(1.0f);
-    draftButton->setHeight(112);
-    draftButton->setPadding(12, 16, 10, 16);
+    draftButton->setHeight(92);
+    draftButton->setPadding(8, 14, 6, 14);
     draftButton->setCornerRadius(8);
     draftButton->setBackgroundColor(
-        nvgRGB(29, 33, 43));
+        nvgRGBA(29, 33, 43, 170));
     draftButton->setMarginRight(12);
     draftButton->addGestureRecognizer(
         new brls::TapGestureRecognizer(
@@ -509,15 +554,15 @@ TwitchChatComposer::TwitchChatComposer(
     sendButton = makeActionButton(
         "Send",
         &sendLabel);
-    sendButton->setWidth(150);
-    sendButton->setHeight(112);
+    sendButton->setWidth(130);
+    sendButton->setHeight(92);
     sendButton->setMarginRight(0);
     sendButton->setAlignItems(
         brls::AlignItems::CENTER);
     sendButton->setJustifyContent(
         brls::JustifyContent::CENTER);
     sendButton->setBackgroundColor(
-        nvgRGB(102, 51, 153));
+        nvgRGB(24, 115, 36));
     sendButton->registerClickAction(
         [this](brls::View*) {
             sendMessage();
@@ -534,34 +579,34 @@ TwitchChatComposer::TwitchChatComposer(
 
     auto* draftHeader = new brls::Box();
     draftHeader->setAxis(brls::Axis::ROW);
-    draftHeader->setMarginBottom(5);
+    draftHeader->setMarginBottom(4);
     draftButton->addView(draftHeader);
 
     auto* draftCaption = new brls::Label();
     draftCaption->setText(
         "Message draft");
-    draftCaption->setFontSize(14);
+    draftCaption->setFontSize(13);
     draftCaption->setTextColor(
         nvgRGB(145, 156, 177));
     draftCaption->setGrow(1.0f);
     draftHeader->addView(draftCaption);
 
     counterLabel = new brls::Label();
-    counterLabel->setFontSize(14);
+    counterLabel->setFontSize(13);
     counterLabel->setTextColor(
         nvgRGB(145, 156, 177));
     draftHeader->addView(counterLabel);
 
     draftPreview =
-        new TwitchDraftPreview();
+        new KickDraftPreview();
     draftPreview->setWidthPercentage(100);
-    draftPreview->setHeight(62);
+    draftPreview->setHeight(54);
     draftButton->addView(draftPreview);
 
     auto* tabRow = new brls::Box();
     tabRow->setAxis(brls::Axis::ROW);
-    tabRow->setMarginBottom(10);
-    this->addView(tabRow);
+    tabRow->setMarginBottom(8);
+    sheet->addView(tabRow);
 
     recentTab = makeActionButton("Recent");
     channelTab = makeActionButton("Channel");
@@ -602,34 +647,24 @@ TwitchChatComposer::TwitchChatComposer(
     channelTab->setVisibility(
         brls::Visibility::GONE);
 
-    recentTab->setCustomNavigationRoute(
-        brls::FocusDirection::UP,
-        draftButton);
-    channelTab->setCustomNavigationRoute(
-        brls::FocusDirection::UP,
-        draftButton);
-    allTab->setCustomNavigationRoute(
-        brls::FocusDirection::UP,
-        draftButton);
-
     focusedEmoteLabel = new brls::Label();
     focusedEmoteLabel->setText(
         "Choose an emote with A");
-    focusedEmoteLabel->setFontSize(16);
+    focusedEmoteLabel->setFontSize(14);
     focusedEmoteLabel->setTextColor(
         nvgRGB(167, 176, 195));
-    focusedEmoteLabel->setMarginBottom(8);
-    this->addView(focusedEmoteLabel);
+    focusedEmoteLabel->setMarginBottom(6);
+    sheet->addView(focusedEmoteLabel);
 
     grid = new RecyclingGrid();
     grid->setGrow(1.0f);
     grid->spanCount = 8;
-    grid->estimatedRowHeight = 98;
-    grid->estimatedRowSpace = 10;
+    grid->estimatedRowHeight = 90;
+    grid->estimatedRowSpace = 8;
     grid->preFetchLine = 2;
     grid->setPadding(2, 2, 2, 2);
     grid->registerCell(
-        "TwitchEmote",
+        "KickEmote",
         []() {
             return new EmoteCell();
         });
@@ -648,17 +683,17 @@ TwitchChatComposer::TwitchChatComposer(
                 return allTab;
             }
         });
-    this->addView(grid);
+    sheet->addView(grid);
 
     auto* footer = new brls::Label();
     footer->setText(
         "A Insert   X Keyboard   L/R Tabs   "
         "ZR or + Send   B Back");
-    footer->setFontSize(16);
+    footer->setFontSize(14);
     footer->setTextColor(
         nvgRGB(154, 165, 187));
-    footer->setMarginTop(8);
-    this->addView(footer);
+    footer->setMarginTop(6);
+    sheet->addView(footer);
 
     this->registerAction(
         "Keyboard",
@@ -711,17 +746,17 @@ TwitchChatComposer::TwitchChatComposer(
     updateTabs();
     refreshGrid();
 
-    if (!twitch::hasUserEmotesScope()) {
+    if (!kick::hasUserEmotesScope()) {
         loading = false;
         statusLabel->setText(
             "Sign out and sign in again "
             "to load emotes");
     } else {
         this->ptrLock();
-        twitch::loadUserEmotesAsync(
+        kick::loadUserEmotesAsync(
             this->channel,
             [this](
-                twitch::UserEmoteCatalogue
+                kick::UserEmoteCatalogue
                     catalogue) {
                 emotes =
                     std::move(catalogue.emotes);
@@ -760,14 +795,34 @@ TwitchChatComposer::TwitchChatComposer(
         brls::Application::giveFocus(
             draftButton);
     });
+
+    {
+        std::weak_ptr<bool> weakAlive = aliveToken;
+        orientationSubscription =
+            kicknx::portrait::OrientationController::instance()
+                .getOrientationChanged()
+                ->subscribe(
+                    [weakAlive](kicknx::portrait::DisplayOrientation) {
+                        brls::sync([weakAlive]() {
+                            if (weakAlive.expired()) return;
+                            brls::Application::popActivity();
+                        });
+                    });
+    }
 }
 
-TwitchChatComposer::~TwitchChatComposer() {
+KickChatComposer::~KickChatComposer() {
+    if (orientationSubscription) {
+        kicknx::portrait::OrientationController::instance()
+            .getOrientationChanged()
+            ->unsubscribe(*orientationSubscription);
+        orientationSubscription.reset();
+    }
     brls::Logger::debug(
-        "TwitchChatComposer: deleted");
+        "KickChatComposer: deleted");
 }
 
-void TwitchChatComposer::openKeyboard() {
+void KickChatComposer::openKeyboard() {
     auto* ime =
         brls::Application::getImeManager();
     if (!ime) {
@@ -793,7 +848,7 @@ void TwitchChatComposer::openKeyboard() {
                     draftButton);
             });
         },
-        "Twitch chat",
+        "Kick chat",
         "Type message text, then return "
         "to choose emotes",
         500,
@@ -801,8 +856,8 @@ void TwitchChatComposer::openKeyboard() {
         0);
 }
 
-void TwitchChatComposer::insertEmote(
-    const twitch::UserEmote& emote) {
+void KickChatComposer::insertEmote(
+    const kick::UserEmote& emote) {
     if (emote.name.empty()) return;
 
     std::string addition;
@@ -816,19 +871,19 @@ void TwitchChatComposer::insertEmote(
 
     if (draft.size() + addition.size() > 500) {
         brls::Application::notify(
-            "The Twitch message limit is "
+            "The Kick message limit is "
             "500 characters");
         return;
     }
 
     draft += addition;
-    twitch::rememberRecentEmote(emote);
+    kick::rememberRecentEmote(emote);
 
     recentEmotes.erase(
         std::remove_if(
             recentEmotes.begin(),
             recentEmotes.end(),
-            [&](const twitch::UserEmote& current) {
+            [&](const kick::UserEmote& current) {
                 return
                     (!emote.id.empty() &&
                      !current.id.empty() &&
@@ -849,15 +904,48 @@ void TwitchChatComposer::insertEmote(
         refreshGrid();
 }
 
-void TwitchChatComposer::sendMessage() {
+void KickChatComposer::sendMessage() {
     if (sending) return;
 
-    const std::string message =
+    const std::string rawMessage =
         trimmed(draft);
-    if (message.empty()) {
+    if (rawMessage.empty()) {
         brls::Application::notify(
             "Enter a chat message first");
         return;
+    }
+
+    // Encode standalone emote tokens into Kick's [emote:id:name] wire format.
+    std::unordered_map<std::string, const kick::UserEmote*> byName;
+    for (const auto& emote : emotes) {
+        if (!emote.name.empty() && !emote.id.empty())
+            byName.emplace(emote.name, &emote);
+    }
+    for (const auto& emote : recentEmotes) {
+        if (!emote.name.empty() && !emote.id.empty())
+            byName.emplace(emote.name, &emote);
+    }
+
+    std::string message;
+    size_t pos = 0;
+    while (pos < rawMessage.size()) {
+        const bool ws = std::isspace(static_cast<unsigned char>(rawMessage[pos]));
+        size_t end = pos + 1;
+        while (end < rawMessage.size() &&
+               static_cast<bool>(std::isspace(static_cast<unsigned char>(rawMessage[end]))) == ws)
+            ++end;
+        const std::string token = rawMessage.substr(pos, end - pos);
+        if (!ws) {
+            const auto found = byName.find(token);
+            if (found != byName.end()) {
+                message += "[emote:" + found->second->id + ":" + found->second->name + "]";
+            } else {
+                message += token;
+            }
+        } else {
+            message += token;
+        }
+        pos = end;
     }
 
     sending = true;
@@ -867,7 +955,7 @@ void TwitchChatComposer::sendMessage() {
         "Sending message…");
 
     this->ptrLock();
-    twitch::sendChatMessageAsync(
+    kick::sendChatMessageAsync(
         channel,
         message,
         [this](const std::string&) {
@@ -875,7 +963,7 @@ void TwitchChatComposer::sendMessage() {
             statusLabel->setText(
                 "Message sent");
             brls::Application::notify(
-                "twiNX: chat message sent");
+                "kickNX: chat message sent");
             this->ptrUnlock();
             brls::Application::popActivity();
         },
@@ -885,12 +973,12 @@ void TwitchChatComposer::sendMessage() {
                 sendLabel->setText("Send");
             statusLabel->setText(error);
             brls::Application::notify(
-                "twiNX chat error: " + error);
+                "kickNX chat error: " + error);
             this->ptrUnlock();
         });
 }
 
-void TwitchChatComposer::setTab(Tab value) {
+void KickChatComposer::setTab(Tab value) {
     if (value == Tab::Channel &&
         !channelSubscribed)
         value = Tab::All;
@@ -900,7 +988,7 @@ void TwitchChatComposer::setTab(Tab value) {
     refreshGrid();
 }
 
-void TwitchChatComposer::cycleTab(
+void KickChatComposer::cycleTab(
     int direction) {
     if (!channelSubscribed) {
         setTab(
@@ -917,7 +1005,7 @@ void TwitchChatComposer::cycleTab(
 }
 
 
-void TwitchChatComposer::updateDraft() {
+void KickChatComposer::updateDraft() {
     draftPreview->configure(
         draft,
         emotes);
@@ -926,15 +1014,15 @@ void TwitchChatComposer::updateDraft() {
         " / 500");
 }
 
-void TwitchChatComposer::reconcileRecentEmotes() {
-    std::vector<twitch::UserEmote> resolved;
+void KickChatComposer::reconcileRecentEmotes() {
+    std::vector<kick::UserEmote> resolved;
     resolved.reserve(recentEmotes.size());
 
     for (const auto& recent : recentEmotes) {
         const auto found = std::find_if(
             emotes.begin(),
             emotes.end(),
-            [&](const twitch::UserEmote& available) {
+            [&](const kick::UserEmote& available) {
                 if (!recent.id.empty() &&
                     !available.id.empty())
                     return recent.id ==
@@ -950,7 +1038,7 @@ void TwitchChatComposer::reconcileRecentEmotes() {
             std::any_of(
                 resolved.begin(),
                 resolved.end(),
-                [&](const twitch::UserEmote& current) {
+                [&](const kick::UserEmote& current) {
                     return
                         (!found->id.empty() &&
                          !current.id.empty() &&
@@ -969,7 +1057,7 @@ void TwitchChatComposer::reconcileRecentEmotes() {
         std::move(resolved);
 }
 
-void TwitchChatComposer::updateChannelTabVisibility() {
+void KickChatComposer::updateChannelTabVisibility() {
     channelTab->setVisibility(
         channelSubscribed
             ? brls::Visibility::VISIBLE
@@ -982,9 +1070,9 @@ void TwitchChatComposer::updateChannelTabVisibility() {
     updateTabs();
 }
 
-void TwitchChatComposer::updateTabs() {
+void KickChatComposer::updateTabs() {
     const NVGcolor active =
-        nvgRGB(102, 51, 153);
+        nvgRGB(24, 115, 36);
     const NVGcolor inactive =
         nvgRGB(45, 50, 65);
 
@@ -1014,8 +1102,8 @@ void TwitchChatComposer::updateTabs() {
     }
 }
 
-std::vector<twitch::UserEmote>
-TwitchChatComposer::visibleEmotes() const {
+std::vector<kick::UserEmote>
+KickChatComposer::visibleEmotes() const {
     if (tab == Tab::All)
         return emotes;
 
@@ -1023,7 +1111,7 @@ TwitchChatComposer::visibleEmotes() const {
         if (!channelSubscribed)
             return {};
 
-        std::vector<twitch::UserEmote> result;
+        std::vector<kick::UserEmote> result;
         for (const auto& emote : emotes) {
             if (emote.channelEmote)
                 result.push_back(emote);
@@ -1034,7 +1122,7 @@ TwitchChatComposer::visibleEmotes() const {
     return recentEmotes;
 }
 
-void TwitchChatComposer::refreshGrid() {
+void KickChatComposer::refreshGrid() {
     const auto values = visibleEmotes();
 
     if (loading) {
@@ -1070,11 +1158,11 @@ void TwitchChatComposer::refreshGrid() {
         new EmoteDataSource(
             values,
             [this](
-                const twitch::UserEmote& emote) {
+                const kick::UserEmote& emote) {
                 insertEmote(emote);
             },
             [this](
-                const twitch::UserEmote& emote) {
+                const kick::UserEmote& emote) {
                 focusedEmoteLabel->setText(
                     emote.name);
             }));

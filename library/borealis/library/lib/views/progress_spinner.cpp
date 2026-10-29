@@ -61,7 +61,8 @@ void ProgressSpinner::animate(bool animate)
 void ProgressSpinner::draw(NVGcontext* vg, float x, float y, float width, float height, Style style, FrameContext* ctx)
 {
     Theme theme       = Application::getTheme();
-    NVGcolor barColor = a(theme["brls/spinner/bar_color"]);
+    NVGcolor barColor = hasCustomColor ? this->customColor : a(theme["brls/spinner/bar_color"]);
+    float minAlpha    = hasCustomColor ? (this->customColor.a > 0.0f ? this->customColor.a : 80.0f / 255.0f) : theme["brls/spinner/bar_color"].a;
 
     // Each bar of the spinner
     switch (size)
@@ -69,7 +70,7 @@ void ProgressSpinner::draw(NVGcontext* vg, float x, float y, float width, float 
         case NORMAL:
             for (int i = 0 + animationValue; i < 8 + animationValue; i++)
             {
-                barColor.a = fmax((i - animationValue) / 8.0f, theme["brls/spinner/bar_color"].a) * this->getAlpha();
+                barColor.a = fmax((i - animationValue) / 8.0f, minAlpha) * this->getAlpha();
                 nvgSave(vg);
                 nvgTranslate(vg, x + width / 2, y + height / 2);
                 nvgRotate(vg, nvgDegToRad(i * 45)); // Internal angle of octagon
@@ -86,7 +87,7 @@ void ProgressSpinner::draw(NVGcontext* vg, float x, float y, float width, float 
         case LARGE:
             for (int i = 0 + animationValue; i < 12 + animationValue; i++)
             {
-                barColor.a = fmax((i - animationValue) / 12.0f, theme["brls/spinner/bar_color"].a) * this->getAlpha();
+                barColor.a = fmax((i - animationValue) / 12.0f, minAlpha) * this->getAlpha();
                 nvgSave(vg);
                 nvgTranslate(vg, x + width / 2, y + height / 2);
                 nvgRotate(vg, nvgDegToRad(i * 30)); // Internal angle of octagon
