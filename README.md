@@ -25,7 +25,7 @@ Switch homebrew. It combines native playback, Kick browsing and interactive
 chat in an interface designed around Joy-Con, Pro Controller and touchscreen
 use in handheld, tabletop and television play.
 
-The 0.4 series features channel follow and unfollow directly from streamer
+Version 0.4.0 features channel follow and unfollow directly from streamer
 profiles, custom 3D kickNX buffering indicator with lime text shimmer,
 clickable user avatar navigation, Kick-green section divider lines and tabs,
 Kick TV QR code pairing, Kick-styled playback controls with live stream uptime,
