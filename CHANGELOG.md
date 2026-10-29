@@ -1,689 +1,111 @@
 # Changelog
 
-All notable changes to **twiNX** are documented in this file.
+All notable changes to **kickNX** are documented in this file.
 
-twiNX is an independent, controller-first Twitch client for Nintendo Switch
-homebrew, created by **HiroshiYamauchi**.
+kickNX is an independent, controller-first Kick client for Nintendo Switch
+homebrew, created by **j2k & Gemini**, based on **twiNX**.
 
-The format is inspired by [Keep a Changelog](https://keepachangelog.com/),
-although early development releases are summarized from the available project
-history.
+The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [0.9.1]
-
-### Changed
-
-- Updated the Twitch `PlaybackAccessToken` persisted-query identifier.
-- Added Twitch's now-required `platform` variable to live playback-token requests.
-- Made the persisted-query identifier an internal resolver constant instead of a
-  user-configurable value.
-- Updated Nintendo Switch application metadata to version `0.9.1`.
-
-### Fixed
-
-- Fixed all live streams failing with `PersistedQueryNotFound` after Twitch
-  retired the previous playback-token query.
-- Added automatic one-time cleanup of obsolete `twinx.txt` files from legacy SD
-  card locations.
-- Prevented stale pre-sign-in configuration files from overriding current live
-  playback behavior.
-
----
-
-## [0.9.0]
-
-### Added
-
-- Added a complete smartphone-style portrait player for handheld use.
-- Added automatic orientation detection using either attached Joy-Con.
-- Added clockwise and counter-clockwise portrait layouts plus manual orientation
-  choices when automatic sensor control is unavailable.
-- Added a rotated 720 x 1280 logical surface with inverse touchscreen-coordinate
-  mapping.
-- Added a portrait layout containing the live stream, live chat, persistent
-  message draft and app-native touch keyboard on one screen.
-- Added a portrait emote sheet that can replace the keyboard without closing the
-  composer.
-- Added two-way keyboard/emote-sheet switching by touching the message draft.
-- Added inline emote images to the portrait message draft.
-- Added adjustable touch-keyboard Joy-Con haptic feedback.
-- Added an on-screen **Send** button to the full Twitch emote composer.
-- Added live search by broadcaster or game/category name, including current
-  viewer counts.
-- Added an audio-only live quality option.
-- Added experimental audio-reactive Joy-Con vibration with Balanced, Quiet,
-  Extreme and High Peaks Only profiles.
-
-### Changed
-
-- Live playback now requests Twitch's embedded-player identity. In validation,
-  this bypasses the generic commercial-break presentation and continues directly
-  with the broadcaster's stream.
-- Promoted the tested portrait-mode work from an isolated experiment into the
-  production twiNX application.
-- Suppressed application-visible Joy-Con input while in portrait mode to prevent
-  accidental actions; the system Home button remains available.
-- Restored all production metadata, OAuth data and preferences to the existing
-  `twiNX` application and `/config/TwiNX/` paths.
-- Updated Nintendo Switch application metadata to version `0.9.0`.
-- Animated Twitch emotes are now treated as a supported chat option after
-  successful console validation.
-
-### Fixed
-
-- Hardened the FFmpeg/NVTEGRA H.264 reference, decode-map and hardware-frame
-  transfer paths against damaged or discontinuous Twitch media.
-- Hardened MPV hardware-frame side-data handling.
-- Prevented malformed decoder state from becoming a fatal null dereference or
-  delayed heap-corruption crash.
-- Preserved production playback and chat performance by keeping verbose playback
-  diagnostics disabled in release builds.
-- Eliminated duplicate hidden-panel chat layout work so high-activity channels
-  update only the visible docked, overlay or portrait chat panel.
-- Limited retained chat history to the visible row pool to reduce high-activity
-  layout and image work.
-- Restored controller focus immediately when returning from portrait to landscape.
-- Stabilized rapid quality-selector changes so only the final selected quality
-  reloads the live stream.
-- Made Software, Hardware and Hybrid decoder selections reload the active stream
-  immediately while discarding stale recovery state from the previous mode.
-- Fixed live search results showing zero viewers and admitting offline channels.
-- Prevented Twitch live streams from writing unnecessary MPV watch-later state.
-- Retained the existing guarded hardware playback stack while removing the
-  commercial presentation that most frequently triggered unsafe transitions.
-
----
-
-## [0.8.1]
-
-### Added
-
-- Added a dedicated About page.
-- Added a complete feature overview.
-- Added the full available twiNX release history.
-- Added project credits and third-party technology acknowledgements.
-- Added an independent-project and non-affiliation notice.
-
-### Changed
-
-- Corrected visible application branding from `TwiNX` to `twiNX`.
-- Updated Nintendo Switch application metadata:
-  - Application name: `twiNX`
-  - Author: `HiroshiYamauchi`
-  - Version: `0.8.1`
-
-### Fixed
-
-- Enabled right-stick scrolling on the About page.
-- Kept the About-page scrolling correction isolated from home-screen navigation.
-- Preserved existing configuration paths to avoid breaking saved preferences
-  and authentication data.
-
----
-
-## [0.8.0]
-
-### Added
-
-- Added a dedicated **Followed channels — offline** row to the home screen.
-- Added profile artwork, channel names and offline status to offline-channel cards.
-- Added direct navigation from offline-channel cards to their channel pages.
-- Added pagination support for followed channels.
-- Added automatic exclusion of channels that are currently live.
-
-### Changed
-
-- Reorganized the home screen into:
-  - Followed channels — live
-  - Followed channels — offline
-  - Popular live streams
-  - Top categories
-- Preserved Twitch’s followed-channel ordering.
-
----
-
-## [0.7.9]
-
-### Added
-
-- Added a compact overlay-chat mode.
-- Added configurable overlay-chat placement:
-  - Top left
-  - Top right
-  - Bottom left
-  - Bottom right
-- Added independent overlay width and compact-height configuration.
-
-### Fixed
-
-- Fixed long chat messages being truncated after only a few lines.
-- Added dynamic message-row height based on wrapped text, badges and emotes.
-- Fixed chat-message overlap caused by mismatched measurement and drawing logic.
-- Fixed the update package incorrectly rejecting Windows CRLF source files.
-
----
-
-## [0.7.8]
-
-### Added
-
-- Added rendering support for incoming Twitch channel-exclusive and subscriber
-  emotes, regardless of whether the signed-in viewer is entitled to send them.
-- Added a **Chat emotes** preference:
-  - Static
-  - Animated
-- Added animated-emote download and GIF frame decoding.
-- Added static fallback while animated content loads.
-- Added emote caching and resource limits intended to reduce memory pressure.
-
-### Changed
-
-- Kept the chat composer restricted to emotes the signed-in user is entitled to send.
-- Marked animated-emote behavior as experimental.
-
-### Fixed
-
-- Added safe fallback behavior when an incoming emote image cannot be downloaded
-  or decoded.
-
----
-
-## [0.7.7]
-
-### Changed
-
-- Reworked playback ownership so only one active player controls the shared MPV
-  instance.
-- Live playback is now stopped and destroyed before opening a channel page.
-- VOD and clip playback now starts with a clean fullscreen layout.
-- Reset inherited live-chat video margins, pan, zoom and alignment before
-  non-live playback.
-- Moved channel-page default focus to permanent controls instead of recycled cards.
-
-### Fixed
-
-- Fixed live streams continuing to play and produce audio behind channel pages.
-- Fixed VODs and clips inheriting an empty black live-chat area.
-- Fixed stale player event handlers remaining active after navigation.
-- Fixed channel-page focus becoming attached to detached or recycled media cards.
-- Fixed cases where only the scrollbar responded after channel-page focus became stuck.
-- Included the per-worker curl DNS-cache stability correction from 0.7.6.
-
----
-
-## [0.7.6]
-
-### Fixed
-
-- Removed unsafe cross-thread sharing of libcurl’s DNS cache.
-- Gave each HTTP worker its own private DNS cache.
-- Fixed a race that could crash inside libcurl host-cache cleanup while badges,
-  emotes or images were downloading.
-- Improved background image-loading stability.
-
----
-
-## [0.7.5]
-
-### Changed
-
-- Replaced automatic emote-grid focus routing with finite logical-index navigation.
-- Made the selected emote index the authoritative navigation state.
-- Up and Down now move by one complete emote row using index arithmetic.
-- Up from the logical first row now exits to the active emote filter tab.
-- Up from the filter tabs moves to the message draft.
-
-### Fixed
-
-- Fixed the chat composer becoming permanently trapped inside the emote grid.
-- Fixed upward navigation failing after emote rows had been recycled.
-- Fixed unloaded rows preventing navigation back toward the beginning of the list.
-- Removed unreliable deferred focus behavior from emote navigation.
-
----
-
-## [0.7.4]
-
-### Changed
-
-- Moved emote-boundary handling from individual recycled cells toward grid-level
-  navigation.
-- Added explicit routing from the first logical emote row to the active filter tab.
-
-### Fixed
-
-- Attempted to prevent recycled emote cells from retaining stale navigation state.
-
----
-
-## [0.7.3]
-
-### Changed
-
-- Added explicit composer navigation routes between:
-  - Message draft
-  - Recent / Channel / All tabs
-  - Emote grid
-- Changed focus-border clipping to preserve horizontal card-border lines.
-
-### Fixed
-
-- Fixed cyan card borders losing their top and bottom lines.
-- Improved upward materialization of emote rows.
-- Improved transitions between the emote grid and composer controls.
-
----
-
-## [0.7.2]
-
-### Added
-
-- Added the experimental **Hybrid** decoder mode.
-- Hybrid mode starts with hardware decoding, temporarily falls back to software
-  decoding during unstable transitions, and may restore hardware decoding after
-  playback stabilizes.
-
-### Changed
-
-- Reworked upper home-screen rendering so scrolling cards remain behind the
-  fixed header area.
-- Reworked emote-grid navigation to materialize unloaded rows before moving focus.
-
-### Fixed
-
-- Reduced the risk of hardware-decoder crashes during Twitch commercial and
-  presentation transitions.
-- Fixed parts of the home-screen focus cursor drawing over the account and action header.
-- Improved navigation through lazily loaded emote rows.
-
----
-
-## [0.7.1]
-
-### Added
-
-- Added direct playback for Twitch VODs.
-- Added direct playback for Twitch clips.
-- Added Twitch media URL resolution before handing playback to MPV.
-- Added playback-error fallback to the media metadata dialog.
-
-### Changed
-
-- Reused the existing twiNX player for live streams, VODs and clips.
-- Preserved existing player controls, quality handling and decoder preferences.
-
-### Fixed
-
-- Improved emote-grid upward navigation.
-- Reduced home-screen scrolling that caused cards to move into the upper header area.
-
----
-
-## [0.7.0]
-
-### Added
-
-- Added detailed Twitch channel pages.
-- Added channel banner and profile artwork.
-- Added live/offline channel status.
-- Added channel description and stream metadata.
-- Added channel schedule section.
-- Added recent-broadcast cards.
-- Added clip cards.
-- Added channel-category cards.
-- Added a channel shortcut from live playback.
-- Added direct **Watch live** behavior for channels that are currently online.
-
-### Changed
-
-- Opening an offline channel now goes directly to its channel page.
-- Opening a live channel continues to start live playback.
-- Channel media cards initially opened detailed metadata while direct playback
-  was being developed.
-
----
-
-## [0.6.0]
-
-### Added
-
-- Added the Twitch chat message composer.
-- Added an on-screen emote picker.
-- Added Recent, Channel and All emote filters.
-- Added controller-first message entry and emote insertion.
-- Added sending messages directly from the player.
-- Added the ability to browse large emote inventories.
-
-### Changed
-
-- Expanded live chat from read-only viewing into interactive chat participation.
-
----
-
-## [0.5.4]
-
-### Fixed
-
-- Added image content-type validation before attempting image decoding.
-- Prevented invalid server responses from being treated as badge or emote images.
-- Reduced crashes caused by malformed, redirected or non-image HTTP responses.
-
----
-
-## [0.5.3]
-
-### Added
-
-- Added native Twitch chat badges.
-- Added broadcaster, moderator, subscriber and other supported badge rendering.
-- Added the Plus-button shortcut for switching chat layouts.
-
-### Changed
-
-- Improved chat identity presentation with usernames, colors, badges and emotes.
-
----
-
-## [0.5.2]
-
-### Fixed
-
-- Corrected live-chat text measurement and wrapping.
-- Fixed messages overlapping adjacent rows.
-- Improved alignment between badges, usernames, text and emotes.
-- Improved multi-line chat readability.
-
----
-
-## [0.5.1]
-
-### Fixed
-
-- Improved chat and emote rendering stability.
-- Added safer handling for missing or unavailable emote images.
-- Reduced crashes during asynchronous chat image loading.
-- Improved cleanup of chat-related resources.
-
----
-
-## [0.5.0]
-
-### Added
-
-- First substantial Twitch chat feature release.
-- Added richer chat-message rendering.
-- Added Twitch emote support in received messages.
-- Added username colors and message formatting.
-- Added asynchronous badge and emote image loading.
-- Added chat scrolling and message-history handling.
-
-### Changed
-
-- Expanded the original read-only chat prototype into a more complete live-chat
-  implementation.
-
----
-
-## [0.4.8]
-
-### Added
-
-- Added a decoder-mode selector.
-- Added selectable software and hardware decoding modes.
-- Added an experimental label and warning for hardware decoding.
-
-### Changed
-
-- Made decoder behavior configurable from the player settings instead of being
-  fixed at build time.
-
----
-
-## [0.4.7]
-
-### Changed
-
-- Improved transitions into and out of hardware decoding.
-- Improved decoder reinitialization when Twitch changed stream presentation.
-- Reduced visual disruption during decoder recovery.
-
-### Fixed
-
-- Fixed additional hardware-decoder transition failures.
-
----
-
-## [0.4.6]
-
-### Fixed
-
-- Improved Twitch playback stability when using software decoding.
-- Added recovery behavior for hardware-decoder failures.
-- Improved handling of decoder resets and stream reconfiguration.
-- Reduced crashes and lockups following commercial breaks or playlist changes.
-
----
-
-## [0.4.5]
-
-### Fixed
-
-- Corrected video sizing in TV-style docked-chat mode.
-- Preserved the stream aspect ratio when the player area was reduced.
-- Fixed stretching and cropping caused by the docked chat panel.
-
----
-
-## [0.4.4]
-
-### Added
-
-- Added MPVCore-level Twitch advertisement and stream-transition recovery.
-- Added lower-level playback recovery independent of the visible player controls.
-
-### Fixed
-
-- Improved recovery after Twitch replaced or interrupted stream segments.
-- Reduced cases where audio or video failed to resume after a transition.
-
----
-
-## [0.4.3]
-
-### Added
-
-- Added explicit commercial-break recovery.
-- Added detection and recovery for playback interruptions around Twitch ads.
-
-### Fixed
-
-- Improved automatic return to the live stream after commercial breaks.
-- Reduced black-screen and stalled-playback conditions after advertisements.
-
----
-
-## [0.4.2]
-
-### Added
-
-- Added TV-style docked chat.
-- Added a dedicated right-side live-chat panel.
-- Added reduced-width video layout while docked chat is visible.
-- Added a persistent Send message control area.
-
-### Changed
-
-- Adapted the player layout for simultaneous video and chat viewing on television
-  and handheld displays.
-
----
-
-## [0.4.1]
-
-### Changed
-
-- Moved chat rendering behind player controls.
-
-### Fixed
-
-- Fixed chat covering playback controls and other player UI elements.
-- Improved layering between video, chat and player overlays.
+## Notes
+- **Subtitles Status**: Subtitle tracks in Player Settings remain inactive until Kick updates their Amazon IVS backend to serve live transcode tracks (Kick's web player currently relies on client-side browser speech recognition).
+- **Backend Notice**: Kick may change or update their backend at any time, which may affect app functionality.
 
 ---
 
 ## [0.4.0]
 
 ### Added
-
-- Added read-only Twitch live chat.
-- Added real-time Twitch chat connection.
-- Added incoming chat-message display beside live playback.
-- Added basic usernames and message text.
-- Added chat visibility controls.
+- **Channel Follow & Unfollow**: Dedicated interactive Follow / Following button on streamer profile pages with real-time follow status detection, custom Kick green styling, toast notifications, guest sign-in prompts, automatic synchronization with followed channels, and automatic hiding when viewing your own channel profile.
+- **Centered Streamer Page & Touch Back Navigation**: Centered the streamer avatar, channel name, live status, broadcast title, metadata, and action buttons in the profile header for a balanced presentation that fills the screen, along with a dedicated top-left `< Back` touch button for intuitive touchscreen and controller return navigation.
+- **Portrait Emote Composer**: Added a dedicated `Emotes` key to the portrait keyboard that opens a portrait-tailored Kick emoji composer featuring Recent and All tabs, a responsive 6-column emote grid, and quick `< Keyboard` return navigation.
+- **Universal Quality & Decoder Selection**: Enabled stream quality preferences and hardware/hybrid/software decoder selection across VODs and clips in Player Settings.
+- **Clickable Profile Avatar**: The top-right profile picture is now an interactive, focusable icon. Clicking or tapping it immediately navigates to your own Kick channel page.
+- **kickNX Buffering Indicator**: Replaced the generic progress spinner with a custom 3D blocky kickNX logo buffering indicator featuring a tight lime-green letter-shimmer sweep and sleek neon progress bar.
+- **Kick Bright Green Section Styling**: Section divider lines and header accent tabs across all browsing, channel profile, and settings screens are now styled in signature Kick bright green (`#53FC18`).
+- **OLED True Black Playback & Profiles**: Maintained clean OLED true black backgrounds across channel profiles, About, and video player loading surfaces, eliminating grey background flashes during stream and VOD buffering.
+- **Home & About Brand Headers**: Replaced standard text titles with the high-resolution transparent 3D kickNX brand logo on the home screen and About page.
+- **Profile Back Button**: Added a dedicated Kick green touch-and-controller `< Back` button on streamer profiles matching channel action buttons.
+- **Dedicated Category Card Placeholder**: Introduced `category-card-bg.png` (`350x410`) matching the exact vertical portrait card aspect ratio (`175x205`), eliminating distortion and keeping the card aesthetic clean when thumbnails are missing or loading.
+- **Seamless Live Stream Continuity**: Replaced aggressive recovery pause/buffer drops and intrusive toast popups with transparent FFmpeg HLS auto-reconnection (`reconnect=1,reconnect_streamed=1`), preventing random stream pauses and toast interruptions.
 
 ---
 
 ## [0.3.2]
 
-### Fixed
-
-- Reset the home-screen scroll position to the absolute top.
-- Fixed the home screen reopening at an unexpected vertical position.
-- Improved initial focus placement when returning home.
+### Added
+- **Kick Lime Green Playback Bar & Live Uptime**: Authentic Kick green (`#53FC18`) scrubber with real-time stream uptime pinned to the live edge.
+- **OLED True Black Theme**: True black home screen background for OLED Switch displays with high-contrast header.
+- **Fixed Clip Metadata**: Shows real clip titles, view counts, and creator usernames.
+- **Channel Category Navigation**: Clicking a category on a streamer's profile page returns home and immediately loads that category's live streams.
+- **Bottom Sheet Emote Composer**: Redesigned the in-player KickNX emote composer as an interactive bottom drawer with rounded corners, translucent backdrop, and continuous real-time video playback visible behind the sheet.
+- **Kick Logo Placeholder & WebP Thumbnail Fixes**: Replaced legacy Jellyfin card placeholder with a centered Kick logo; fixed missing thumbnails for clips and streamer profile categories with subcategory fallback caching.
+- **User Profile Avatar**: Restored top-right profile avatar display for signed-in users with public channel fallback and instant session loading.
 
 ---
 
 ## [0.3.1]
 
 ### Added
-
-- Added a television-oriented home-screen layout.
-- Added player quality information.
-- Added improved live-stream cards and category presentation.
-- Added source-quality identification in the player.
-
-### Changed
-
-- Improved the home-screen structure for controller and television use.
+- **Fast VOD & Clip Loading**: Instant transition into player view with dedicated loading indicator and notice.
+- **Active Chatter Counter**: Displays real-time live chatter count in chat header with neon green highlight.
+- **Subtitles Support**: Multi-language WebVTT subtitle track selection in Player Settings (inactive pending Kick IVS backend update).
 
 ---
 
 ## [0.3.0]
 
 ### Added
-
-- Added detailed live-channel information.
-- Added stream title, game/category and viewer information.
-- Added playback-quality selection.
-- Added Twitch stream-variant discovery.
-- Added source and transcoded-quality choices.
-
-### Changed
-
-- Expanded live playback beyond a single automatically selected stream URL.
-
----
-
-## [0.2.5]
-
-### Fixed
-
-- Added deterministic controller-focus routing.
-- Fixed unpredictable cursor jumps between home-screen elements.
-- Improved navigation consistency across horizontal rows.
-- Reduced focus changes when no directional input was being made.
-
----
-
-## [0.2.4]
-
-### Fixed
-
-- Improved home-screen focus behavior.
-- Corrected application and interface icons.
-- Fixed incorrect or inconsistent controller-navigation routes.
-- Improved selected-card highlighting.
-
----
-
-## [0.2.3]
-
-### Added
-
-- Added early twiNX branding.
-- Added improved controller-navigation structure.
-- Added clearer home-screen sections and action controls.
+- Official Kick TV QR code & 6-digit link authentication flow (`kick.com/tv/login`) with automatic authorization polling via the Kick mobile app.
+- NanoVG-rendered QR code component (`QRCodeView`) with auto-scaling and visual centering.
+- 60 FPS video playback presentation with 60Hz display timing alignment (`override-display-fps = 60`, `video-sync = audio`, `framedrop = vo`).
+- Direct single-variant VOD resolution in `resolveVod`, downloading only the preferred quality rendition and eliminating multi-hour manifest download stalls.
+- Updated Kick stream quality ladders across player settings and stream details to match Kick's exact native resolutions (`1080p60`, `720p60`, `480p`, `360p`, `160p`, `Auto`).
+- Custom FFmpeg 7.1 build with native libnx Horizon TLS/HTTPS support (`sslInitialize`) and NVTEGRA transfer guards.
+- URL query parameter preservation in `absoluteUrl` so signed AWS IVS and CloudFront authentication tokens carry through to variant playlists and media segments.
+- Optimized demuxer probe parameters (128 KB probesize, 1s analyze duration, `http_persistent=1` keep-alive connections).
 
 ### Changed
-
-- Began transitioning the original proof of concept into a dedicated Twitch client.
-
----
-
-## [0.2.2]
+- Official Kick mobile app QR code pairing authentication.
+- Removed legacy `opengl-glfinish` blocking calls that stalled the GPU on Mesa/Nouveau and capped playback to 30fps.
+- Replaced per-file options in `loadfile` with global player options in `MPVCore::init()`.
 
 ### Fixed
-
-- Improved browsing stability.
-- Reduced crashes while loading Twitch rows and images.
-- Added safer handling for incomplete Twitch responses.
-- Improved navigation while content was still loading.
-
----
-
-## [0.2.1]
-
-### Fixed
-
-- Added early user-experience improvements.
-- Improved initial focus and controller behavior.
-- Improved home-screen spacing and status presentation.
-- Corrected minor login and browsing workflow issues.
+- Fixed resolution selection bug where manually picking 720p60 or other qualities remained stuck on 1080p60 due to `resolveLive` overwriting the selected rendition with the root multivariant playlist.
+- Fixed VOD playback taking minutes to load by avoiding sequential parsing of all variant playlists.
+- Fixed choppy 30fps playback by removing `glFinish` stalls and setting 60Hz presentation timing.
+- Fixed "stream: No protocol handler found to open URL https://..." playback errors by providing custom `libavformat` HTTPS protocol support with Horizon OS SSL.
+- Fixed live stream recovery and playback loops caused by broken `loadfile` syntax.
 
 ---
 
 ## [0.2.0]
 
 ### Added
-
-- Added Twitch sign-in.
-- Added authenticated Twitch API access.
-- Added followed-channel browsing.
-- Added popular live-stream browsing.
-- Added top-category browsing.
-- Added search.
-- Added signed-in account information.
-- Added sign-out and refresh controls.
-
-### Changed
-
-- Replaced the original fixed-channel configuration workflow with built-in
-  authentication and interactive browsing.
+- Real-time live chat powered by Pusher WebSockets (`wss://ws-us2.pusher.com`).
+- Kick chat emote sheet and on-screen message composer.
+- Channel details pages with past broadcasts (VODs), clips, categories, and streamer info.
+- Followed channels row for live streams on the home dashboard.
+- Live broadcaster and category search with real-time viewer count indicators.
 
 ---
 
 ## [0.1.0]
 
 ### Added
-
-- Initial proof of concept.
-- Added native Twitch live-stream playback on Nintendo Switch.
-- Added basic MPV integration.
-- Added an initial fixed-channel playback workflow.
-- Added early controller support.
-- Established the Switchfin/Borealis-based application foundation.
+- Initial native Nintendo Switch port for Kick.com based on twiNX.
+- Kick v1/v2 REST API resolvers for browsing, stream discovery, and account sessions.
+- Guest browsing mode without requiring an account.
+- Controller-first Borealis interface, Joy-Con motion portrait mode, and touch controls.
 
 ---
 
 ## Project credits
 
-- **twiNX** was created and developed by **HiroshiYamauchi**.
-- twiNX is built using open-source technologies including Borealis, MPV, FFmpeg,
-  libcurl and related libraries.
-- Portions of the original application foundation derive from upstream open-source
-  projects whose licenses and notices are preserved separately.
+- **kickNX** was created and developed by **j2k** with AI co-development by **Gemini**, based on **twiNX**.
+- Built using open-source technologies including Borealis, MPV, FFmpeg, libcurl, and libnx.
+- Upstream foundations: twiNX, Switchfin, and Borealis.
 
-twiNX is an independent project and is not affiliated with, endorsed by or
-sponsored by Twitch Interactive, Nintendo, Amazon or their subsidiaries.
+kickNX is an independent project and is not affiliated with, endorsed by or sponsored by Kick, Nintendo, or Amazon.

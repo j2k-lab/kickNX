@@ -42,71 +42,41 @@
                     axis="column"
                     marginBottom="30px">
                     <brls:SelectorCell
-                        id="setting/twitch/quality" />
+                        id="setting/kick/quality" />
                     <brls:SelectorCell
-                        id="setting/twitch/decoder" />
+                        id="setting/kick/decoder" />
                     <brls:SelectorCell
                         id="setting/portrait/orientation" />
                     <brls:SelectorCell
                         id="setting/portrait/keyboard_haptic" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_mode" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_participation" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_composer" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_emotes" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_overlay_size" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_overlay_position" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_docked_width" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_overlay_width" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_font" />
+                    <brls:SelectorCell
+                        id="setting/kick/chat_opacity" />
                     <brls:BooleanCell
-                        id="setting/twitch/audio_reactive_haptics" />
-                    <brls:SelectorCell
-                        id="setting/twitch/audio_reactive_profile" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_mode" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_participation" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_composer" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_emotes" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_overlay_size" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_overlay_position" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_docked_width" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_overlay_width" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_font" />
-                    <brls:SelectorCell
-                        id="setting/twitch/chat_opacity" />
-                    <brls:BooleanCell
-                        id="setting/twitch/chat_timestamps" />
+                        id="setting/kick/chat_timestamps" />
                     <brls:SelectorCell
                         id="setting/track/audio" />
                     <brls:SelectorCell
                         id="setting/track/subtitle" />
-                    <brls:SelectorCell
-                        id="setting/video/mirror" />
-                    <brls:SelectorCell
-                        id="setting/video/rotation" />
-                    <brls:SelectorCell
-                        id="setting/video/aspect" />
                     <brls:SliderCell
                         id="setting/video/subsync" />
-                </brls:Box>
-
-                <brls:Header
-                    width="auto"
-                    height="auto"
-                    title="@i18n/main/player/common"
-                    marginBottom="0px" />
-                <brls:Box
-                    width="100%"
-                    height="auto"
-                    axis="column"
-                    marginBottom="30px">
-                    <brls:BooleanCell
-                        id="setting/fullscreen" />
-                    <brls:BooleanCell
-                        id="setting/always_on_top" />
-                    <brls:BooleanCell
-                        id="setting/player/bottom_bar" />
-                    <brls:BooleanCell
-                        id="setting/player/osd_on_toggle" />
                 </brls:Box>
 
                 <brls:Header

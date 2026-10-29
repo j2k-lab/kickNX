@@ -1,18 +1,18 @@
-# Building twiNX for Nintendo Switch
+# Building kickNX for Nintendo Switch
 
 ## Supported playback stack
 
-twiNX 0.9.0 is validated with this exact Switch playback stack:
+kickNX 0.9.0 is validated with this exact Switch playback stack:
 
 ```text
 MPV:    switch-libmpv 0.36.0-7
 FFmpeg: switch-ffmpeg 7.1-12
 ```
 
-The repository recipes include twiNX guards for MPV frame side data and for
+The repository recipes include kickNX guards for MPV frame side data and for
 FFmpeg/NVTEGRA H.264 references, decode maps and hardware-frame transfers.
 Using a different MPV or FFmpeg package may compile, but it is not the playback
-stack validated against Twitch stream discontinuities.
+stack validated against Kick stream discontinuities.
 
 ## Requirements
 
@@ -62,15 +62,15 @@ Extract it into the repository-local dependency root:
 
 ```bash
 cd ../../..
-rm -rf .twinx-build/ffmpeg-local-root
-mkdir -p .twinx-build/ffmpeg-local-root
+rm -rf .kicknx-build/ffmpeg-local-root
+mkdir -p .kicknx-build/ffmpeg-local-root
 bsdtar -xf scripts/switch/ffmpeg-libnx/switch-ffmpeg-7.1-12-any.pkg.tar.zst \
-  -C .twinx-build/ffmpeg-local-root
+  -C .kicknx-build/ffmpeg-local-root
 ```
 
-The `.twinx-build` directory is ignored by Git.
+The `.kicknx-build` directory is ignored by Git.
 
-## 3. Build twiNX
+## 3. Build kickNX
 
 ### Windows PowerShell
 
@@ -93,14 +93,14 @@ To use an FFmpeg package extracted elsewhere:
 Or with a custom dependency root:
 
 ```bash
-TWINX_FFMPEG_ROOT=/path/to/switch-portlibs ./build-switch.sh
+KICKNX_FFMPEG_ROOT=/path/to/switch-portlibs ./build-switch.sh
 ```
 
 ## Output
 
 ```text
-build_switch/TwiNX.nro
-build_switch/TwiNX.elf
+build_switch/KickNX.nro
+build_switch/KickNX.elf
 ```
 
 Keep each NRO together with its matching ELF. Atmosphere crash addresses can
@@ -110,4 +110,4 @@ only be symbolicated accurately with the ELF from the exact same build.
 
 When no custom FFmpeg root is available, CMake uses the FFmpeg libraries
 reported by the installed `mpv.pc`. The project may compile, but that build does
-not necessarily include the TLS and NVTEGRA guards validated for twiNX 0.9.0.
+not necessarily include the TLS and NVTEGRA guards validated for kickNX 0.9.0.

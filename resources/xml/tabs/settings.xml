@@ -70,8 +70,6 @@
                 axis="column"
                 marginBottom="30px">
                 <brls:BooleanCell
-                    id="setting/player/osd_on_toggle" />
-                <brls:BooleanCell
                     id="setting/player/touch_gesture" />
                 <brls:BooleanCell
                     id="setting/player/tv_model" />
@@ -121,19 +119,6 @@
                     visibility="gone" />
             </brls:Box>
 
-            <brls:Header
-                width="auto"
-                height="auto"
-                title="@i18n/main/tabs/downloads"
-                marginBottom="0px" />
-            <brls:Box
-                width="100%"
-                height="auto"
-                axis="column"
-                marginBottom="30px">
-                <brls:SelectorCell
-                    id="setting/download/quality" />
-            </brls:Box>
 
             <brls:Header
                 width="auto"
@@ -147,8 +132,6 @@
                 marginBottom="30px">
                 <brls:BooleanCell
                     id="setting/player/clip_point" />
-                <brls:BooleanCell
-                    id="setting/ui/bottom_bar" />
                 <brls:BooleanCell
                     id="setting/ui/show_fps" />
                 <SelectorCell
