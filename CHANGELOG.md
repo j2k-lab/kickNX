@@ -31,6 +31,18 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 - **Dedicated Category Card Placeholder**: Introduced `category-card-bg.png` (`350x410`) matching the exact vertical portrait card aspect ratio (`175x205`), eliminating distortion and keeping the card aesthetic clean when thumbnails are missing or loading.
 - **Seamless Live Stream Continuity**: Replaced aggressive recovery pause/buffer drops and intrusive toast popups with transparent FFmpeg HLS auto-reconnection (`reconnect=1,reconnect_streamed=1`), preventing random stream pauses and toast interruptions.
 
+
+### Fixed
+- **Chat status banner**: The "Connecting to Kick chat..." message no longer stays stuck at the top of the chat once connected or after messages arrive.
+- **Scrub bar crash**: Fixed a crash when pressing B to exit a stream immediately after dragging the progress bar.
+- **Popular live streams**: Streams in the popular, featured and category lists now show their viewer count instead of "OFFLINE".
+- **Emote composer rotation**: The emote composer now closes when the display rotates instead of staying open over the portrait keyboard.
+- **Home title**: "Kick for Nintendo Switch" no longer wraps onto a second line after returning home quickly.
+
+### Changed
+- **OLED black chat**: The docked and portrait chat panels now use a true OLED black background.
+- **Simplified playback settings**: Removed options that had no effect on Kick playback (show bottom progress bar, show OSD when paused, video flip, rotation, aspect ratio) and the empty Common section. Aspect ratio is always automatic.
+
 ---
 
 ## [0.3.2]

@@ -25,7 +25,7 @@ Switch homebrew. It combines native playback, Kick browsing and interactive
 chat in an interface designed around Joy-Con, Pro Controller and touchscreen
 use in handheld, tabletop and television play.
 
-Version 0.4.0 features channel follow and unfollow directly from streamer
+The 0.4 series features channel follow and unfollow directly from streamer
 profiles, custom 3D kickNX buffering indicator with lime text shimmer,
 clickable user avatar navigation, Kick-green section divider lines and tabs,
 Kick TV QR code pairing, Kick-styled playback controls with live stream uptime,
@@ -105,7 +105,7 @@ chat, and Joy-Con portrait mode.
 2. Extract the release so the SD card contains:
 
    ```text
-   /switch/kickNX/kickNX.nro
+   /switch/KickNX/KickNX.nro
    ```
 
 3. Launch kickNX from the Nintendo Switch Homebrew Menu.
@@ -116,7 +116,7 @@ settings automatically through the in-app settings menu.
 
 ## Updating
 
-Replace the existing NRO in `/switch/kickNX/` with the newer release. OAuth,
+Replace the existing NRO in `/switch/KickNX/` with the newer release. OAuth,
 chat, decoder, orientation and interface preferences remain under
 `/config/KickNX/` and are not stored inside the executable.
 
@@ -170,7 +170,7 @@ Major milestones:
 - `0.3.0` - TV QR code login, live AWS IVS master playback, 60 FPS presentation, and fast VOD streaming
 - `0.3.1` - Fast VOD/clip launch, active chatter counter, and WebVTT subtitle track selection
 - `0.3.2` - Kick signature playback bar with live uptime, channel category navigation, and bottom sheet emote composer
-- `0.4.0` - Channel follow/unfollow on streamer profiles, clickable user avatar, and Kick bright green UI theme
+- `0.4.0` - Channel follow/unfollow on streamer profiles, clickable user avatar, and Kick bright green UI theme, plus chat, playback and settings fixes
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
