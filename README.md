@@ -7,9 +7,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/j2k-lab/kickNX/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/j2k-lab/kickNX?color=53FC18&label=release&logo=github&style=flat-square" height="20"></a>
+  <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Release 0.4.0" src="https://img.shields.io/badge/release-0.4.0-53FC18?logo=github&style=flat-square" height="20"></a>
   <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/j2k-lab/kickNX/total?color=53FC18&style=flat-square" height="20"></a>
-  <a href="https://github.com/j2k-lab/kickNX/actions"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/j2k-lab/kickNX/source-checks.yml?branch=main&label=build&style=flat-square" height="20"></a>
+  <img alt="Nintendo Switch" src="https://img.shields.io/badge/platform-Nintendo%20Switch-E60012?logo=nintendoswitch&logoColor=white&style=flat-square" height="20">
   <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B&logoColor=white&style=flat-square" height="20">
   <a href="LICENSE"><img alt="License GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0--only-blue?style=flat-square" height="20"></a>
 </p>
