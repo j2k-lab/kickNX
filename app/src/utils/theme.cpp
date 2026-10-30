@@ -35,6 +35,10 @@ Palette makeOled() {
     p.focusHighlight1 = nvgRGB(83, 252, 24);
     p.focusHighlight2 = nvgRGB(105, 255, 55);
     p.focusBackground = nvgRGB(31, 34, 39);
+    p.headerAccent = p.accent;
+    p.headerTextPrimary = p.textPrimary;
+    p.headerTextSecondary = p.textSecondary;
+    p.headerTextMuted = p.textMuted;
     return p;
 }
 
@@ -55,35 +59,42 @@ Palette makeDarkGrey() {
     return p;
 }
 
-// Bright pages for docked play in well-lit rooms. Bright Kick green is hard
-// to read on white, so text and focus use a deeper green.
-Palette makeLight() {
+// Kick green (#8BB06F) pages with light grey cards and near-black text, under the
+// dark Kick "K" pattern on headers. The focus ring pulses white/black so it
+// shows on the green page, the grey cards and the dark headers alike.
+Palette makeKick() {
     Palette p;
-    p.preset = Preset::Light;
-    p.id = "light";
-    p.name = "Light";
-    p.background = nvgRGB(229, 232, 237);
-    p.header = nvgRGB(206, 238, 196);
-    p.surface = nvgRGB(250, 251, 253);
-    p.surfaceAlt = nvgRGB(217, 221, 228);
-    p.heroOverlay = nvgRGBA(255, 255, 255, 240);
-    p.textPrimary = nvgRGB(20, 22, 28);
-    p.textSecondary = nvgRGB(62, 68, 82);
-    p.textMuted = nvgRGB(88, 95, 110);
-    p.textFaint = nvgRGB(118, 125, 140);
-    p.accent = nvgRGB(21, 128, 31);
+    p.preset = Preset::Kick;
+    p.id = "kick";
+    p.name = "Kick";
+    p.background = nvgRGB(139, 176, 111);
+    p.header = nvgRGB(120, 156, 94);
+    p.surface = nvgRGB(218, 221, 226);
+    p.surfaceAlt = nvgRGB(226, 236, 218);
+    p.heroOverlay = nvgRGBA(218, 221, 226, 240);
+    p.textPrimary = nvgRGB(12, 14, 16);
+    p.textSecondary = nvgRGB(34, 40, 38);
+    p.textMuted = nvgRGB(38, 62, 42);
+    p.textFaint = nvgRGB(58, 86, 62);
+    p.accent = nvgRGB(12, 14, 16);
     p.button = nvgRGB(24, 115, 36);
     p.buttonText = nvgRGB(255, 255, 255);
-    p.buttonMuted = nvgRGB(96, 104, 120);
+    p.buttonMuted = nvgRGB(70, 78, 90);
     p.errorBackground = nvgRGB(252, 226, 230);
     p.errorText = nvgRGB(140, 24, 42);
     p.live = nvgRGB(184, 38, 72);
     p.outline = nvgRGBA(0, 0, 0, 70);
     p.divider = nvgRGBA(0, 0, 0, 24);
-    p.focusHighlight1 = nvgRGB(21, 128, 31);
-    p.focusHighlight2 = nvgRGB(40, 165, 52);
-    p.focusBackground = nvgRGB(222, 244, 216);
+    p.focusHighlight1 = nvgRGB(255, 255, 255);
+    p.focusHighlight2 = nvgRGB(12, 14, 16);
+    p.focusBackground = nvgRGB(236, 243, 230);
     p.keepButtonFillOnFocus = true;
+    p.headerImage = "img/kick_theme_header.png";
+    p.headerAccent = nvgRGB(139, 176, 111);
+    p.headerTextPrimary = nvgRGB(245, 246, 250);
+    p.headerTextSecondary = nvgRGB(200, 206, 214);
+    p.headerTextMuted = nvgRGB(170, 177, 193);
+    p.pageImage = "img/kick_theme_background.png";
     return p;
 }
 
@@ -110,14 +121,16 @@ void activate(size_t index) {
 }  // namespace
 
 const std::vector<Palette>& presets() {
-    static const std::vector<Palette> all = {makeOled(), makeDarkGrey(), makeLight()};
+    static const std::vector<Palette> all = {makeOled(), makeDarkGrey(), makeKick()};
     return all;
 }
 
 const Palette& current() { return presets()[activeIndex]; }
 
 void load() {
-    const std::string saved = AppConfig::instance().getItem(AppConfig::APP_COLOR_THEME, std::string("oled"));
+    std::string saved = AppConfig::instance().getItem(AppConfig::APP_COLOR_THEME, std::string("oled"));
+    // Kick replaced the pre-release Light preset in the same slot.
+    if (saved == "light") saved = "kick";
     const auto& all = presets();
     const auto it = std::find_if(all.begin(), all.end(), [&](const Palette& p) { return p.id == saved; });
     activate(it == all.end() ? 0 : static_cast<size_t>(std::distance(all.begin(), it)));
@@ -129,6 +142,69 @@ void set(Preset preset) {
     if (it == all.end()) return;
     activate(static_cast<size_t>(std::distance(all.begin(), it)));
     AppConfig::instance().setItem(AppConfig::APP_COLOR_THEME, it->id);
+}
+
+namespace {
+
+// Paints artwork over the whole of its parent's frame, scaled to cover it and
+// centred, with the parent's rounded corners. A plain brls::Image laid out as
+// an absolute child of a padded header was sized and placed from its own
+// frame and ended up in the header's top-right corner, so this ignores its
+// own layout and draws from the parent's frame instead.
+class Backdrop : public brls::View {
+public:
+    explicit Backdrop(const std::string& image) {
+        loader = new brls::Image();
+        loader->setImageFromRes(image);
+        this->setPositionType(brls::PositionType::ABSOLUTE);
+        this->setPositionTop(0);
+        this->setPositionLeft(0);
+        this->setWidthPercentage(100);
+        this->setHeightPercentage(100);
+        this->setFocusable(false);
+    }
+
+    ~Backdrop() override { delete loader; }
+
+    void draw(NVGcontext* vg, float, float, float, float, brls::Style, brls::FrameContext*) override {
+        brls::View* parent = this->getParent();
+        const int texture = loader->getTexture();
+        const float imageWidth = loader->getOriginalImageWidth();
+        const float imageHeight = loader->getOriginalImageHeight();
+        if (!parent || texture <= 0 || imageWidth <= 0 || imageHeight <= 0) return;
+
+        const brls::Rect frame = parent->getFrame();
+        const float scale = std::max(frame.getWidth() / imageWidth, frame.getHeight() / imageHeight);
+        const float drawWidth = imageWidth * scale;
+        const float drawHeight = imageHeight * scale;
+        const float drawX = frame.getMinX() + (frame.getWidth() - drawWidth) / 2;
+        const float drawY = frame.getMinY() + (frame.getHeight() - drawHeight) / 2;
+
+        const NVGpaint paint = nvgImagePattern(vg, drawX, drawY, drawWidth, drawHeight, 0, texture, this->getAlpha());
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, frame.getMinX(), frame.getMinY(), frame.getWidth(), frame.getHeight(),
+            parent->getCornerRadius());
+        nvgFillPaint(vg, paint);
+        nvgFill(vg);
+    }
+
+private:
+    brls::Image* loader = nullptr;
+};
+
+void addBackdrop(brls::Box* box, const std::string& image) {
+    if (!box || image.empty()) return;
+    box->addView(new Backdrop(image), 0);
+}
+
+}  // namespace
+
+void decorateHeader(brls::Box* header, const Palette& palette) {
+    addBackdrop(header, palette.headerImage);
+}
+
+void decoratePage(brls::Box* page, const Palette& palette) {
+    addBackdrop(page, palette.pageImage);
 }
 
 }  // namespace kicknx::theme

@@ -8,7 +8,7 @@
 
 /// Section header laid out like brls::Header (accent bar, title, right-aligned
 /// count and an accent underline) but coloured from the active kickNX theme,
-/// so it stays readable on the Light preset.
+/// so it stays readable on the Kick preset.
 class ThemeHeader : public brls::Box {
 public:
     ThemeHeader() {

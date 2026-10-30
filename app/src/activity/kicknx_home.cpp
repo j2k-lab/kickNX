@@ -847,6 +847,7 @@ KickNXHome::KickNXHome() {
     top->setWidthPercentage(100);
     top->setBackgroundColor(kicknx::theme::current().header);
     top->setPadding(24, 48, 12, 48);
+    kicknx::theme::decorateHeader(top);
     this->addView(top);
 
     auto* headingRow = new brls::Box();
@@ -875,7 +876,7 @@ KickNXHome::KickNXHome() {
     auto* title = new brls::Label();
     title->setText("· Kick for Nintendo Switch");
     title->setFontSize(33);
-    title->setTextColor(kicknx::theme::current().accent);
+    title->setTextColor(kicknx::theme::current().headerAccent);
     title->setMarginLeft(14);
     // Keep the title on one line: during abrupt screen transitions the label
     // can be laid out while its parent is momentarily narrow, which wrapped
@@ -886,7 +887,7 @@ KickNXHome::KickNXHome() {
 
     accountLabel = new brls::Label();
     accountLabel->setFontSize(18);
-    accountLabel->setTextColor(kicknx::theme::current().textSecondary);
+    accountLabel->setTextColor(kicknx::theme::current().headerTextSecondary);
     accountLabel->setMarginTop(5);
     headingText->addView(accountLabel);
 
@@ -908,7 +909,7 @@ KickNXHome::KickNXHome() {
 
     statusLabel = new brls::Label();
     statusLabel->setFontSize(17);
-    statusLabel->setTextColor(kicknx::theme::current().textMuted);
+    statusLabel->setTextColor(kicknx::theme::current().headerTextMuted);
     statusLabel->setMarginTop(6);
     statusLabel->setMarginBottom(14);
     top->addView(statusLabel);
@@ -1231,12 +1232,13 @@ brls::Box* makeThemePreview(const kicknx::theme::Palette& preset) {
     bar->setPadding(0, 14, 0, 14);
     bar->setCornerRadius(8);
     bar->setBackgroundColor(preset.header);
+    kicknx::theme::decorateHeader(bar, preset);
     preview->addView(bar);
 
     auto* logo = new brls::Label();
     logo->setText("kickNX");
     logo->setFontSize(17);
-    logo->setTextColor(preset.accent);
+    logo->setTextColor(preset.headerAccent);
     bar->addView(logo);
 
     auto* cards = new brls::Box();
@@ -1322,6 +1324,7 @@ void KickNXHome::showThemePicker() {
     heading->setWidthPercentage(100);
     heading->setCornerRadius(16);
     heading->setBackgroundColor(palette.header);
+    kicknx::theme::decorateHeader(heading);
     panel->addView(heading);
 
     auto* headingText = new brls::Box();
@@ -1332,13 +1335,13 @@ void KickNXHome::showThemePicker() {
     auto* title = new brls::Label();
     title->setText("Theme");
     title->setFontSize(34);
-    title->setTextColor(palette.accent);
+    title->setTextColor(palette.headerAccent);
     headingText->addView(title);
 
     auto* subtitle = new brls::Label();
     subtitle->setText("Choose how kickNX looks. Video and the chat overlay stay dark.");
     subtitle->setFontSize(17);
-    subtitle->setTextColor(palette.textMuted);
+    subtitle->setTextColor(palette.headerTextMuted);
     subtitle->setMarginTop(4);
     headingText->addView(subtitle);
 
@@ -1577,7 +1580,13 @@ void KickNXHome::beginLogin() {
     page->setDimensions(
         brls::Application::contentWidth,
         brls::Application::contentHeight);
-    page->setBackgroundColor(kicknx::theme::current().header);
+    const auto& palette = kicknx::theme::current();
+    // With full-screen artwork (Kick theme) the heading sits on the dark
+    // pattern and the two cards take the page colour so they stand out.
+    const bool artwork = !palette.pageImage.empty();
+    const NVGcolor cardColor = artwork ? palette.background : palette.surfaceAlt;
+    page->setBackgroundColor(palette.header);
+    kicknx::theme::decoratePage(page);
 
     auto* heading = new brls::Box();
     heading->setAxis(brls::Axis::ROW);
@@ -1594,14 +1603,14 @@ void KickNXHome::beginLogin() {
     auto* title = new brls::Label();
     title->setText("Sign in to Kick");
     title->setFontSize(32);
-    title->setTextColor(kicknx::theme::current().textPrimary);
+    title->setTextColor(artwork ? palette.headerAccent : palette.textPrimary);
     headingText->addView(title);
 
     auto* subtitle = new brls::Label();
     subtitle->setText(
         "Scan with the Kick mobile app to pair your account");
     subtitle->setFontSize(16);
-    subtitle->setTextColor(kicknx::theme::current().textMuted);
+    subtitle->setTextColor(artwork ? palette.headerAccent : palette.textMuted);
     subtitle->setMarginTop(4);
     headingText->addView(subtitle);
 
@@ -1634,7 +1643,7 @@ void KickNXHome::beginLogin() {
     qrCard->setJustifyContent(brls::JustifyContent::CENTER);
     qrCard->setWidth(480);
     qrCard->setCornerRadius(18);
-    qrCard->setBackgroundColor(kicknx::theme::current().surfaceAlt);
+    qrCard->setBackgroundColor(cardColor);
     qrCard->setPadding(24, 24, 24, 24);
     body->addView(qrCard);
 
@@ -1656,7 +1665,7 @@ void KickNXHome::beginLogin() {
     infoCard->setGrow(1.0f);
     infoCard->setMarginLeft(32);
     infoCard->setCornerRadius(18);
-    infoCard->setBackgroundColor(kicknx::theme::current().surfaceAlt);
+    infoCard->setBackgroundColor(cardColor);
     infoCard->setPadding(32, 40, 28, 40);
     infoCard->setJustifyContent(brls::JustifyContent::SPACE_BETWEEN);
     body->addView(infoCard);
@@ -1698,7 +1707,12 @@ void KickNXHome::beginLogin() {
     codeBox->setJustifyContent(brls::JustifyContent::CENTER);
     codeBox->setPadding(14, 32, 14, 32);
     codeBox->setCornerRadius(12);
-    codeBox->setBackgroundColor(kicknx::theme::current().header);
+    codeBox->setBackgroundColor(artwork ? palette.background : palette.header);
+    // On a card of the same green, an outline keeps the code box visible.
+    if (artwork) {
+        codeBox->setBorderThickness(2.0f);
+        codeBox->setBorderColor(palette.textPrimary);
+    }
     codeBox->setMarginTop(18);
     codeBox->setWidth(320);
     infoTop->addView(codeBox);
@@ -1983,6 +1997,7 @@ void KickNXHome::showAbout() {
     heading->setPadding(24, 48, 18, 48);
     heading->setWidthPercentage(100);
     heading->setBackgroundColor(kicknx::theme::current().header);
+    kicknx::theme::decorateHeader(heading);
     page->addView(heading);
 
     auto* headingText = new brls::Box();
@@ -1998,7 +2013,7 @@ void KickNXHome::showAbout() {
     auto* title = new brls::Label();
     title->setText("About");
     title->setFontSize(34);
-    title->setTextColor(kicknx::theme::current().accent);
+    title->setTextColor(kicknx::theme::current().headerAccent);
     titleRow->addView(title);
 
     auto* titleLogo = new brls::Image();
@@ -2014,7 +2029,7 @@ void KickNXHome::showAbout() {
         "Version " + AppVersion::getVersion() +
         " · Kick for Nintendo Switch");
     subtitle->setFontSize(17);
-    subtitle->setTextColor(kicknx::theme::current().textMuted);
+    subtitle->setTextColor(kicknx::theme::current().headerTextMuted);
     subtitle->setMarginTop(4);
     headingText->addView(subtitle);
 

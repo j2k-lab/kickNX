@@ -13,7 +13,7 @@ namespace kicknx::theme {
 enum class Preset {
     Oled = 0,
     DarkGrey = 1,
-    Light = 2,
+    Kick = 2,
 };
 
 struct Palette {
@@ -48,9 +48,23 @@ struct Palette {
     NVGcolor focusBackground; // fill behind a focused card, so text stays readable
 
     /// Keep a filled button's own colour when focused instead of painting the
-    /// focus fill over it. Needed on Light, where the pale focus fill would
+    /// focus fill over it. Needed on Kick, where the pale focus fill would
     /// wash out the white button text.
     bool keepButtonFillOnFocus = false;
+
+    /// Artwork drawn behind page headers (Home, About, theme picker, events);
+    /// empty for a plain header colour. Text on those headers uses the
+    /// header* colours below, which differ from page text when the artwork
+    /// is dark but the page is bright.
+    std::string headerImage;
+    NVGcolor headerAccent;
+    NVGcolor headerTextPrimary;
+    NVGcolor headerTextSecondary;
+    NVGcolor headerTextMuted;
+
+    /// Full-screen artwork behind the sign-in page, empty for a plain page.
+    /// Its cards then use the page background colour so they stand out.
+    std::string pageImage;
 };
 
 /// All presets, in the order they are offered to the viewer.
@@ -64,5 +78,11 @@ void load();
 
 /// Saves and applies a preset. Screens built afterwards use it.
 void set(Preset preset);
+
+/// Puts the palette's header artwork, if any, behind a header box's children.
+void decorateHeader(brls::Box* header, const Palette& palette = current());
+
+/// Puts the palette's full-screen artwork, if any, behind a page's children.
+void decoratePage(brls::Box* page, const Palette& palette = current());
 
 }  // namespace kicknx::theme
