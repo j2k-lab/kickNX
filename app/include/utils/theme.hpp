@@ -46,6 +46,11 @@ struct Palette {
     NVGcolor focusHighlight1; // Borealis focus highlight
     NVGcolor focusHighlight2;
     NVGcolor focusBackground; // fill behind a focused card, so text stays readable
+
+    /// Keep a filled button's own colour when focused instead of painting the
+    /// focus fill over it. Needed on Light, where the pale focus fill would
+    /// wash out the white button text.
+    bool keepButtonFillOnFocus = false;
 };
 
 /// All presets, in the order they are offered to the viewer.

@@ -83,6 +83,7 @@ Palette makeLight() {
     p.focusHighlight1 = nvgRGB(21, 128, 31);
     p.focusHighlight2 = nvgRGB(40, 165, 52);
     p.focusBackground = nvgRGB(222, 244, 216);
+    p.keepButtonFillOnFocus = true;
     return p;
 }
 

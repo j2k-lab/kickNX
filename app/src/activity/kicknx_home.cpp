@@ -212,6 +212,7 @@ brls::Box* makeButton(const std::string& text, brls::Label** outLabel = nullptr)
     button->setPadding(12, 22, 12, 22);
     button->setCornerRadius(8);
     button->setBackgroundColor(kicknx::theme::current().button);
+    button->setHideHighlightBackground(kicknx::theme::current().keepButtonFillOnFocus);
     button->setMarginRight(12);
     button->addGestureRecognizer(new brls::TapGestureRecognizer(button));
 

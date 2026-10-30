@@ -312,6 +312,8 @@ ChannelActionButton* makeButton(
     button->setCornerRadius(8);
     button->setBackgroundColor(
         kicknx::theme::current().button);
+    button->setHideHighlightBackground(
+        kicknx::theme::current().keepButtonFillOnFocus);
     button->setMarginRight(12);
     button->addGestureRecognizer(
         new brls::TapGestureRecognizer(button));
@@ -646,6 +648,7 @@ KickChannelPage::KickChannelPage(
     backButton->setPadding(8, 18, 8, 18);
     backButton->setCornerRadius(8);
     backButton->setBackgroundColor(kicknx::theme::current().button);
+    backButton->setHideHighlightBackground(kicknx::theme::current().keepButtonFillOnFocus);
     backButton->addGestureRecognizer(new brls::TapGestureRecognizer(backButton));
     backButton->registerClickAction([this](brls::View*) {
         markClosing();

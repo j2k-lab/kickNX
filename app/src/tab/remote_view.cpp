@@ -1531,6 +1531,7 @@ public:
         composeButton->setBackgroundColor(docked ? palette.button : nvgRGB(24, 115, 36));
         composeButton->setCornerRadius(8);
         composeButton->setTextColor(docked ? palette.buttonText : nvgRGB(255, 255, 255));
+        composeButton->setHideHighlightBackground(docked && palette.keepButtonFillOnFocus);
         composeButton->setMarginTop(8);
         composeButton->setVisibility(brls::Visibility::GONE);
         composeButton->registerClickAction(
