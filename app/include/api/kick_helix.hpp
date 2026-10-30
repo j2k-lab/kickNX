@@ -123,6 +123,31 @@ struct ClipPage {
     bool loaded = false;
 };
 
+/// A Kick event (kick.com/events). Only id and slug are guaranteed; every
+/// other field may be empty because the events API is new and undocumented.
+struct LiveEvent {
+    std::string id;
+    std::string slug;
+    std::string title;
+    std::string description;
+    std::string phase;  // "pre", "live" or "post"
+    std::string categoryName;
+    std::string organiserName;
+    std::string organiserSlug;
+    std::string bannerUrl;
+    std::string thumbnailUrl;
+    std::string startTime;  // ISO 8601, UTC
+    int liveStreamCount = 0;
+    int viewCount = 0;
+
+    bool isLive() const { return phase == "live"; }
+};
+
+struct EventPage {
+    std::vector<LiveEvent> items;
+    bool loaded = false;
+};
+
 struct HomeData {
     OAuthSession account;
     UserProfile profile;
@@ -130,6 +155,7 @@ struct HomeData {
     StreamPage offlineFollowed;
     StreamPage popular;
     ClipPage popularClips;
+    EventPage events;  // optional: a failure hides the row instead of erroring
     CategoryPage categories;
     std::string followedError;
     std::string offlineFollowedError;
@@ -215,6 +241,23 @@ void loadPopularPageAsync(
     const Config& config,
     const std::string& cursor,
     StreamPageCallback success,
+    ErrorCallback failure,
+    HTTP::Cancel cancel = nullptr);
+
+/// Live streams taking part in one event, as playable stream cards.
+void loadEventStreamsAsync(
+    const Config& config,
+    const std::string& eventId,
+    StreamPageCallback success,
+    ErrorCallback failure,
+    HTTP::Cancel cancel = nullptr);
+
+/// Most-viewed clips from one event, 20 per page.
+void loadEventClipsAsync(
+    const Config& config,
+    const std::string& eventId,
+    const std::string& cursor,
+    ClipPageCallback success,
     ErrorCallback failure,
     HTTP::Cancel cancel = nullptr);
 

@@ -817,7 +817,9 @@ std::vector<ChannelClip> parseClipList(
     for (const auto& item : *list) {
         if (!item.is_object()) continue;
         ChannelClip clip;
-        const std::string clipUrl = jsonString(item, "clip_url", jsonString(item, "video_url"));
+        // Event clips (web.kick.com) carry playback_url instead of clip_url.
+        const std::string clipUrl = jsonString(item, "clip_url",
+            jsonString(item, "video_url", jsonString(item, "playback_url")));
         const std::string rawId = jsonString(item, "id");
         clip.id = !clipUrl.empty() ? clipUrl : rawId;
         clip.url = clipUrl;
@@ -832,7 +834,8 @@ std::vector<ChannelClip> parseClipList(
         if (item.contains("channel") && item["channel"].is_object()) {
             clip.channelName = jsonString(item["channel"], "username");
         }
-        clip.viewCount = jsonInt(item, "views", jsonInt(item, "view_count", 0));
+        clip.viewCount = jsonInt(item, "views",
+            jsonInt(item, "view_count", jsonInt(item, "views_count", 0)));
         clip.duration = jsonFloat(item, "duration", 0.0f);
 
         if (!clip.id.empty()) {
@@ -874,6 +877,132 @@ ClipPage getPopularClips(
     page.items = parseClipList(root, "", 40);
     if (root.is_object() && root.contains("nextCursor") && root["nextCursor"].is_string())
         page.cursor = root["nextCursor"].get<std::string>();
+    return page;
+}
+
+// Nested object lookup that tolerates missing keys and wrong types, so a
+// change in Kick's newer event payloads never throws during parsing.
+const json& jsonChild(const json& obj, const char* key) {
+    static const json empty = json::object();
+    if (!obj.is_object() || !obj.contains(key) || !obj[key].is_object()) return empty;
+    return obj[key];
+}
+
+// Returns the first array found under data.<key>, data, or <key>.
+const json* jsonList(const json& root, const char* key) {
+    const json& data = jsonChild(root, "data");
+    if (data.contains(key) && data[key].is_array()) return &data[key];
+    if (root.is_object() && root.contains("data") && root["data"].is_array()) return &root["data"];
+    if (root.is_object() && root.contains(key) && root[key].is_array()) return &root[key];
+    return nullptr;
+}
+
+// Events from kick.com/events (web.kick.com/api/v1/events/browse). Live events
+// come first, busiest first; upcoming and finished events follow.
+EventPage getEvents(
+    const Config& config,
+    OAuthSession& session,
+    const HTTP::Cancel& cancel) {
+    const json root = json::parse(kickGet(
+        config, session, "https://web.kick.com/api/v1/events/browse", cancel));
+
+    EventPage page;
+    page.loaded = true;
+    const json* list = jsonList(root, "events");
+    if (!list) return page;
+
+    for (const auto& item : *list) {
+        if (!item.is_object()) continue;
+        LiveEvent event;
+        event.id = jsonString(item, "id");
+        event.slug = jsonString(item, "slug");
+        if (event.id.empty() || event.slug.empty()) continue;
+        if (jsonBool(item, "is_draft", false)) continue;
+
+        event.title = jsonString(item, "title", jsonString(item, "name", event.slug));
+        event.description = jsonString(item, "description");
+        event.phase = jsonString(item, "phase");
+        event.startTime = jsonString(item, "start_time");
+        event.liveStreamCount = jsonInt(item, "num_livestreams", 0);
+        event.viewCount = jsonInt(item, "view_count", 0);
+        event.categoryName = jsonString(jsonChild(item, "category"), "name");
+
+        const json& assets = jsonChild(item, "assets");
+        event.thumbnailUrl = jsonString(assets, "thumbnail", jsonString(assets, "banner"));
+        event.bannerUrl = jsonString(assets, "banner", event.thumbnailUrl);
+
+        const json& organiser = jsonChild(item, "organiser");
+        event.organiserName = jsonString(jsonChild(organiser, "user"), "username");
+        event.organiserSlug = jsonString(jsonChild(organiser, "channel"), "slug");
+        if (event.organiserName.empty()) event.organiserName = event.organiserSlug;
+
+        page.items.push_back(std::move(event));
+    }
+
+    std::stable_sort(page.items.begin(), page.items.end(), [](const LiveEvent& a, const LiveEvent& b) {
+        const auto rank = [](const LiveEvent& e) { return e.isLive() ? 0 : (e.phase == "pre" ? 1 : 2); };
+        if (rank(a) != rank(b)) return rank(a) < rank(b);
+        return a.liveStreamCount > b.liveStreamCount;
+    });
+    return page;
+}
+
+// Live streams in one event, mapped onto the regular stream cards so they
+// play through the normal Kick player.
+StreamPage getEventStreams(
+    const Config& config,
+    OAuthSession& session,
+    const std::string& eventId,
+    const HTTP::Cancel& cancel) {
+    const json root = json::parse(kickGet(
+        config, session,
+        "https://web.kick.com/api/v1/events/" + percentEncode(eventId) + "/streams",
+        cancel));
+
+    StreamPage page;
+    page.loaded = true;
+    const json* list = jsonList(root, "streams");
+    if (!list) return page;
+
+    for (const auto& item : *list) {
+        if (!item.is_object()) continue;
+        const json& channel = jsonChild(item, "channel");
+        const json& user = jsonChild(item, "user");
+        const json& livestream = jsonChild(item, "livestream");
+
+        Stream stream;
+        stream.userLogin = jsonString(channel, "slug");
+        if (stream.userLogin.empty()) continue;
+        stream.userId = jsonString(channel, "id");
+        stream.userName = jsonString(user, "username", stream.userLogin);
+        stream.id = jsonString(livestream, "id");
+        stream.title = jsonString(livestream, "title");
+        stream.language = jsonString(livestream, "language");
+        stream.viewerCount = jsonInt(livestream, "view_count", 0);
+        stream.thumbnailUrl = jsonString(jsonChild(livestream, "thumbnail"), "src");
+        stream.isLive = true;
+        page.items.push_back(std::move(stream));
+    }
+    return page;
+}
+
+// Most-viewed clips from one event. Kick ignores sort=; only
+// sort_by=view_count is accepted (other values return Bad Request).
+ClipPage getEventClips(
+    const Config& config,
+    OAuthSession& session,
+    const std::string& eventId,
+    const std::string& cursor,
+    const HTTP::Cancel& cancel) {
+    std::string url = "https://web.kick.com/api/v1/events/" + percentEncode(eventId) +
+        "/clips?sort_by=view_count";
+    if (!cursor.empty()) url += "&cursor=" + percentEncode(cursor);
+
+    const json root = json::parse(kickGet(config, session, url, cancel));
+    ClipPage page;
+    page.loaded = true;
+    page.items = parseClipList(root, "", 40);
+    page.cursor = jsonString(jsonChild(root, "data"), "cursor");
     return page;
 }
 
@@ -1959,6 +2088,14 @@ void loadHomeAsync(
                     result.popularClipsError = sectionError(exception);
                 }
 
+                // Events are optional: a failure is logged and the row is hidden.
+                try {
+                    result.events = getEvents(config, result.account, cancel);
+                } catch (const std::exception& exception) {
+                    throwIfCancelled(cancel);
+                    brls::Logger::warning("kickNX: events could not be loaded: {}", exception.what());
+                }
+
                 try {
                     result.categories = getCategories(config, result.account, "", cancel);
                 } catch (const std::exception& exception) {
@@ -2037,6 +2174,35 @@ void loadPopularPageAsync(
         },
         std::move(success), std::move(failure), std::move(cancel),
         "Unknown popular-streams request error");
+}
+
+void loadEventStreamsAsync(
+    const Config& config,
+    const std::string& eventId,
+    StreamPageCallback success,
+    ErrorCallback failure,
+    HTTP::Cancel cancel) {
+    loadPageAsync<StreamPage>(config,
+        [eventId](const Config& c, OAuthSession& session, const HTTP::Cancel& requestCancel) {
+            return getEventStreams(c, session, eventId, requestCancel);
+        },
+        std::move(success), std::move(failure), std::move(cancel),
+        "Unknown event streams request error");
+}
+
+void loadEventClipsAsync(
+    const Config& config,
+    const std::string& eventId,
+    const std::string& cursor,
+    ClipPageCallback success,
+    ErrorCallback failure,
+    HTTP::Cancel cancel) {
+    loadPageAsync<ClipPage>(config,
+        [eventId, cursor](const Config& c, OAuthSession& session, const HTTP::Cancel& requestCancel) {
+            return getEventClips(c, session, eventId, cursor, requestCancel);
+        },
+        std::move(success), std::move(failure), std::move(cancel),
+        "Unknown event clips request error");
 }
 
 void loadPopularClipsPageAsync(

@@ -15,6 +15,7 @@
 #include <borealis/core/cache_helper.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <functional>
 #include <fmt/format.h>
@@ -245,6 +246,20 @@ std::string streamKey(const kick::Stream& item) {
 
 std::string categoryKey(const kick::Category& item) {
     return item.id.empty() ? item.name : item.id;
+}
+
+std::string eventKey(const kick::LiveEvent& item) {
+    return item.id;
+}
+
+std::string eventSubtitle(const kick::LiveEvent& item) {
+    std::string detail = item.categoryName;
+    if (item.liveStreamCount > 0) {
+        if (!detail.empty()) detail += " \u00b7 ";
+        detail += std::to_string(item.liveStreamCount) +
+            (item.liveStreamCount == 1 ? " live stream" : " live streams");
+    }
+    return detail.empty() ? std::string("Kick event") : detail;
 }
 
 std::string clipKey(const kick::ChannelClip& item) {
@@ -566,6 +581,60 @@ private:
     std::function<brls::View*()> upTarget;
 };
 
+// Events reuse StreamCell: event thumbnail, title, and category/stream count.
+class EventDataSource : public RecyclingGridDataSource {
+public:
+    using Selection = std::function<void(const kick::LiveEvent&)>;
+    using Focus = std::function<void(const kick::LiveEvent&, size_t)>;
+
+    EventDataSource(
+        std::vector<kick::LiveEvent> data,
+        Selection selected,
+        Focus focused,
+        std::function<brls::View*()> up)
+        : items(std::move(data)),
+          onSelected(std::move(selected)),
+          onFocused(std::move(focused)),
+          upTarget(up) {}
+
+    size_t getItemCount() override { return items.size(); }
+
+    RecyclingGridItem* cellForRow(RecyclingView* recycler, size_t index) override {
+        auto* cell = dynamic_cast<StreamCell*>(recycler->dequeueReusableCell("Event"));
+        const auto& item = items.at(index);
+        cell->upTarget = upTarget;
+        cell->title->setText(item.title);
+        cell->subtitle->setText(eventSubtitle(item));
+        if (!item.thumbnailUrl.empty()) Image::with(cell->picture, item.thumbnailUrl);
+
+        const kick::LiveEvent focusedItem = item;
+        const Focus focusedCallback = onFocused;
+        cell->onFocused = [focusedItem, index, focusedCallback]() {
+            if (focusedCallback) focusedCallback(focusedItem, index);
+        };
+        return cell;
+    }
+
+    void onItemSelected(brls::Box*, size_t index) override {
+        if (onSelected) onSelected(items.at(index));
+    }
+
+    void clearData() override { items.clear(); }
+
+    size_t find(const std::string& key) const {
+        for (size_t index = 0; index < items.size(); ++index) {
+            if (eventKey(items[index]) == key) return index;
+        }
+        return items.size();
+    }
+
+private:
+    std::vector<kick::LiveEvent> items;
+    Selection onSelected;
+    Focus onFocused;
+    std::function<brls::View*()> upTarget;
+};
+
 class CategoryDataSource : public RecyclingGridDataSource {
 public:
     using Selection = std::function<void(const kick::Category&)>;
@@ -642,7 +711,7 @@ private:
 
 class KickRow : public brls::Box {
 public:
-    enum class Kind { Streams, Categories, Clips };
+    enum class Kind { Streams, Categories, Clips, Events };
     using FocusCallback = std::function<void(const std::string&, const std::string&)>;
     using StreamFocusCallback = std::function<void(const kick::Stream&)>;
 
@@ -666,6 +735,8 @@ public:
             recycler->registerCell("Stream", []() { return new StreamCell(); });
         } else if (kind == Kind::Clips) {
             recycler->registerCell("Clip", []() { return new StreamCell(); });
+        } else if (kind == Kind::Events) {
+            recycler->registerCell("Event", []() { return new StreamCell(); });
         } else {
             recycler->registerCell("Category", []() { return new CategoryCell(); });
         }
@@ -703,6 +774,7 @@ public:
             }, upTarget);
         categorySource = nullptr;
         clipSource = nullptr;
+        eventSource = nullptr;
         recycler->setDataSource(streamSource);
         showResult(count > 0, emptyText);
     }
@@ -719,7 +791,25 @@ public:
             }, upTarget);
         streamSource = nullptr;
         categorySource = nullptr;
+        eventSource = nullptr;
         recycler->setDataSource(clipSource);
+        showResult(count > 0, emptyText);
+    }
+
+    void setEvents(
+        std::vector<kick::LiveEvent> items,
+        std::function<void(const kick::LiveEvent&)> selected,
+        const std::string& emptyText,
+        std::function<brls::View*()> upTarget = {}) {
+        count = items.size();
+        eventSource = new EventDataSource(std::move(items), std::move(selected),
+            [this](const kick::LiveEvent& event, size_t) {
+                if (focusCallback) focusCallback(id, eventKey(event));
+            }, upTarget);
+        streamSource = nullptr;
+        categorySource = nullptr;
+        clipSource = nullptr;
+        recycler->setDataSource(eventSource);
         showResult(count > 0, emptyText);
     }
 
@@ -744,6 +834,7 @@ public:
             }, upTarget);
         streamSource = nullptr;
         clipSource = nullptr;
+        eventSource = nullptr;
         recycler->setDataSource(categorySource);
         showResult(count > 0, emptyText);
     }
@@ -782,6 +873,7 @@ public:
         streamSource = nullptr;
         categorySource = nullptr;
         clipSource = nullptr;
+        eventSource = nullptr;
         count = 0;
         hasMore = false;
     }
@@ -793,6 +885,7 @@ public:
         if (streamSource) index = streamSource->find(key);
         if (categorySource) index = categorySource->find(key);
         if (clipSource) index = clipSource->find(key);
+        if (eventSource) index = eventSource->find(key);
         if (index >= count) return false;
         recycler->selectRowAt(index, false);
         if (auto* focus = recycler->getDefaultFocus()) {
@@ -826,6 +919,7 @@ private:
     StreamDataSource* streamSource = nullptr;
     CategoryDataSource* categorySource = nullptr;
     ClipDataSource* clipSource = nullptr;
+    EventDataSource* eventSource = nullptr;
     size_t count = 0;
     bool hasMore = false;
 };
@@ -1063,6 +1157,7 @@ KickNXHome::KickNXHome() {
     offlineFollowedRow = new KickRow("offline-followed", "Followed channels — offline", KickRow::Kind::Streams, remember);
     popularRow = new KickRow("popular", "Popular live streams", KickRow::Kind::Streams, remember);
     popularClipsRow = new KickRow("popular-clips", "Popular clips", KickRow::Kind::Clips, remember);
+    eventsRow = new KickRow("events", "Live events", KickRow::Kind::Events, remember);
     categoryStreamsRow = new KickRow("category-streams", "Category streams", KickRow::Kind::Streams, remember);
     categoriesRow = new KickRow("categories", "Top categories", KickRow::Kind::Categories, remember);
     searchRow = new KickRow("search", "Search results", KickRow::Kind::Streams, remember);
@@ -1111,6 +1206,7 @@ KickNXHome::KickNXHome() {
     content->addView(followedRow);
     content->addView(popularRow);
     content->addView(popularClipsRow);
+    content->addView(eventsRow);
     content->addView(categoryStreamsRow);
     content->addView(categoriesRow);
     content->addView(searchRow);
@@ -1121,6 +1217,7 @@ KickNXHome::KickNXHome() {
                  followedRow,
                  popularRow,
                  popularClipsRow,
+                 eventsRow,
                  categoryStreamsRow,
                  categoriesRow,
                  searchRow,
@@ -1520,6 +1617,7 @@ void KickNXHome::restoreContentFocus() {
     if (lastFocusedRow == "followed" && followedRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "popular" && popularRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "popular-clips" && popularClipsRow->focusKey(lastFocusedKey)) return;
+    if (lastFocusedRow == "events" && eventsRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "category-streams" && categoryStreamsRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "categories" && categoriesRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "search" && searchRow->focusKey(lastFocusedKey)) return;
@@ -1538,6 +1636,10 @@ void KickNXHome::focusFirstContentRow() {
         return;
     }
     if (auto* focus = popularClipsRow->defaultFocus()) {
+        brls::Application::giveFocus(focus);
+        return;
+    }
+    if (auto* focus = eventsRow->defaultFocus()) {
         brls::Application::giveFocus(focus);
         return;
     }
@@ -1890,6 +1992,11 @@ void KickNXHome::showHomeData(kick::HomeData data) {
     const bool offlineFollowedHasItems = signedIn && !data.offlineFollowed.items.empty();
     const bool popularHasItems = !data.popular.items.empty();
     const bool popularClipsHaveItems = !data.popularClips.items.empty();
+    std::vector<kick::LiveEvent> liveEvents;
+    for (auto& event : data.events.items) {
+        if (event.isLive()) liveEvents.push_back(std::move(event));
+    }
+    const bool eventsHaveItems = !liveEvents.empty();
     const bool categoriesHaveItems = !data.categories.items.empty();
 
     auto focusTopActions = [this]() -> brls::View* {
@@ -1901,6 +2008,7 @@ void KickNXHome::showHomeData(kick::HomeData data) {
     std::function<brls::View*()> offlineFollowedUpTarget;
     std::function<brls::View*()> popularUpTarget;
     std::function<brls::View*()> popularClipsUpTarget;
+    std::function<brls::View*()> eventsUpTarget;
     std::function<brls::View*()> categoriesUpTarget;
 
     if (followedHasItems) {
@@ -1909,6 +2017,8 @@ void KickNXHome::showHomeData(kick::HomeData data) {
         popularUpTarget = focusTopActions;
     } else if (popularClipsHaveItems) {
         popularClipsUpTarget = focusTopActions;
+    } else if (eventsHaveItems) {
+        eventsUpTarget = focusTopActions;
     } else if (categoriesHaveItems) {
         categoriesUpTarget = focusTopActions;
     } else if (offlineFollowedHasItems) {
@@ -1948,6 +2058,16 @@ void KickNXHome::showHomeData(kick::HomeData data) {
             ? "Kick returned no popular clips."
             : "Popular clips could not be loaded. Use Retry to try again.",
         popularClipsUpTarget);
+    // Events are new and undocumented; when none are live, or the request
+    // failed, the row is hidden rather than showing an error.
+    if (eventsHaveItems) {
+        eventsRow->setEvents(std::move(liveEvents),
+            [this](const kick::LiveEvent& event) { openEvent(event); },
+            "No Kick events are live right now.",
+            eventsUpTarget);
+    } else {
+        eventsRow->clear();
+    }
     categoriesRow->setCategories(std::move(data.categories.items),
         [this](const kick::Category& category) { openCategory(category); },
         data.categoriesError.empty()
@@ -2441,6 +2561,227 @@ void KickNXHome::openChannelPage(
             new KickChannelPage(login)));
 }
 
+namespace {
+
+// Root of the event page. Cancels its stream request when the page closes so
+// a late reply never touches views that were already deleted.
+class EventPageView : public brls::Box {
+public:
+    EventPageView() : cancel(std::make_shared<std::atomic_bool>(false)) {}
+    ~EventPageView() override { cancel->store(true); }
+
+    HTTP::Cancel cancel;
+};
+
+// "2026-09-08T16:00:00Z" -> "2026-09-08 16:00 UTC". Kick sends UTC times.
+std::string eventTimeText(const std::string& iso) {
+    if (iso.size() < 16 || iso[10] != 'T') return iso;
+    return iso.substr(0, 10) + " " + iso.substr(11, 5) + " UTC";
+}
+
+std::string eventPhaseText(const kick::LiveEvent& event) {
+    if (event.isLive()) return "LIVE NOW";
+    if (event.phase == "pre") return "Upcoming";
+    if (event.phase == "post") return "Ended";
+    return "Event";
+}
+
+}  // namespace
+
+void KickNXHome::openEvent(const kick::LiveEvent& event) {
+    const auto& palette = kicknx::theme::current();
+
+    auto* page = new EventPageView();
+    page->setAxis(brls::Axis::COLUMN);
+    page->setDimensions(
+        brls::Application::contentWidth,
+        brls::Application::contentHeight);
+    page->setBackgroundColor(palette.background);
+
+    auto* heading = new brls::Box();
+    heading->setAxis(brls::Axis::ROW);
+    heading->setAlignItems(brls::AlignItems::CENTER);
+    heading->setPadding(24, 48, 18, 48);
+    heading->setWidthPercentage(100);
+    heading->setBackgroundColor(palette.header);
+    kicknx::theme::decorateHeader(heading);
+    page->addView(heading);
+
+    auto* headingText = new brls::Box();
+    headingText->setAxis(brls::Axis::COLUMN);
+    headingText->setGrow(1.0f);
+    heading->addView(headingText);
+
+    auto* title = new brls::Label();
+    title->setText(event.title);
+    title->setFontSize(30);
+    title->setSingleLine(true);
+    title->setTextColor(palette.headerTextPrimary);
+    headingText->addView(title);
+
+    std::string meta = eventPhaseText(event);
+    if (!event.categoryName.empty()) meta += " · " + event.categoryName;
+    if (!event.organiserName.empty()) meta += " · Organised by " + event.organiserName;
+    if (!event.startTime.empty()) meta += " · " + eventTimeText(event.startTime);
+    auto* metaLabel = new brls::Label();
+    metaLabel->setText(meta);
+    metaLabel->setFontSize(16);
+    metaLabel->setMarginTop(4);
+    metaLabel->setTextColor(event.isLive() ? palette.headerAccent : palette.headerTextMuted);
+    headingText->addView(metaLabel);
+
+    auto* backButton = makeButton("Back");
+    backButton->setMarginRight(0);
+    backButton->registerClickAction([](brls::View*) {
+        return brls::Application::popActivity();
+    });
+    heading->addView(backButton);
+
+    auto* scroll = new brls::ScrollingFrame();
+    scroll->setGrow(1.0f);
+    scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
+    page->addView(scroll);
+
+    auto* content = new brls::Box();
+    content->setAxis(brls::Axis::COLUMN);
+    content->setPadding(18, 48, 36, 48);
+    scroll->setContentView(content);
+
+    if (!event.bannerUrl.empty()) {
+        auto* banner = new brls::Image();
+        banner->setWidthPercentage(100);
+        banner->setHeight(230);
+        banner->setCornerRadius(12);
+        banner->setScalingType(brls::ImageScalingType::FILL);
+        banner->setImageFromRes("img/video-card-bg.png");
+        Image::with(banner, event.bannerUrl);
+        content->addView(banner);
+    }
+
+    if (!event.description.empty()) {
+        auto* description = new brls::Label();
+        description->setText(event.description);
+        description->setFontSize(17);
+        description->setMarginTop(14);
+        description->setTextColor(palette.textSecondary);
+        content->addView(description);
+    }
+
+    auto* status = new brls::Label();
+    status->setFontSize(17);
+    status->setMarginTop(18);
+    status->setTextColor(palette.textMuted);
+    content->addView(status);
+
+    auto* streamsRow = new KickRow("event-streams", "Live streams", KickRow::Kind::Streams,
+        [](const std::string&, const std::string&) {});
+    streamsRow->setMarginTop(14);
+    content->addView(streamsRow);
+
+    // Most-viewed clips from the event, shown once Kick returns any; ended
+    // events often have clips even with no one live.
+    auto* clipsRow = new KickRow("event-clips", "Popular clips", KickRow::Kind::Clips,
+        [](const std::string&, const std::string&) {});
+    clipsRow->setMarginTop(14);
+    clipsRow->setVisibility(brls::Visibility::GONE);
+    content->addView(clipsRow);
+
+    // Shared with the async callbacks below; they bail out once the page closes.
+    struct EventPageState {
+        bool streamsShown = false;
+        bool clipsLoading = false;
+        std::string clipsCursor;
+    };
+    auto state = std::make_shared<EventPageState>();
+
+    static_cast<KickNXActionButton*>(backButton)->downTarget = [state, streamsRow, clipsRow]() -> brls::View* {
+        if (state->streamsShown) return streamsRow->defaultFocus();
+        if (clipsRow->getVisibility() == brls::Visibility::VISIBLE) return clipsRow->defaultFocus();
+        return nullptr;
+    };
+
+    page->registerAction("Back", brls::BUTTON_B, [](brls::View*) {
+        return brls::Application::popActivity();
+    });
+
+    brls::Application::pushActivity(new brls::Activity(page));
+    brls::sync([backButton]() { brls::Application::giveFocus(backButton); });
+
+    const HTTP::Cancel cancel = page->cancel;
+    const std::string eventId = event.id;
+    const auto playClip = [](const kick::ChannelClip& clip) {
+        const std::string channel = clip.channelName.empty() ? clip.creatorName : clip.channelName;
+        RemoteView::playClip(clip.id, clip.title, channel + " · " + viewsText(clip.viewCount));
+    };
+    const auto clipsUp = [state, streamsRow, backButton]() -> brls::View* {
+        if (state->streamsShown) return streamsRow->defaultFocus();
+        return backButton;
+    };
+
+    // Next pages load as the row is scrolled to its end. The row's grid owns
+    // the loader; the loader keeps only a weak reference to itself, so there
+    // is no ownership cycle.
+    auto loadMoreClips = std::make_shared<std::function<void()>>();
+    *loadMoreClips = [cancel, state, clipsRow, eventId, weakMore = std::weak_ptr<std::function<void()>>(loadMoreClips)]() {
+        if (state->clipsLoading || state->clipsCursor.empty()) return;
+        state->clipsLoading = true;
+        kick::loadEventClipsAsync(kick::loadConfig(), eventId, state->clipsCursor,
+            [cancel, state, clipsRow, weakMore](kick::ClipPage result) {
+                if (cancel->load()) return;
+                state->clipsLoading = false;
+                clipsRow->appendClips(std::move(result.items));
+                state->clipsCursor = result.cursor;
+                clipsRow->setHasMore(!state->clipsCursor.empty());
+                if (auto more = weakMore.lock())
+                    clipsRow->onNextPage(!state->clipsCursor.empty(), [more]() { (*more)(); });
+            },
+            [cancel, state](const std::string&) {
+                if (cancel->load()) return;
+                state->clipsLoading = false;
+            },
+            cancel);
+    };
+
+    kick::loadEventClipsAsync(kick::loadConfig(), eventId, "",
+        [cancel, state, clipsRow, playClip, clipsUp, loadMoreClips](kick::ClipPage result) {
+            if (cancel->load() || result.items.empty()) return;
+            state->clipsCursor = result.cursor;
+            clipsRow->setClips(std::move(result.items), playClip,
+                "This event has no clips yet.", clipsUp);
+            clipsRow->setHasMore(!state->clipsCursor.empty());
+            clipsRow->onNextPage(!state->clipsCursor.empty(), [loadMoreClips]() { (*loadMoreClips)(); });
+        },
+        // Clips are extra; on failure the row simply stays hidden.
+        [](const std::string&) {},
+        cancel);
+
+    if (!event.isLive() && event.liveStreamCount <= 0) {
+        status->setText(event.phase == "pre"
+            ? "This event hasn't started yet."
+            : "This event has ended.");
+        streamsRow->setVisibility(brls::Visibility::GONE);
+        return;
+    }
+
+    status->setText("Loading live streams…");
+    kick::loadEventStreamsAsync(kick::loadConfig(), eventId,
+        [this, cancel, state, status, streamsRow, backButton](kick::StreamPage result) {
+            if (cancel->load()) return;
+            status->setVisibility(brls::Visibility::GONE);
+            state->streamsShown = !result.items.empty();
+            streamsRow->setStreams(std::move(result.items),
+                [this](const kick::Stream& stream) { playChannel(stream); },
+                "No one is streaming this event right now.",
+                [backButton]() -> brls::View* { return backButton; });
+            if (auto* focus = streamsRow->defaultFocus()) brls::Application::giveFocus(focus);
+        },
+        [cancel, status](const std::string& error) {
+            if (cancel->load()) return;
+            status->setText("Live streams could not be loaded: " + error);
+        },
+        cancel);
+}
+
 void KickNXHome::playChannel(const kick::Stream& stream) {
     if (busy) return;
     if (!stream.isLive) {
@@ -2477,6 +2818,7 @@ void KickNXHome::clearRows() {
     offlineFollowedRow->clear();
     popularRow->clear();
     popularClipsRow->clear();
+    eventsRow->clear();
     categoryStreamsRow->clear();
     categoriesRow->clear();
     searchRow->clear();

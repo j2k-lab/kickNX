@@ -12,6 +12,7 @@ namespace kick {
 struct Stream;
 struct Category;
 struct HomeData;
+struct LiveEvent;
 }
 
 class KickRow;
@@ -44,6 +45,7 @@ private:
     void searchFor(const std::string& query);
     void openCategory(const kick::Category& category);
     void openChannelPage(const kick::Stream& stream);
+    void openEvent(const kick::LiveEvent& event);
     void playChannel(const kick::Stream& stream);
     void updateHero(const kick::Stream& stream);
     void clearHero();
@@ -97,6 +99,7 @@ private:
     KickRow* offlineFollowedRow = nullptr;
     KickRow* popularRow = nullptr;
     KickRow* popularClipsRow = nullptr;
+    KickRow* eventsRow = nullptr;
     KickRow* categoryStreamsRow = nullptr;
     KickRow* categoriesRow = nullptr;
     KickRow* searchRow = nullptr;
