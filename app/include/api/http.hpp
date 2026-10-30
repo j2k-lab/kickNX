@@ -55,6 +55,9 @@ public:
     int propfind(const std::string& url, std::ostream* out);
     std::string _post(const std::string& url, const std::string& data);
     void set_user_agent(const std::string& agent);
+    /// Marks a ThreadPool worker's handle, whose image downloads share fewer
+    /// connection slots so Kick API calls always have one free.
+    void set_pooled(bool value) { pooled = value; }
     void set_basic_auth(const std::string& user, const std::string& passwd);
     void _delete(const std::string& url, std::ostream* out);
 
@@ -140,4 +143,5 @@ private:
     // Cancellation is needed for image requests, but progress callbacks are
     // enabled only for callers that explicitly request progress reporting.
     bool report_progress = false;
+    bool pooled = false;
 };

@@ -37,6 +37,7 @@ void ThreadPool::start(size_t num) {
 void *ThreadPool::task_loop(void *ptr) {
     ThreadPool *p = reinterpret_cast<ThreadPool *>(ptr);
     HTTP s;
+    s.set_pooled(true);
     while (!p->isStop.load()) {
         Task task;
 

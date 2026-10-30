@@ -2,6 +2,8 @@
 #include "utils/config.hpp"
 #include <borealis/core/logger.hpp>
 #include <curl/curl.h>
+#include <condition_variable>
+#include <mutex>
 #if defined(BOREALIS_USE_GXM)
 #include <mbedtls/platform.h>
 #include <psp2/gxm.h>
@@ -83,6 +85,51 @@ private:
 static std::string user_agent =
     fmt::format("{}/{} ({})", AppVersion::getPackageName(), AppVersion::getVersion(), AppVersion::getPlatform());
 
+namespace {
+
+// Counting gate on how many requests may be connected at the same time.
+class TransferGate {
+public:
+    explicit TransferGate(int slots) : free(slots) {}
+
+    void acquire() {
+        std::unique_lock<std::mutex> lock(mutex);
+        cond.wait(lock, [this]() { return free > 0; });
+        --free;
+    }
+
+    void release() {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++free;
+        }
+        cond.notify_one();
+    }
+
+private:
+    std::mutex mutex;
+    std::condition_variable cond;
+    int free;
+};
+
+// The Switch's TLS service only gives an app a handful of connections, and
+// past that new handshakes fail with "SSL connect error". Bursts of
+// thumbnails (e.g. refreshing Home quickly) used to take every slot, so Kick
+// API calls (home sections, playback URLs, login) failed. At most 4 requests
+// run at once, and background image downloads may use only 3 of them, so an
+// API call always has a slot.
+TransferGate& allTransfers() {
+    static TransferGate gate(4);
+    return gate;
+}
+
+TransferGate& imageTransfers() {
+    static TransferGate gate(3);
+    return gate;
+}
+
+}  // namespace
+
 /// @brief curl context
 
 HTTP::HTTP() : chunk(nullptr) {
@@ -125,6 +172,17 @@ HTTP::HTTP() : chunk(nullptr) {
     curl_easy_setopt(this->easy, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(this->easy, CURLOPT_TCP_NODELAY, 1L);
     curl_easy_setopt(this->easy, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+    // The Switch allows an app only a few TLS connections at once. Image
+    // workers keep their handle for the app's lifetime, and by default each
+    // one caches an open connection to every image host it has used. With
+    // enough hosts those idle connections use up the limit and new requests
+    // (login, playback URLs) fail with "SSL connect error". Keep one idle
+    // connection per handle, so the image workers hold at most 4 between
+    // them, and drop idle ones after a minute.
+    curl_easy_setopt(this->easy, CURLOPT_MAXCONNECTS, 1L);
+#if LIBCURL_VERSION_NUM >= 0x074100
+    curl_easy_setopt(this->easy, CURLOPT_MAXAGE_CONN, 60L);
+#endif
 #if LIBCURL_VERSION_NUM >= 0x071900 && !defined(__PS4__)
     curl_easy_setopt(this->easy, CURLOPT_TCP_KEEPALIVE, 1L);
 #endif
@@ -220,7 +278,13 @@ int HTTP::perform(std::ostream* body) {
     curl_easy_setopt(this->easy, CURLOPT_WRITEDATA, body);
     curl_easy_setopt(this->easy, CURLOPT_PROXY, PROXY_STATUS ? PROXY.c_str() : nullptr);
 
-    CURLcode res = curl_easy_perform(this->easy);
+    CURLcode res = CURLE_ABORTED_BY_CALLBACK;
+    if (pooled) imageTransfers().acquire();
+    allTransfers().acquire();
+    // A thumbnail scrolled away while waiting for a slot is skipped.
+    if (!is_cancel || !is_cancel->load()) res = curl_easy_perform(this->easy);
+    allTransfers().release();
+    if (pooled) imageTransfers().release();
 
     // ThreadPool workers reuse HTTP handles. Do not leak cancellation,
     // subscribers, or progress-meter state into the next image request.
