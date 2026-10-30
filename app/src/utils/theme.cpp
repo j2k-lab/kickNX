@@ -69,9 +69,9 @@ Palette makeKick() {
     p.name = "Kick";
     p.background = nvgRGB(139, 176, 111);
     p.header = nvgRGB(120, 156, 94);
-    p.surface = nvgRGB(218, 221, 226);
+    p.surface = nvgRGB(184, 189, 195);
     p.surfaceAlt = nvgRGB(226, 236, 218);
-    p.heroOverlay = nvgRGBA(218, 221, 226, 240);
+    p.heroOverlay = nvgRGBA(184, 189, 195, 240);
     p.textPrimary = nvgRGB(12, 14, 16);
     p.textSecondary = nvgRGB(34, 40, 38);
     p.textMuted = nvgRGB(38, 62, 42);

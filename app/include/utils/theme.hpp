@@ -62,8 +62,9 @@ struct Palette {
     NVGcolor headerTextSecondary;
     NVGcolor headerTextMuted;
 
-    /// Full-screen artwork behind the sign-in page, empty for a plain page.
-    /// Its cards then use the page background colour so they stand out.
+    /// Full-screen artwork behind the sign-in page and the tall streamer-page
+    /// header, empty for none. Sign-in cards then use the page background
+    /// colour so they stand out.
     std::string pageImage;
 };
 

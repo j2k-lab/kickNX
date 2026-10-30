@@ -19,7 +19,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Colour themes**: OLED (the default), Dark Grey and Kick. Choose one from the new **Theme** button on Home. The picker is a pop-up with a small preview of each theme, and the choice is saved and applied straight away.
-- **Kick theme**: a muted Kick green (`#8BB06F`) page with light grey cards, a dark "K" monogram pattern behind the Home, About, theme picker and event headers, and the full pattern behind the sign-in screen. The focus ring pulses white and black so it shows everywhere.
+- **Kick theme**: a muted Kick green (`#8BB06F`) page with light grey cards, a dark "K" monogram pattern behind the Home, About, theme picker and event headers, and the full pattern behind streamer page headers and the sign-in screen. The focus ring pulses white and black so it shows everywhere.
 - **Docked chat follows the theme**: the docked chat panel uses the active theme's colours. The chat overlay on top of the video keeps its dark look.
 - **Live events**: a Live events row on Home lists Kick events that are live now. Each event opens a page with its banner, details, live streams and its most-viewed clips, which load more as you scroll.
 - **In-app chat keyboard in landscape**: the landscape composer opens on an on-screen keyboard (with Caps Lock and symbols) instead of the system keyboard, with a green Emotes key to switch to the emote picker. Its keys are see-through so the stream stays visible. The Nintendo keyboard is still available under Player Settings → Message composer.

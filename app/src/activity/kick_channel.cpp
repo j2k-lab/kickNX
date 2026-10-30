@@ -632,6 +632,9 @@ KickChannelPage::KickChannelPage(
     headerBox->setBackgroundColor(
         kicknx::theme::current().header);
     headerBox->setPadding(14, 42, 24, 42);
+    // This header is about as tall as the screen, so it takes the
+    // full-screen artwork rather than the short header strip.
+    kicknx::theme::decoratePage(headerBox);
     content->addView(headerBox);
 
     auto* topBar = new brls::Box();
@@ -695,7 +698,7 @@ KickChannelPage::KickChannelPage(
     name->setFontSize(32);
     name->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     name->setTextColor(
-        kicknx::theme::current().textPrimary);
+        kicknx::theme::current().headerTextPrimary);
     identity->addView(name);
 
     liveState = new brls::Label();
@@ -703,7 +706,7 @@ KickChannelPage::KickChannelPage(
     liveState->setFontSize(17);
     liveState->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     liveState->setTextColor(
-        kicknx::theme::current().textMuted);
+        kicknx::theme::current().headerTextMuted);
     liveState->setMarginTop(6);
     identity->addView(liveState);
 
@@ -712,7 +715,7 @@ KickChannelPage::KickChannelPage(
     status->setFontSize(15);
     status->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     status->setTextColor(
-        kicknx::theme::current().textMuted);
+        kicknx::theme::current().headerTextMuted);
     status->setMarginTop(4);
     identity->addView(status);
 
@@ -720,7 +723,7 @@ KickChannelPage::KickChannelPage(
     headline->setFontSize(22);
     headline->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     headline->setTextColor(
-        kicknx::theme::current().textPrimary);
+        kicknx::theme::current().headerTextPrimary);
     headline->setMarginTop(14);
     headline->setWidthPercentage(90);
     headerBox->addView(headline);
@@ -729,7 +732,7 @@ KickChannelPage::KickChannelPage(
     metadata->setFontSize(16);
     metadata->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     metadata->setTextColor(
-        kicknx::theme::current().textMuted);
+        kicknx::theme::current().headerTextMuted);
     metadata->setMarginTop(8);
     headerBox->addView(metadata);
 
@@ -737,7 +740,7 @@ KickChannelPage::KickChannelPage(
     description->setFontSize(16);
     description->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     description->setTextColor(
-        kicknx::theme::current().textSecondary);
+        kicknx::theme::current().headerTextSecondary);
     description->setMarginTop(12);
     description->setWidthPercentage(85);
     headerBox->addView(description);
@@ -964,7 +967,7 @@ void KickChannelPage::showData(
                 loaded.liveStream.viewerCount) +
             " viewers");
         liveState->setTextColor(
-            kicknx::theme::current().accent);
+            kicknx::theme::current().headerAccent);
         headline->setText(
             loaded.liveStream.title.empty()
                 ? loaded.information.title
@@ -974,7 +977,7 @@ void KickChannelPage::showData(
     } else {
         liveState->setText("OFFLINE");
         liveState->setTextColor(
-            kicknx::theme::current().textMuted);
+            kicknx::theme::current().headerTextMuted);
         headline->setText(
             loaded.information.title);
         playButton->setVisibility(
