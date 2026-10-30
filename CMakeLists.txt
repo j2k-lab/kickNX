@@ -73,7 +73,7 @@ include(${BOREALIS_LIBRARY}/cmake/toolchain.cmake)
 # project info
 project(KickNX)
 set(VERSION_MAJOR "0")
-set(VERSION_MINOR "4")
+set(VERSION_MINOR "5")
 set(VERSION_ALTER "0")
 set(PROJECT_TITLEID "010ff000ffff0006")
 set(PROJECT_AUTHOR "j2k")

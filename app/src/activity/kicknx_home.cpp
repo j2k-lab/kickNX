@@ -2104,7 +2104,16 @@ void KickNXHome::showAbout() {
 
     addSection("Changelog");
     addBody(
-        "0.4.0 (Current)\n"
+        "0.5.0 (Current)\n"
+        "• Colour themes: OLED (default), Dark Grey and Light, chosen from a pop-up on Home.\n"
+        "• Larger profile picture on Home.\n"
+        "• Light theme: green header, softer background and readable focused cards.\n"
+        "• Kick-only app: Jellyfin, media library, USB browsing and danmaku removed.\n"
+        "• Offline streams show a message and return to the previous screen.\n"
+        "• Live playback: adaptive quality, captions load on demand, twiNX cache settings.\n"
+        "• OSD wakes with the stick or D-pad without taking focus from the chat composer.\n"
+        "• Emote backspace removes a whole emote.\n\n"
+        "0.4.0\n"
         "• Channel follow/unfollow button on streamer profiles with live status & sync.\n"
         "• Clickable user profile avatar navigating directly to your own channel page.\n"
         "• Custom 3D kickNX buffering indicator with lime-green text shimmer & neon bar.\n"

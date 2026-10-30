@@ -15,6 +15,25 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.5.0]
+
+### Added
+- **Colour themes**: OLED (the default), Dark Grey and Light. Choose one from the new **Theme** button on Home. The picker is a pop-up with a small preview of each theme, and the choice is saved and applied straight away.
+- **Docked chat follows the theme**: the docked chat panel uses the active theme's colours. The chat overlay on top of the video keeps its dark look.
+- **Light theme polish**: a light-green header, a softer grey page background, and a pale-green focus fill so text on focused cards stays readable.
+
+### Changed
+- **Larger profile picture** on the Home screen.
+- **Kick-only client**: the Jellyfin, media library, server setup, settings page, USB file browser, local music player, Apache/WebDAV remote sources, analytics and danmaku code have been removed. kickNX now starts directly on the Kick home screen.
+- **Live playback**: "Auto" quality uses Kick's adaptive master playlist, captions load only when chosen, and streams open with the same cache settings as twiNX.
+- **Offline streams**: when Kick reports a channel has gone offline, the player shows a message and returns to the previous screen.
+
+### Fixed
+- **OSD focus**: pushing the left stick or D-pad no longer pulls focus away from the chat composer, and it still wakes the OSD when you are watching the stream.
+- **Emote backspace**: one press removes a whole emote from the chat draft.
+
+---
+
 ## [0.4.0]
 
 ### Added

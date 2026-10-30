@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Release 0.4.0" src="https://img.shields.io/badge/release-0.4.0-53FC18?logo=github&style=flat-square" height="20"></a>
+  <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Release 0.5.0" src="https://img.shields.io/badge/release-0.5.0-53FC18?logo=github&style=flat-square" height="20"></a>
   <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/j2k-lab/kickNX/total?color=53FC18&style=flat-square" height="20"></a>
   <img alt="Nintendo Switch" src="https://img.shields.io/badge/platform-Nintendo%20Switch-E60012?logo=nintendoswitch&logoColor=white&style=flat-square" height="20">
   <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B&logoColor=white&style=flat-square" height="20">
@@ -25,7 +25,9 @@ Switch homebrew. It combines native playback, Kick browsing and interactive
 chat in an interface designed around Joy-Con, Pro Controller and touchscreen
 use in handheld, tabletop and television play.
 
-Version 0.4.0 features channel follow and unfollow directly from streamer
+Version 0.5.0 adds colour themes (OLED, Dark Grey and Light) chosen from a
+pop-up on Home, and removes the non-Kick features to make kickNX Kick-only.
+It also includes channel follow and unfollow directly from streamer
 profiles, custom 3D kickNX buffering indicator with lime text shimmer,
 clickable user avatar navigation, Kick-green section divider lines and tabs,
 Kick TV QR code pairing, Kick-styled playback controls with live stream uptime,
@@ -170,6 +172,7 @@ Major milestones:
 - `0.3.0` - TV QR code login, live AWS IVS master playback, 60 FPS presentation, and fast VOD streaming
 - `0.3.1` - Fast VOD/clip launch, active chatter counter, and WebVTT subtitle track selection
 - `0.3.2` - Kick signature playback bar with live uptime, channel category navigation, and bottom sheet emote composer
+- `0.5.0` - Colour themes with a Home pop-up picker, Kick-only cleanup, offline stream handling and playback fixes
 - `0.4.0` - Channel follow/unfollow on streamer profiles, clickable user avatar, and Kick bright green UI theme, plus chat, playback and settings fixes
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
