@@ -1388,17 +1388,22 @@ public:
             rows.push_back(row);
         }
 
+        // An outlined button whose text and outline follow the page text
+        // colour (black on Kick, white elsewhere). setTextColor re-applies
+        // the bordered style, so the outline is set after it.
+        const NVGcolor composeColor = docked ? primaryText : nvgRGB(255, 255, 255);
         composeButton = new brls::Button();
         composeButton->setText("Send message");
         composeButton->setFontSize(15);
-        composeButton->setHeight(46);
+        composeButton->setHeight(56);
         composeButton->setStyle(&brls::BUTTONSTYLE_BORDERED);
-        composeButton->setBorderThickness(2.0f);
-        composeButton->setBorderColor(accent);
-        composeButton->setBackgroundColor(docked ? palette.button : nvgRGB(24, 115, 36));
         composeButton->setCornerRadius(8);
-        composeButton->setTextColor(docked ? palette.buttonText : nvgRGB(255, 255, 255));
-        composeButton->setHideHighlightBackground(docked && palette.keepButtonFillOnFocus);
+        composeButton->setTextColor(composeColor);
+        composeButton->setBorderThickness(2.0f);
+        composeButton->setBorderColor(composeColor);
+        composeButton->setAxis(brls::Axis::COLUMN);
+        composeButton->setPaddingTop(0);
+        composeButton->setPaddingBottom(0);
         composeButton->setMarginTop(8);
         composeButton->setVisibility(brls::Visibility::GONE);
         composeButton->registerClickAction(
@@ -1419,7 +1424,20 @@ public:
                     : false;
             });
 
+        auto* composeHint = new brls::Label();
+        composeHint->setText("Tap or press ZL");
+        composeHint->setFontSize(12);
+        composeHint->setTextColor(mutedText);
+        composeHint->setHorizontalAlign(brls::HorizontalAlign::CENTER);
+        composeHint->setMarginTop(2);
+        composeButton->addView(composeHint);
+
         this->addView(composeButton);
+    }
+
+    void setComposeVisible(bool visible) {
+        composeButton->setVisibility(
+            visible ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
     }
 
     void apply(const kick::ChatPreferences& value) {
@@ -1469,11 +1487,9 @@ public:
             this->setBackgroundColor(nvgRGBA(12, 14, 20, alpha));
         }
 
-        composeButton->setVisibility(
+        setComposeVisible(
             value.participation ==
-                    kick::ChatParticipation::Interactive
-                ? brls::Visibility::VISIBLE
-                : brls::Visibility::GONE);
+            kick::ChatParticipation::Interactive);
 
         refresh();
     }
@@ -1548,7 +1564,7 @@ public:
         this->setWidth(width);
         this->setHeight(height);
         this->setBackgroundColor(kicknx::theme::current().background);
-        composeButton->setVisibility(brls::Visibility::GONE);
+        setComposeVisible(false);
         refresh();
     }
 
@@ -1565,7 +1581,7 @@ private:
                 ? 28.0f
                 : 0.0f) +
             (composeButton->getVisibility() == brls::Visibility::VISIBLE
-                ? 58.0f
+                ? 68.0f
                 : 0.0f);
         const float availableHeight =
             std::max(
@@ -1941,6 +1957,11 @@ constexpr int KICK_OFFLINE_CONFIRMATIONS = 2;
 constexpr long KICK_OFFLINE_EXIT_DELAY_MS = 3500;
 constexpr long KICK_OFFLINE_RECHECK_MS = 3000;
 constexpr long KICK_OFFLINE_POLL_MS = 20000;
+// Opening the chat composer while a stream is still starting competes with
+// playback for the Switch's few TLS connections (SSL connect errors, and
+// sometimes a crash), so ZL and the Send message button wait for the stream
+// to load and for this long after the player opens.
+constexpr auto KICK_CHAT_OPEN_DELAY = std::chrono::seconds(5);
 
 void handleKickStreamOffline(
     const std::shared_ptr<KickPlaybackRecoveryState>& state) {
@@ -2691,6 +2712,7 @@ public:
             auto& mpv = MPVCore::instance();
             switch (event) {
             case MpvEventEnum::MPV_LOADED: {
+                streamLoaded = true;
                 if (!this->kickChannel.empty()) {
                     applyKickVideoLayout(currentChatPreferences);
                     if (playbackRecovery) {
@@ -3227,6 +3249,14 @@ public:
     }
 
     void openChatComposer() {
+        if (!streamLoaded ||
+            std::chrono::steady_clock::now() - openedAt <
+                KICK_CHAT_OPEN_DELAY) {
+            brls::Application::notify(
+                "Chat opens once the stream has started");
+            return;
+        }
+
         const auto preferences =
             kick::loadChatPreferences();
 
@@ -3574,6 +3604,9 @@ private:
     kicknx::portrait::DisplayOrientation portraitOrientation =
         kicknx::portrait::DisplayOrientation::Landscape;
     bool playerShuttingDown = false;
+    bool streamLoaded = false;
+    const std::chrono::steady_clock::time_point openedAt =
+        std::chrono::steady_clock::now();
     // Shared with asynchronous callbacks (e.g. the Nintendo software keyboard)
     // so they can tell whether this player still exists before touching it.
     std::shared_ptr<std::atomic_bool> playerAlive =
