@@ -8,6 +8,8 @@
 #include "tab/remote_view.hpp"
 #include "utils/image.hpp"
 #include "utils/config.hpp"
+#include "utils/thread.hpp"
+#include "api/http.hpp"
 #include "view/h_recycling.hpp"
 #include "view/mpv_core.hpp"
 #include "view/qr_code_view.hpp"
@@ -2103,6 +2105,93 @@ void KickNXHome::showHomeData(kick::HomeData data) {
     }
 }
 
+namespace {
+
+constexpr const char* KICKNX_LATEST_RELEASE_URL =
+    "https://api.github.com/repos/j2k-lab/kickNX/releases/latest";
+
+/// The first "X.Y.Z" in text as numbers, e.g. "kickNX 0.5.0" -> {0, 5, 0}.
+/// Releases all use the fixed tag "Latest", so the version is read from the
+/// release title instead.
+std::vector<int> parseVersion(const std::string& text) {
+    std::vector<int> parts;
+    size_t i = 0;
+    while (i < text.size() && !std::isdigit(static_cast<unsigned char>(text[i]))) ++i;
+    while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i]))) {
+        int value = 0;
+        while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i]))) {
+            value = value * 10 + (text[i] - '0');
+            ++i;
+        }
+        parts.push_back(value);
+        if (i + 1 < text.size() && text[i] == '.' &&
+            std::isdigit(static_cast<unsigned char>(text[i + 1]))) {
+            ++i;
+        } else {
+            break;
+        }
+    }
+    return parts;
+}
+
+std::string joinVersion(const std::vector<int>& parts) {
+    std::string out;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (i) out += '.';
+        out += std::to_string(parts[i]);
+    }
+    return out;
+}
+
+void showUpdateResult(const std::string& message) {
+    auto* dialog = new brls::Dialog(message);
+    dialog->addButton("OK", []() {});
+    dialog->open();
+}
+
+/// Asks GitHub for the newest release and tells the viewer whether it is
+/// newer than this build. Only runs when the viewer presses the button.
+void checkForUpdates() {
+    static std::atomic_bool checking{false};
+    if (checking.exchange(true)) return;
+    brls::Application::notify("Checking for updates…");
+
+    ThreadPool::instance().submit([](HTTP&) {
+        std::string message;
+        try {
+            const auto release = nlohmann::json::parse(
+                HTTP::get(KICKNX_LATEST_RELEASE_URL, HTTP::Timeout{}));
+            auto latest = parseVersion(release.value("name", ""));
+            if (latest.empty()) latest = parseVersion(release.value("tag_name", ""));
+            const auto current = parseVersion(AppVersion::getVersion());
+
+            if (latest.empty()) {
+                message = "Couldn't read the latest version from GitHub. "
+                          "Check github.com/j2k-lab/kickNX/releases.";
+            } else if (latest > current) {
+                message = "kickNX " + joinVersion(latest) + " is available. "
+                          "You have " + AppVersion::getVersion() + ".\n\n"
+                          "Update from the Homebrew App Store, or download it from "
+                          "github.com/j2k-lab/kickNX/releases";
+            } else {
+                message = "You're on the latest version (" +
+                          AppVersion::getVersion() + ").";
+            }
+        } catch (const std::exception& ex) {
+            brls::Logger::error("update check failed: {}", ex.what());
+            message = "Couldn't check for updates. "
+                      "Check your internet connection and try again.";
+        }
+
+        brls::sync([message]() {
+            checking.store(false);
+            showUpdateResult(message);
+        });
+    });
+}
+
+}  // namespace
+
 void KickNXHome::showAbout() {
     auto* page = new brls::Box();
     page->setAxis(brls::Axis::COLUMN);
@@ -2152,6 +2241,13 @@ void KickNXHome::showAbout() {
     subtitle->setTextColor(kicknx::theme::current().headerTextMuted);
     subtitle->setMarginTop(4);
     headingText->addView(subtitle);
+
+    auto* updateButton = makeButton("Check for updates");
+    updateButton->registerClickAction([](brls::View*) {
+        checkForUpdates();
+        return true;
+    });
+    heading->addView(updateButton);
 
     auto* backButton = makeButton("Back");
     backButton->setMarginRight(0);
