@@ -2111,7 +2111,7 @@ void KickNXHome::showAbout() {
         "• Light theme: green header, softer background and readable focused cards.\n"
         "• Kick-only app: Jellyfin, media library, USB browsing and danmaku removed.\n"
         "• Offline streams show a message and return to the previous screen.\n"
-        "• Live playback: adaptive quality, captions load on demand, twiNX cache settings.\n"
+        "• Live playback: adaptive quality, twiNX cache settings.\n"
         "• OSD wakes with the stick or D-pad without taking focus from the chat composer.\n"
         "• Emote backspace removes a whole emote.\n\n"
         "0.4.0\n"

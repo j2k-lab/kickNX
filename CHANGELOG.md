@@ -25,7 +25,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - **Larger profile picture** on the Home screen.
 - **Kick-only client**: the Jellyfin, media library, server setup, settings page, USB file browser, local music player, Apache/WebDAV remote sources, analytics and danmaku code have been removed. kickNX now starts directly on the Kick home screen.
-- **Live playback**: "Auto" quality uses Kick's adaptive master playlist, captions load only when chosen, and streams open with the same cache settings as twiNX.
+- **Live playback**: "Auto" quality uses Kick's adaptive master playlist, and streams open with the same cache settings as twiNX.
 - **Offline streams**: when Kick reports a channel has gone offline, the player shows a message and returns to the previous screen.
 
 ### Fixed
