@@ -25,8 +25,10 @@ Switch homebrew. It combines native playback, Kick browsing and interactive
 chat in an interface designed around Joy-Con, Pro Controller and touchscreen
 use in handheld, tabletop and television play.
 
-Version 0.5.0 adds colour themes (OLED, Dark Grey and Light) chosen from a
-pop-up on Home, and removes the non-Kick features to make kickNX Kick-only.
+Version 0.5.0 adds colour themes (OLED, Dark Grey and Kick) chosen from a
+pop-up on Home, a Live events row and event pages with live streams and
+popular clips, and an in-app keyboard for landscape chat. It also removes the
+non-Kick features to make kickNX Kick-only.
 It also includes channel follow and unfollow directly from streamer
 profiles, custom 3D kickNX buffering indicator with lime text shimmer,
 clickable user avatar navigation, Kick-green section divider lines and tabs,
@@ -42,6 +44,7 @@ chat, and Joy-Con portrait mode.
 - Transparent 3D kickNX brand header logo on Home and About pages
 - Interactive top-right profile avatar navigating directly to your channel
 - Followed live channels row
+- Live events row, with event pages showing the event's live streams and most-viewed clips
 - Popular streams, top categories and live search by channel or game
 - Current viewer counts in live search results
 - Controller-friendly horizontal rows with pagination
@@ -67,6 +70,7 @@ chat, and Joy-Con portrait mode.
 - Decoder changes apply immediately to the active live stream
 - Hardened MPV/FFmpeg/NVTEGRA hardware-frame handling
 - Fullscreen, docked-chat and overlay-chat layouts
+- Stream title shown at the top of the live player controls
 - Live streams do not create unnecessary MPV watch-later files
 
 ### Portrait mode
@@ -86,8 +90,9 @@ chat, and Joy-Con portrait mode.
 - Kick username colors and formatted chat messages
 - Global, channel, subscriber and exclusive emotes
 - Static and animated Kick emotes
-- Message composer with Recent, Channel and All emote tabs
+- Message composer with a built-in on-screen keyboard (Caps Lock, symbols) and Recent, Channel and All emote tabs
 - Touch-accessible Send button in the full composer
+- Optional Nintendo system keyboard under Player Settings → Message composer
 - Multi-line message wrapping
 - Docked chat, full-height overlay and compact overlay
 - Four-corner overlay placement and configurable width
@@ -96,6 +101,7 @@ chat, and Joy-Con portrait mode.
 
 - D-pad and left-stick focus navigation with Kick bright green hover highlights
 - OLED true black backgrounds across streamer profiles and About pages
+- OLED, Dark Grey and Kick colour themes; Kick pairs a muted green page with a dark "K" pattern on headers and the sign-in screen
 - Right-stick scrolling on long pages
 - Handheld, portrait and television-friendly layouts
 - Dedicated About page with features, credits and complete release history

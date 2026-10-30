@@ -18,9 +18,12 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 ## [0.5.0]
 
 ### Added
-- **Colour themes**: OLED (the default), Dark Grey and Light. Choose one from the new **Theme** button on Home. The picker is a pop-up with a small preview of each theme, and the choice is saved and applied straight away.
+- **Colour themes**: OLED (the default), Dark Grey and Kick. Choose one from the new **Theme** button on Home. The picker is a pop-up with a small preview of each theme, and the choice is saved and applied straight away.
+- **Kick theme**: a muted Kick green (`#8BB06F`) page with light grey cards, a dark "K" monogram pattern behind the Home, About, theme picker and event headers, and the full pattern behind the sign-in screen. The focus ring pulses white and black so it shows everywhere.
 - **Docked chat follows the theme**: the docked chat panel uses the active theme's colours. The chat overlay on top of the video keeps its dark look.
-- **Light theme polish**: a light-green header, a softer grey page background, and a pale-green focus fill so text on focused cards stays readable.
+- **Live events**: a Live events row on Home lists Kick events that are live now. Each event opens a page with its banner, details, live streams and its most-viewed clips, which load more as you scroll.
+- **In-app chat keyboard in landscape**: the landscape composer opens on an on-screen keyboard (with Caps Lock and symbols) instead of the system keyboard, with a green Emotes key to switch to the emote picker. Its keys are see-through so the stream stays visible. The Nintendo keyboard is still available under Player Settings → Message composer.
+- **Stream title on the live OSD**: the top of the player shows the channel and stream title, like VODs and clips.
 
 ### Changed
 - **Larger profile picture** on the Home screen.
@@ -31,6 +34,9 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **OSD focus**: pushing the left stick or D-pad no longer pulls focus away from the chat composer, and it still wakes the OSD when you are watching the stream.
 - **Emote backspace**: one press removes a whole emote from the chat draft.
+- **Crash after closing a stream quickly**: backing out of a stream, especially right after closing an overlay such as Tesla/Ultrahand, could leave focus on the deleted player's close button, and pressing A then crashed the app.
+- **Sign-in, playback and refresh failures**: kickNX now limits how many secure connections it opens at once, so thumbnails can no longer use up the Switch's limit and make sign-in, playback URLs or Home sections fail with "SSL connect error".
+- **Damaged settings file**: a corrupted `config.json` no longer makes kickNX quit at launch; it is kept as `config.json.bak` and default settings are used.
 
 ---
 
