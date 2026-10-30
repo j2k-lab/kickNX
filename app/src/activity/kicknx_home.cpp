@@ -2067,7 +2067,7 @@ void KickNXHome::showAbout() {
     content->addView(creditCard);
 
     auto* createdBy = new brls::Label();
-    createdBy->setText("Created by j2k & Gemini");
+    createdBy->setText("Created by j2k");
     createdBy->setFontSize(24);
     createdBy->setTextColor(kicknx::theme::current().accent);
     creditCard->addView(createdBy);
@@ -2154,10 +2154,10 @@ void KickNXHome::showAbout() {
     addSection("Credits");
     addBody(
         "Project author & direction: j2k\n"
-        "AI co-development: Gemini\n"
+        "AI co-development: Gemini and Claude\n"
         "Original foundation: twiNX\n\n"
         "Built with Kick v1/v2 APIs, Centrifugo & Pusher WebSockets, mpv, FFmpeg, Borealis, "
-        "libcurl, libnx, and devkitPro. Special thanks to the twiNX project, Gemini, and the "
+        "libcurl, libnx, and devkitPro. Special thanks to the twiNX project, Gemini, Claude, and the "
         "Nintendo Switch homebrew and open-source communities that made kickNX possible.");
 
     addSection("Project note");

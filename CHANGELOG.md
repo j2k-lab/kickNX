@@ -3,7 +3,7 @@
 All notable changes to **kickNX** are documented in this file.
 
 kickNX is an independent, controller-first Kick client for Nintendo Switch
-homebrew, created by **j2k & Gemini**, based on **twiNX**.
+homebrew, created by **j2k** with AI co-development by **Gemini** and **Claude**, based on **twiNX**.
 
 The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 
@@ -135,7 +135,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 
 ## Project credits
 
-- **kickNX** was created and developed by **j2k** with AI co-development by **Gemini**, based on **twiNX**.
+- **kickNX** was created and developed by **j2k** with AI co-development by **Gemini** and **Claude**, based on **twiNX**.
 - Built using open-source technologies including Borealis, MPV, FFmpeg, libcurl, and libnx.
 - Upstream foundations: twiNX, Switchfin, and Borealis.
 
