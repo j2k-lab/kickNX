@@ -1,7 +1,7 @@
 # Nintendo Switch FFmpeg 7.1 libnx TLS recipe
 
 This directory contains the reproducible `switch-ffmpeg` package recipe used
-for the kickNX 0.9.0 release build. It adds Nintendo Switch/libnx TLS support so
+for the kickNX 0.5.0 release build. It adds Nintendo Switch/libnx TLS support so
 FFmpeg can open HTTPS Kick playlists directly, plus the validated kickNX
 H.264-reference and NVTEGRA hardware-frame transfer guards.
 

@@ -2,7 +2,7 @@
 
 ## Supported playback stack
 
-kickNX 0.9.0 is validated with this exact Switch playback stack:
+kickNX 0.5.0 is validated with this exact Switch playback stack:
 
 ```text
 MPV:    switch-libmpv 0.36.0-7
@@ -110,4 +110,4 @@ only be symbolicated accurately with the ELF from the exact same build.
 
 When no custom FFmpeg root is available, CMake uses the FFmpeg libraries
 reported by the installed `mpv.pc`. The project may compile, but that build does
-not necessarily include the TLS and NVTEGRA guards validated for kickNX 0.9.0.
+not necessarily include the TLS and NVTEGRA guards validated for kickNX 0.5.0.
