@@ -1260,10 +1260,6 @@ KickNXHome::KickNXHome() {
         refreshHome();
         return true;
     });
-    this->registerAction("Configured channel", brls::BUTTON_RB, [this](brls::View*) {
-        playConfiguredChannel();
-        return true;
-    });
 
     updateAccount();
     refreshHome();
@@ -2921,17 +2917,6 @@ void KickNXHome::playChannel(const kick::Stream& stream) {
     }
 
     RemoteView::playLive(config, stream.uptimeSeconds, stream.title);
-}
-
-void KickNXHome::playConfiguredChannel() {
-    auto config = kick::loadConfig();
-    if (config.channel.empty()) {
-        statusLabel->setText("No Kick channel is selected");
-        return;
-    }
-    config.preferredQuality = kick::loadPreferredQuality();
-    if (config.preferredQuality.empty()) config.preferredQuality = "auto";
-    RemoteView::playLive(config);
 }
 
 void KickNXHome::clearRows() {

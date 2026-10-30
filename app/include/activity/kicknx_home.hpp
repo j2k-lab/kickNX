@@ -49,7 +49,6 @@ private:
     void playChannel(const kick::Stream& stream);
     void updateHero(const kick::Stream& stream);
     void clearHero();
-    void playConfiguredChannel();
     void showHomeData(kick::HomeData data);
     void clearRows();
 
