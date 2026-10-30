@@ -154,9 +154,6 @@ void ScrollingFrame::draw(NVGcontext* vg, float x, float y, float width, float h
 
 void ScrollingFrame::rightStickScrollingBehaviour()
 {
-    if (Application::getInputType() != InputType::GAMEPAD)
-        return;
-
     if (!focused && !childFocused)
         return;
 
@@ -171,6 +168,12 @@ void ScrollingFrame::rightStickScrollingBehaviour()
 
     if (std::fabs(axis) <= DEAD_ZONE)
         return;
+
+    // After a touch, only the D-pad, left stick or a button used to bring
+    // back gamepad input. Let the right stick do it too, and scroll on the
+    // same push since scrolling never changes the selection.
+    if (Application::getInputType() != InputType::GAMEPAD)
+        Application::setInputType(InputType::GAMEPAD);
 
     // Preserve fine movement near the dead zone while still allowing fast
     // traversal through long pages at full deflection.

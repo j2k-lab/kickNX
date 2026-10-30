@@ -27,8 +27,10 @@
 
 namespace {
 
-class AboutScrollingFrame : public brls::ScrollingFrame {
+class HeaderScrollingFrame : public brls::ScrollingFrame {
 public:
+    /// Focus anywhere inside this view (a page header and its buttons)
+    /// counts as focus in the scroll frame.
     void setFocusProxy(brls::View* view) { focusProxy = view; }
 
     void draw(
@@ -40,19 +42,34 @@ public:
         brls::Style style,
         brls::FrameContext* ctx) override {
         // ScrollingFrame normally reads the right stick only while it or one
-        // of its descendants owns focus. The About page keeps focus on the
-        // fixed Back button, which sits outside the scroll frame. Bridge that
-        // one local focus state during drawing so the stock right-stick
-        // scrolling behavior remains available without changing global/home
-        // navigation.
-        const bool proxyIsFocused =
-            focusProxy && brls::Application::getCurrentFocus() == focusProxy;
+        // of its descendants owns focus. Home, About and event pages keep
+        // their buttons in a fixed header outside the scroll frame, so the
+        // right stick stopped scrolling once one of them was focused. Bridge
+        // that one local focus state during drawing so the stock right-stick
+        // scrolling behavior remains available without changing navigation.
+        bool proxyIsFocused = false;
+        for (brls::View* view = brls::Application::getCurrentFocus();
+             focusProxy && view; view = view->getParent()) {
+            if (view == focusProxy) {
+                proxyIsFocused = true;
+                break;
+            }
+        }
         const bool previousChildFocused = childFocused;
-        if (proxyIsFocused) childFocused = true;
+        const brls::ScrollingBehavior previousBehavior = behavior;
+        if (proxyIsFocused) {
+            childFocused = true;
+            // NATURAL scrolling (Home uses it while the followed row is
+            // focused) pulls focus that sits outside the frame back into it,
+            // which would trap focus below the header. Bridge only the
+            // right-stick scrolling.
+            behavior = brls::ScrollingBehavior::CENTERED;
+        }
 
         brls::ScrollingFrame::draw(vg, x, y, width, height, style, ctx);
 
         childFocused = previousChildFocused;
+        behavior = previousBehavior;
     }
 
 private:
@@ -1093,8 +1110,9 @@ KickNXHome::KickNXHome() {
     errorBox->addView(retryButton);
     top->addView(errorBox);
 
-    homeScroll = new brls::ScrollingFrame();
-    auto* scroll = homeScroll;
+    auto* scroll = new HeaderScrollingFrame();
+    scroll->setFocusProxy(top);
+    homeScroll = scroll;
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
     scroll->setFocusable(false);
     scroll->setGrow(1.0f);
@@ -2256,11 +2274,11 @@ void KickNXHome::showAbout() {
     });
     heading->addView(backButton);
 
-    auto* scroll = new AboutScrollingFrame();
+    auto* scroll = new HeaderScrollingFrame();
     scroll->setGrow(1.0f);
     scroll->setFocusable(false);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
-    scroll->setFocusProxy(backButton);
+    scroll->setFocusProxy(heading);
     page->addView(scroll);
 
     auto* content = new brls::Box();
@@ -2738,7 +2756,8 @@ void KickNXHome::openEvent(const kick::LiveEvent& event) {
     });
     heading->addView(backButton);
 
-    auto* scroll = new brls::ScrollingFrame();
+    auto* scroll = new HeaderScrollingFrame();
+    scroll->setFocusProxy(heading);
     scroll->setGrow(1.0f);
     scroll->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
     page->addView(scroll);

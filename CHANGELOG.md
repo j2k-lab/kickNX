@@ -35,6 +35,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **OSD focus**: pushing the left stick or D-pad no longer pulls focus away from the chat composer, and it still wakes the OSD when you are watching the stream.
+- **Right-stick scrolling**: the right stick keeps scrolling Home, About and event pages while a top-bar button is selected, and after you touch the screen it brings back the controller and scrolls on the first push. Before, it did nothing until you used the left stick or pressed a button.
 - **Emote backspace**: one press removes a whole emote from the chat draft.
 - **Crash after closing a stream quickly**: backing out of a stream, especially right after closing an overlay such as Tesla/Ultrahand, could leave focus on the deleted player's close button, and pressing A then crashed the app.
 - **Sign-in, playback and refresh failures**: kickNX now limits how many secure connections it opens at once, so thumbnails can no longer use up the Switch's limit and make sign-in, playback URLs or Home sections fail with "SSL connect error".

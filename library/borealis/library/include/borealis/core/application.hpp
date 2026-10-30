@@ -65,6 +65,7 @@ class Application
 {
   public:
     friend class EditTextDialog;
+    friend class ScrollingFrame; // right stick brings back gamepad input
 
     static inline uint32_t ORIGINAL_WINDOW_WIDTH  = 1280;
     static inline uint32_t ORIGINAL_WINDOW_HEIGHT = 720;
