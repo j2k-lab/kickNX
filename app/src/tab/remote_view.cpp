@@ -1723,6 +1723,9 @@ struct KickPlaybackRecoveryState {
     std::atomic_bool offlineHandled{false};
     std::atomic_bool offlineCheckRunning{false};
     std::atomic_int offlineStrikes{0};
+    // Leaves the player once the stream has ended; set by the player, and
+    // only called while `alive` is set.
+    std::function<void()> exitPlayer;
     std::string channel;
     std::function<void(std::vector<kick::SubtitleTrack>)> onSubtitlesResolved;
 };
@@ -1937,6 +1940,7 @@ void scheduleKickHardwareActivationCheck(
 constexpr int KICK_OFFLINE_CONFIRMATIONS = 2;
 constexpr long KICK_OFFLINE_EXIT_DELAY_MS = 3500;
 constexpr long KICK_OFFLINE_RECHECK_MS = 3000;
+constexpr long KICK_OFFLINE_POLL_MS = 20000;
 
 void handleKickStreamOffline(
     const std::shared_ptr<KickPlaybackRecoveryState>& state) {
@@ -1954,7 +1958,8 @@ void handleKickStreamOffline(
     // backed out never has an unrelated screen closed underneath them.
     brls::delay(KICK_OFFLINE_EXIT_DELAY_MS, [state]() {
         if (!state->alive.load()) return;
-        VideoView::close(true);
+        if (state->exitPlayer) state->exitPlayer();
+        else VideoView::close(true);
     });
 }
 
@@ -1985,6 +1990,20 @@ void checkKickStreamOffline(
         brls::delay(KICK_OFFLINE_RECHECK_MS, [state]() {
             checkKickStreamOffline(state);
         });
+    });
+}
+
+// A stream that ends often just stalls without any playback event, so
+// interruptions alone never noticed it. Ask Kick every 20 seconds as well,
+// until the player closes or the stream is confirmed offline.
+void watchKickStreamOffline(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state) {
+    std::weak_ptr<KickPlaybackRecoveryState> weak = state;
+    brls::delay(KICK_OFFLINE_POLL_MS, [weak]() {
+        auto current = weak.lock();
+        if (!current || !current->alive.load() || current->offlineHandled.load()) return;
+        checkKickStreamOffline(current);
+        watchKickStreamOffline(current);
     });
 }
 
@@ -2568,6 +2587,8 @@ public:
             playbackRecovery->onSubtitlesResolved = [this](std::vector<kick::SubtitleTrack> subs) {
                 this->kickSubtitles = std::move(subs);
             };
+            playbackRecovery->exitPlayer = [this]() { leaveEndedStream(); };
+            watchKickStreamOffline(playbackRecovery);
 
             std::weak_ptr<KickPlaybackRecoveryState> weakRecovery =
                 playbackRecovery;
@@ -2833,6 +2854,33 @@ public:
 
     void deactivatePlaybackForNavigation() {
         deactivatePlayback();
+    }
+
+    // Called once Kick confirms the stream ended. VideoView::close pops
+    // whatever is on top, so with player settings, the chat composer or a
+    // dialog open it closed that instead and left the dead player behind.
+    // Close those first, one per pass, then the player itself.
+    void leaveEndedStream() {
+        if (playerShuttingDown) return;
+        brls::Activity* own = this->getParentActivity();
+        const auto stack = brls::Application::getActivitiesStack();
+        if (!own || stack.empty()) return;
+
+        if (stack.back() != own) {
+            brls::Application::popActivity(brls::TransitionAnimation::NONE);
+            std::weak_ptr<std::atomic_bool> weakAlive = playerAlive;
+            // Give the popped screen time to be removed before looking again;
+            // popping twice in one go would pop the same screen twice.
+            brls::delay(300, [this, weakAlive]() {
+                auto alive = weakAlive.lock();
+                if (!alive || !alive->load()) return;
+                leaveEndedStream();
+            });
+            return;
+        }
+
+        deactivatePlayback();
+        VideoView::close(true);
     }
 
     ~RemotePlayer() override {

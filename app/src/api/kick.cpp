@@ -478,7 +478,12 @@ void checkChannelLiveAsync(const std::string& channel, LiveCheckCallback done) {
                 const json root = json::parse(response);
                 if (root.is_object() && root.contains("livestream")) {
                     known = true;
-                    live = root["livestream"].is_object();
+                    const json& stream = root["livestream"];
+                    // Kick can keep returning the finished broadcast for a
+                    // while, flagged is_live: false.
+                    live = stream.is_object() &&
+                        !(stream.contains("is_live") && stream["is_live"].is_boolean() &&
+                          !stream["is_live"].get<bool>());
                 }
             } catch (const std::exception& error) {
                 brls::Logger::warning(

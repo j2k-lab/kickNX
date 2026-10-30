@@ -29,7 +29,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 - **Larger profile picture** on the Home screen.
 - **Kick-only client**: the Jellyfin, media library, server setup, settings page, USB file browser, local music player, Apache/WebDAV remote sources, analytics and danmaku code have been removed. kickNX now starts directly on the Kick home screen.
 - **Live playback**: "Auto" quality uses Kick's adaptive master playlist, and streams open with the same cache settings as twiNX.
-- **Offline streams**: when Kick reports a channel has gone offline, the player shows a message and returns to the previous screen.
+- **Offline streams**: when Kick reports a channel has gone offline, the player shows a message and returns to the previous screen. While you watch, kickNX also checks every 20 seconds, since an ended stream often just stalls, and it needs two offline answers in a row before leaving.
 
 ### Fixed
 - **OSD focus**: pushing the left stick or D-pad no longer pulls focus away from the chat composer, and it still wakes the OSD when you are watching the stream.
@@ -37,6 +37,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 - **Crash after closing a stream quickly**: backing out of a stream, especially right after closing an overlay such as Tesla/Ultrahand, could leave focus on the deleted player's close button, and pressing A then crashed the app.
 - **Sign-in, playback and refresh failures**: kickNX now limits how many secure connections it opens at once, so thumbnails can no longer use up the Switch's limit and make sign-in, playback URLs or Home sections fail with "SSL connect error".
 - **Damaged settings file**: a corrupted `config.json` no longer makes kickNX quit at launch; it is kept as `config.json.bak` and default settings are used.
+- **Leaving an ended stream**: the offline return closes any screen opened from the player (settings, chat composer, a dialog) before the player itself. It used to close that screen instead and leave the dead player behind.
 
 ---
 
