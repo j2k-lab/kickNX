@@ -1,4 +1,6 @@
 #include "activity/kick_channel.hpp"
+#include "utils/theme.hpp"
+#include "view/theme_header.hpp"
 #include "activity/kicknx_home.hpp"
 
 #include "api/kick.hpp"
@@ -116,7 +118,7 @@ public:
         nvgCircle(vg, cx, cy, radius);
         nvgFillColor(
             vg,
-            nvgRGB(24, 115, 36));
+            kicknx::theme::current().button);
         nvgFill(vg);
 
         if (loader->getTexture() > 0) {
@@ -140,7 +142,7 @@ public:
         nvgCircle(vg, cx, cy, radius);
         nvgStrokeColor(
             vg,
-            nvgRGBA(255, 255, 255, 100));
+            kicknx::theme::current().outline);
         nvgStrokeWidth(vg, 2.0f);
         nvgStroke(vg);
         nvgRestore(vg);
@@ -169,7 +171,7 @@ public:
         this->setFocusable(true);
         this->setCornerRadius(8);
         this->setBackgroundColor(
-            nvgRGB(31, 35, 46));
+            kicknx::theme::current().surface);
         this->setPadding(0, 0, 10, 0);
 
         image = new brls::Image();
@@ -187,7 +189,7 @@ public:
         title->setMarginLeft(9);
         title->setMarginRight(9);
         title->setTextColor(
-            nvgRGB(245, 246, 250));
+            kicknx::theme::current().textPrimary);
         this->addView(title);
 
         subtitle = new brls::Label();
@@ -197,7 +199,7 @@ public:
         subtitle->setMarginLeft(9);
         subtitle->setMarginRight(9);
         subtitle->setTextColor(
-            nvgRGB(164, 173, 192));
+            kicknx::theme::current().textMuted);
         this->addView(subtitle);
     }
 
@@ -309,7 +311,7 @@ ChannelActionButton* makeButton(
     button->setPadding(12, 22, 12, 22);
     button->setCornerRadius(8);
     button->setBackgroundColor(
-        nvgRGB(24, 115, 36));
+        kicknx::theme::current().button);
     button->setMarginRight(12);
     button->addGestureRecognizer(
         new brls::TapGestureRecognizer(button));
@@ -318,7 +320,7 @@ ChannelActionButton* makeButton(
     label->setText(text);
     label->setFontSize(18);
     label->setTextColor(
-        nvgRGB(250, 250, 252));
+        kicknx::theme::current().buttonText);
     button->addView(label);
 
     if (output)
@@ -341,7 +343,7 @@ brls::Box* createMediaSection(
     section->setAxis(brls::Axis::COLUMN);
     section->setMarginTop(20);
 
-    auto* header = new brls::Header();
+    auto* header = new ThemeHeader();
     header->setTitle(titleText);
     header->setHeight(38);
     section->addView(header);
@@ -351,7 +353,7 @@ brls::Box* createMediaSection(
         empty->setText(emptyText);
         empty->setFontSize(16);
         empty->setTextColor(
-            nvgRGB(165, 174, 193));
+            kicknx::theme::current().textMuted);
         empty->setMarginTop(14);
         empty->setMarginBottom(14);
         empty->setMarginLeft(4);
@@ -388,7 +390,7 @@ public:
         this->setAxis(brls::Axis::COLUMN);
         this->setFocusable(true);
         this->setCornerRadius(8);
-        this->setBackgroundColor(nvgRGB(32, 35, 45));
+        this->setBackgroundColor(kicknx::theme::current().surface);
         this->setPadding(0, 0, 10, 0);
 
         picture = new brls::Image();
@@ -404,7 +406,7 @@ public:
         title->setMarginTop(8);
         title->setMarginLeft(8);
         title->setMarginRight(8);
-        title->setTextColor(nvgRGB(245, 246, 250));
+        title->setTextColor(kicknx::theme::current().textPrimary);
         this->addView(title);
     }
 
@@ -523,7 +525,7 @@ brls::Box* createCategorySection(
     section->setAxis(brls::Axis::COLUMN);
     section->setMarginTop(20);
 
-    auto* header = new brls::Header();
+    auto* header = new ThemeHeader();
     header->setTitle(titleText);
     header->setHeight(38);
     section->addView(header);
@@ -533,7 +535,7 @@ brls::Box* createCategorySection(
         empty->setText(emptyText);
         empty->setFontSize(16);
         empty->setTextColor(
-            nvgRGB(165, 174, 193));
+            kicknx::theme::current().textMuted);
         empty->setMarginTop(14);
         empty->setMarginBottom(14);
         empty->setMarginLeft(4);
@@ -600,7 +602,7 @@ KickChannelPage::KickChannelPage(
         brls::Application::contentWidth,
         brls::Application::contentHeight);
     this->setBackgroundColor(
-        nvgRGB(0, 0, 0));
+        kicknx::theme::current().background);
 
     scroll = new brls::ScrollingFrame();
     scroll->setDimensions(
@@ -610,14 +612,14 @@ KickChannelPage::KickChannelPage(
         brls::ScrollingBehavior::CENTERED);
     scroll->setFocusable(false);
     scroll->setBackgroundColor(
-        nvgRGB(0, 0, 0));
+        kicknx::theme::current().background);
     this->addView(scroll);
 
     content = new brls::Box();
     content->setAxis(brls::Axis::COLUMN);
     content->setWidthPercentage(100);
     content->setBackgroundColor(
-        nvgRGB(0, 0, 0));
+        kicknx::theme::current().background);
     content->setPadding(0, 0, 0, 0);
     scroll->setContentView(content);
 
@@ -626,7 +628,7 @@ KickChannelPage::KickChannelPage(
     headerBox->setWidthPercentage(100);
     headerBox->setAlignItems(brls::AlignItems::CENTER);
     headerBox->setBackgroundColor(
-        nvgRGB(16, 18, 24));
+        kicknx::theme::current().header);
     headerBox->setPadding(14, 42, 24, 42);
     content->addView(headerBox);
 
@@ -643,7 +645,7 @@ KickChannelPage::KickChannelPage(
     backButton->setFocusable(true);
     backButton->setPadding(8, 18, 8, 18);
     backButton->setCornerRadius(8);
-    backButton->setBackgroundColor(nvgRGB(24, 115, 36));
+    backButton->setBackgroundColor(kicknx::theme::current().button);
     backButton->addGestureRecognizer(new brls::TapGestureRecognizer(backButton));
     backButton->registerClickAction([this](brls::View*) {
         markClosing();
@@ -656,7 +658,7 @@ KickChannelPage::KickChannelPage(
     auto* backLabel = new brls::Label();
     backLabel->setText("<  Back");
     backLabel->setFontSize(16);
-    backLabel->setTextColor(nvgRGB(255, 255, 255));
+    backLabel->setTextColor(kicknx::theme::current().buttonText);
     backButton->addView(backLabel);
     topBar->addView(backButton);
 
@@ -690,7 +692,7 @@ KickChannelPage::KickChannelPage(
     name->setFontSize(32);
     name->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     name->setTextColor(
-        nvgRGB(245, 246, 250));
+        kicknx::theme::current().textPrimary);
     identity->addView(name);
 
     liveState = new brls::Label();
@@ -698,7 +700,7 @@ KickChannelPage::KickChannelPage(
     liveState->setFontSize(17);
     liveState->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     liveState->setTextColor(
-        nvgRGB(172, 180, 199));
+        kicknx::theme::current().textMuted);
     liveState->setMarginTop(6);
     identity->addView(liveState);
 
@@ -707,7 +709,7 @@ KickChannelPage::KickChannelPage(
     status->setFontSize(15);
     status->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     status->setTextColor(
-        nvgRGB(164, 173, 192));
+        kicknx::theme::current().textMuted);
     status->setMarginTop(4);
     identity->addView(status);
 
@@ -715,7 +717,7 @@ KickChannelPage::KickChannelPage(
     headline->setFontSize(22);
     headline->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     headline->setTextColor(
-        nvgRGB(238, 239, 244));
+        kicknx::theme::current().textPrimary);
     headline->setMarginTop(14);
     headline->setWidthPercentage(90);
     headerBox->addView(headline);
@@ -724,7 +726,7 @@ KickChannelPage::KickChannelPage(
     metadata->setFontSize(16);
     metadata->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     metadata->setTextColor(
-        nvgRGB(166, 176, 195));
+        kicknx::theme::current().textMuted);
     metadata->setMarginTop(8);
     headerBox->addView(metadata);
 
@@ -732,7 +734,7 @@ KickChannelPage::KickChannelPage(
     description->setFontSize(16);
     description->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     description->setTextColor(
-        nvgRGB(199, 204, 216));
+        kicknx::theme::current().textSecondary);
     description->setMarginTop(12);
     description->setWidthPercentage(85);
     headerBox->addView(description);
@@ -798,7 +800,7 @@ KickChannelPage::KickChannelPage(
     bodyBox->setAxis(brls::Axis::COLUMN);
     bodyBox->setWidthPercentage(100);
     bodyBox->setBackgroundColor(
-        nvgRGB(0, 0, 0));
+        kicknx::theme::current().background);
     bodyBox->setPadding(8, 42, 36, 42);
     content->addView(bodyBox);
 
@@ -959,7 +961,7 @@ void KickChannelPage::showData(
                 loaded.liveStream.viewerCount) +
             " viewers");
         liveState->setTextColor(
-            nvgRGB(83, 252, 24));
+            kicknx::theme::current().accent);
         headline->setText(
             loaded.liveStream.title.empty()
                 ? loaded.information.title
@@ -969,7 +971,7 @@ void KickChannelPage::showData(
     } else {
         liveState->setText("OFFLINE");
         liveState->setTextColor(
-            nvgRGB(177, 183, 198));
+            kicknx::theme::current().textMuted);
         headline->setText(
             loaded.information.title);
         playButton->setVisibility(
@@ -1208,7 +1210,7 @@ void KickChannelPage::playLive() {
     config.preferredQuality =
         kick::loadPreferredQuality();
     if (config.preferredQuality.empty())
-        config.preferredQuality = "1080p60";
+        config.preferredQuality = "auto";
 
     RemoteView::playLive(config, data.liveStream.uptimeSeconds);
 }
@@ -1243,10 +1245,10 @@ void KickChannelPage::updateFollowButton(bool isFollowing) {
     if (!followButton || !followButtonLabel) return;
     if (isFollowing) {
         followButtonLabel->setText("Following");
-        followButton->setBackgroundColor(nvgRGB(50, 56, 70));
+        followButton->setBackgroundColor(kicknx::theme::current().buttonMuted);
     } else {
         followButtonLabel->setText("Follow");
-        followButton->setBackgroundColor(nvgRGB(24, 115, 36));
+        followButton->setBackgroundColor(kicknx::theme::current().button);
     }
 }
 

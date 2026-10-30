@@ -23,7 +23,7 @@ namespace {
 
 const std::vector<std::string>& kickQualityLabels() {
     static const std::vector<std::string> labels = {
-        "1080p60 (Recommended)", "720p60", "480p", "360p", "160p", "Auto",
+        "1080p60", "720p60", "480p", "360p", "160p", "Auto (Recommended)",
     };
     return labels;
 }
@@ -53,9 +53,9 @@ int kickQualityIndex(const std::string& quality) {
 
 const std::vector<std::string>& kickDecoderLabels() {
     static const std::vector<std::string> labels = {
-        "Software (recommended)",
-        "Hardware (experimental)",
-        "Hybrid (experimental)",
+        "Software",
+        "Hardware",
+        "Hybrid (recommended)",
     };
     return labels;
 }
@@ -190,14 +190,14 @@ int closestIndex(const std::vector<int>& values, int wanted) {
 
 }  // namespace
 
-PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string kickChannel) {
+PlayerSetting::PlayerSetting(std::string kickChannel) {
     this->inflateFromXMLRes("xml/view/player_setting.xml");
     brls::Logger::debug("PlayerSetting: create");
     this->audioTrack->detail->setVisibility(brls::Visibility::GONE);
     this->subtitleTrack->detail->setVisibility(brls::Visibility::GONE);
 
     const std::string savedQuality = kick::loadPreferredQuality().empty()
-        ? "1080p60"
+        ? "auto"
         : kick::loadPreferredQuality();
     btnKickQuality->init(
         "Kick stream quality",
@@ -583,12 +583,9 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string kickChanne
 
     auto& mpv = MPVCore::instance();
 
-    std::vector<std::string> audioTrack, audioSource;
-    std::vector<int> audioStream;
+    std::vector<std::string> audioTrack;
     std::vector<std::string> subTrack = {"main/player/none"_i18n};
     std::vector<int64_t> subTrackIds = {0};
-    std::vector<std::string> subSource = {"main/player/none"_i18n};
-    std::vector<int> subStream = {0};
     int currentSubIndex = 0;
 
     int64_t count = mpv.getInt("track-list/count");
@@ -609,19 +606,39 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string kickChanne
         }
     }
 
-    if (src != nullptr) {
-        for (auto& s : src->MediaStreams) {
-            if (s.Type == jellyfin::streamTypeAudio) {
-                audioSource.push_back(s.DisplayTitle);
-                audioStream.push_back(s.Index);
-            } else if (s.Type == jellyfin::streamTypeSubtitle) {
-                subSource.push_back(s.DisplayTitle);
-                subStream.push_back(s.Index);
-            }
-        }
-    }
     // Subtitle selection
-    if (subTrack.size() > 1) {
+    const auto& liveCaptions = kick::liveSubtitles();
+    if (!liveCaptions.empty()) {
+        // Kick live captions are not preloaded (each is its own live feed), so
+        // list the advertised languages and load only the chosen one.
+        std::vector<std::string> captionNames = {"main/player/none"_i18n};
+        int currentCaption = 0;
+        for (size_t i = 0; i < liveCaptions.size(); ++i) {
+            captionNames.push_back(liveCaptions[i].name);
+            if (!kick::liveCaptionLanguage().empty() &&
+                liveCaptions[i].language == kick::liveCaptionLanguage())
+                currentCaption = static_cast<int>(i + 1);
+        }
+        this->subtitleTrack->setVisibility(brls::Visibility::VISIBLE);
+        this->subtitleTrack->init("main/player/subtitle"_i18n, captionNames, currentCaption,
+            [&mpv, currentCaption](int selected) mutable {
+                if (selected == currentCaption) return;
+                // Drop the caption feed that is loaded now, if any.
+                if (currentCaption > 0) mpv.command("sub-remove");
+                currentCaption = selected;
+
+                const auto& captions = kick::liveSubtitles();
+                if (selected <= 0 || static_cast<size_t>(selected) > captions.size()) {
+                    kick::setLiveCaptionLanguage("");
+                    mpv.command("set", "sid", "no");
+                    return;
+                }
+                const auto& caption = captions[selected - 1];
+                kick::setLiveCaptionLanguage(caption.language);
+                mpv.command("sub-add", caption.url.c_str(), "select",
+                    caption.name.c_str(), caption.language.c_str());
+            });
+    } else if (subTrack.size() > 1) {
         this->subtitleTrack->setVisibility(brls::Visibility::VISIBLE);
         this->subtitleTrack->init("main/player/subtitle"_i18n, subTrack, currentSubIndex, [&mpv, subTrackIds](int selected) {
             selectedSubtitle = selected;
@@ -630,15 +647,6 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string kickChanne
             } else {
                 mpv.setInt("sid", subTrackIds[selected]);
             }
-        });
-    } else if (subSource.size() > 1) {
-        this->subtitleTrack->setVisibility(brls::Visibility::VISIBLE);
-        int value = 0;
-        for (size_t i = 0; i < subStream.size(); i++)
-            if (subStream[i] == selectedSubtitle) value = i;
-        this->subtitleTrack->init("main/player/subtitle"_i18n, subSource, value, [subStream](int selected) {
-            selectedSubtitle = subStream[selected];
-            MPVCore::instance().getCustomEvent()->fire(QUALITY_CHANGE, nullptr);
         });
     } else {
         std::vector<std::string> defaultSub = {"main/player/none"_i18n};
@@ -655,14 +663,6 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src, std::string kickChanne
             mpv.setInt("aid", selectedAudio);
         });
         this->audioTrack->detail->setVisibility(brls::Visibility::GONE);
-    } else if (audioSource.size() > 1) {
-        int value = 0;
-        for (size_t i = 0; i < audioStream.size(); i++)
-            if (audioStream[i] == selectedAudio) value = i;
-        this->audioTrack->init("main/player/audio"_i18n, audioSource, value, [audioStream](int selected) {
-            selectedAudio = audioStream[selected];
-            MPVCore::instance().getCustomEvent()->fire(QUALITY_CHANGE, nullptr);
-        });
     } else {
         this->audioTrack->setVisibility(brls::Visibility::GONE);
     }

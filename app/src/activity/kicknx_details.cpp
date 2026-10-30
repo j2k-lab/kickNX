@@ -1,4 +1,5 @@
 #include "activity/kicknx_details.hpp"
+#include "utils/theme.hpp"
 
 #include "api/kick.hpp"
 #include "tab/remote_view.hpp"
@@ -18,14 +19,14 @@ brls::Box* makeDetailsButton(const std::string& text, brls::Label** outLabel = n
     button->setAxis(brls::Axis::ROW);
     button->setPadding(14, 24, 14, 24);
     button->setCornerRadius(8);
-    button->setBackgroundColor(nvgRGB(24, 115, 36));
+    button->setBackgroundColor(kicknx::theme::current().button);
     button->setMarginBottom(14);
     button->addGestureRecognizer(new brls::TapGestureRecognizer(button));
 
     auto* label = new brls::Label();
     label->setText(text);
     label->setFontSize(20);
-    label->setTextColor(nvgRGB(250, 250, 252));
+    label->setTextColor(kicknx::theme::current().buttonText);
     button->addView(label);
     if (outLabel) *outLabel = label;
     return button;
@@ -39,7 +40,7 @@ std::string viewersText(int viewers) {
 
 const std::vector<std::string>& qualityLabels() {
     static const std::vector<std::string> labels = {
-        "1080p60 (Recommended)", "720p60", "480p", "360p", "160p", "Auto",
+        "1080p60", "720p60", "480p", "360p", "160p", "Auto (Recommended)",
     };
     return labels;
 }
@@ -70,23 +71,23 @@ int qualityIndex(const std::string& value) {
 KickNXDetails::KickNXDetails(kick::Stream stream)
     : stream(std::move(stream)), preferredQuality(kick::loadPreferredQuality()) {
     if (preferredQuality.empty()) preferredQuality = kick::loadConfig().preferredQuality;
-    if (preferredQuality.empty()) preferredQuality = "1080p60";
+    if (preferredQuality.empty()) preferredQuality = "auto";
 
     this->setAxis(brls::Axis::COLUMN);
     this->setDimensions(brls::Application::contentWidth, brls::Application::contentHeight);
-    this->setBackgroundColor(nvgRGB(16, 18, 24));
+    this->setBackgroundColor(kicknx::theme::current().header);
     this->setPadding(28, 48, 28, 48);
 
     auto* heading = new brls::Label();
     heading->setText(stream.userName.empty() ? stream.userLogin : stream.userName);
     heading->setFontSize(34);
-    heading->setTextColor(nvgRGB(245, 246, 250));
+    heading->setTextColor(kicknx::theme::current().textPrimary);
     heading->setMarginBottom(8);
     this->addView(heading);
 
     statusLabel = new brls::Label();
     statusLabel->setFontSize(17);
-    statusLabel->setTextColor(stream.isLive ? nvgRGB(210, 120, 140) : nvgRGB(170, 177, 193));
+    statusLabel->setTextColor(stream.isLive ? kicknx::theme::current().live : kicknx::theme::current().textMuted);
     statusLabel->setText(stream.isLive ? "LIVE · " + viewersText(stream.viewerCount) : "OFFLINE");
     statusLabel->setMarginBottom(18);
     this->addView(statusLabel);
@@ -114,14 +115,14 @@ KickNXDetails::KickNXDetails(kick::Stream stream)
         auto* captionLabel = new brls::Label();
         captionLabel->setText(caption);
         captionLabel->setFontSize(15);
-        captionLabel->setTextColor(nvgRGB(150, 158, 176));
+        captionLabel->setTextColor(kicknx::theme::current().textFaint);
         captionLabel->setMarginBottom(3);
         info->addView(captionLabel);
 
         auto* valueLabel = new brls::Label();
         valueLabel->setText(value.empty() ? "—" : value);
         valueLabel->setFontSize(19);
-        valueLabel->setTextColor(nvgRGB(238, 240, 246));
+        valueLabel->setTextColor(kicknx::theme::current().textPrimary);
         valueLabel->setMarginBottom(16);
         info->addView(valueLabel);
     };

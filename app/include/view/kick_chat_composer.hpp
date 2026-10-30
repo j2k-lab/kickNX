@@ -41,6 +41,7 @@ private:
 
     void openKeyboard();
     void insertEmote(const kick::UserEmote& emote);
+    void backspaceDraft();
     void sendMessage();
     void setTab(Tab value);
     void cycleTab(int direction);

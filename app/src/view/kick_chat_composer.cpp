@@ -2,6 +2,7 @@
 
 #include "utils/image.hpp"
 #include "view/recycling_grid.hpp"
+#include <borealis/core/cache_helper.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -101,6 +102,7 @@ public:
             const auto found = byName.find(token);
             if (found != byName.end()) {
                 segment.emote = true;
+                segment.url = found->second->imageUrl;
                 segment.image =
                     ComposerPreviewTexturePool::
                         instance().get(
@@ -181,6 +183,8 @@ public:
                 bounds);
         };
 
+        bool needsTextureRefresh = false;
+
         for (const auto& segment : segments) {
             if (line >= MAX_LINES) break;
 
@@ -190,8 +194,12 @@ public:
                     nextLine();
                 if (line >= MAX_LINES) break;
 
-                if (segment.image &&
-                    segment.image->getTexture() > 0) {
+                int tex = segment.image ? segment.image->getTexture() : 0;
+                if (tex <= 0 && !segment.url.empty()) {
+                    tex = brls::TextureCache::instance().getCache(segment.url);
+                }
+
+                if (tex > 0) {
                     const float imageY =
                         cursorY -
                         FONT_SIZE -
@@ -204,7 +212,7 @@ public:
                             EMOTE_SIZE,
                             EMOTE_SIZE,
                             0,
-                            segment.image->getTexture(),
+                            tex,
                             1.0f);
                     nvgBeginPath(vg);
                     nvgRect(
@@ -218,6 +226,7 @@ public:
                     cursorX +=
                         EMOTE_SIZE + 4.0f;
                 } else {
+                    needsTextureRefresh = true;
                     const float size =
                         textWidth(segment.text);
                     if (cursorX > x &&
@@ -257,11 +266,16 @@ public:
         }
 
         nvgRestore(vg);
+
+        if (needsTextureRefresh) {
+            this->invalidate();
+        }
     }
 
 private:
     struct Segment {
         std::string text;
+        std::string url;
         bool emote = false;
         brls::Image* image = nullptr;
     };
@@ -687,13 +701,21 @@ KickChatComposer::KickChatComposer(
 
     auto* footer = new brls::Label();
     footer->setText(
-        "A Insert   X Keyboard   L/R Tabs   "
-        "ZR or + Send   B Back");
+        "A Insert   Y Delete   X Keyboard   "
+        "L/R Tabs   ZR/+ Send   B Back");
     footer->setFontSize(14);
     footer->setTextColor(
         nvgRGB(154, 165, 187));
     footer->setMarginTop(6);
     sheet->addView(footer);
+
+    this->registerAction(
+        "Delete",
+        brls::BUTTON_Y,
+        [this](brls::View*) {
+            backspaceDraft();
+            return true;
+        });
 
     this->registerAction(
         "Keyboard",
@@ -904,6 +926,47 @@ void KickChatComposer::insertEmote(
         refreshGrid();
 }
 
+void KickChatComposer::backspaceDraft() {
+    if (draft.empty()) return;
+
+    // Check if draft ends with an emote
+    std::string temp = draft;
+    while (!temp.empty() && std::isspace(static_cast<unsigned char>(temp.back())))
+        temp.pop_back();
+
+    if (!temp.empty()) {
+        size_t lastSpace = temp.find_last_of(" \t\n\r");
+        size_t tokenStart = (lastSpace == std::string::npos) ? 0 : lastSpace + 1;
+        std::string lastToken = temp.substr(tokenStart);
+
+        bool isEmote = false;
+        auto checkEmote = [&](const kick::UserEmote& e) {
+            return !e.name.empty() && e.name == lastToken;
+        };
+        if (std::any_of(emotes.begin(), emotes.end(), checkEmote) ||
+            std::any_of(recentEmotes.begin(), recentEmotes.end(), checkEmote)) {
+            isEmote = true;
+        }
+
+        if (isEmote) {
+            size_t eraseStart = (tokenStart > 0 && std::isspace(static_cast<unsigned char>(draft[tokenStart - 1])))
+                                    ? tokenStart - 1
+                                    : tokenStart;
+            draft.erase(eraseStart);
+            updateDraft();
+            return;
+        }
+    }
+
+    // Normal single-codepoint erase
+    size_t position = draft.size() - 1;
+    while (position > 0 &&
+        (static_cast<unsigned char>(draft[position]) & 0xC0) == 0x80)
+        --position;
+    draft.erase(position);
+    updateDraft();
+}
+
 void KickChatComposer::sendMessage() {
     if (sending) return;
 
@@ -1006,9 +1069,18 @@ void KickChatComposer::cycleTab(
 
 
 void KickChatComposer::updateDraft() {
+    std::vector<kick::UserEmote> allKnown = emotes;
+    for (const auto& r : recentEmotes) {
+        if (!r.name.empty() &&
+            std::none_of(allKnown.begin(), allKnown.end(), [&](const kick::UserEmote& e) {
+                return e.name == r.name;
+            })) {
+            allKnown.push_back(r);
+        }
+    }
     draftPreview->configure(
         draft,
-        emotes);
+        allKnown);
     counterLabel->setText(
         std::to_string(draft.size()) +
         " / 500");

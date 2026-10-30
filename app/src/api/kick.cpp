@@ -237,15 +237,15 @@ std::string getMasterPlaylist(const std::string& url) {
 
 std::string loadPreferredQuality() {
     std::ifstream input(settingsPath());
-    if (!input.is_open()) return "1080p60";
+    if (!input.is_open()) return "auto";
 
     try {
         const json root = json::parse(input);
-        if (!root.is_object()) return "1080p60";
+        if (!root.is_object()) return "auto";
         const std::string quality = trim(root.value("preferred_quality", ""));
-        return quality.empty() ? "1080p60" : quality;
+        return quality.empty() ? "auto" : quality;
     } catch (...) {
-        return "1080p60";
+        return "auto";
     }
 }
 
@@ -292,11 +292,11 @@ bool savePreferredQuality(const std::string& quality) {
 
 DecoderMode loadDecoderMode() {
     std::ifstream input(settingsPath());
-    if (!input.is_open()) return DecoderMode::Software;
+    if (!input.is_open()) return DecoderMode::Hybrid;
 
     try {
         const json root = json::parse(input);
-        if (!root.is_object()) return DecoderMode::Software;
+        if (!root.is_object()) return DecoderMode::Hybrid;
 
         if (root.contains("kick_decoder_mode")) {
             const auto& stored = root.at("kick_decoder_mode");
@@ -311,7 +311,8 @@ DecoderMode loadDecoderMode() {
                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
                 if (value == "hardware") return DecoderMode::Hardware;
                 if (value == "hybrid") return DecoderMode::Hybrid;
-                return DecoderMode::Software;
+                if (value == "software") return DecoderMode::Software;
+                return DecoderMode::Hybrid;
             }
         }
 
@@ -322,9 +323,9 @@ DecoderMode loadDecoderMode() {
                 ? DecoderMode::Hardware
                 : DecoderMode::Software;
         }
-        return DecoderMode::Software;
+        return DecoderMode::Hybrid;
     } catch (...) {
-        return DecoderMode::Software;
+        return DecoderMode::Hybrid;
     }
 }
 
@@ -425,10 +426,9 @@ Resolution resolveLive(const Config& config) {
     result.channel = clean.channel;
     result.masterUrl = masterUrl;
     result.selected = selectQuality(qualities, clean.preferredQuality);
-    // If the user selected "auto", use the multivariant master playlist so MPV
-    // can dynamically adapt between renditions. Otherwise, use the resolved
-    // variant URL (which preserves the signed ?token= query parameters) so MPV
-    // streams exclusively at the requested resolution.
+    // "auto" keeps the multivariant master playlist so mpv's HLS demuxer can
+    // switch renditions to match the connection, as twiNX does. Concrete
+    // choices use the signed variant URL, which keeps its ?token= parameters.
     if (result.selected.id == "auto" || result.selected.url.empty()) {
         result.selected.url = masterUrl;
     }
@@ -464,11 +464,57 @@ void resolveLiveAsync(
         });
 }
 
+void checkChannelLiveAsync(const std::string& channel, LiveCheckCallback done) {
+    ThreadPool::instance().submit(
+        [channel, done = std::move(done)](HTTP&) mutable {
+            bool known = false;
+            bool live = false;
+            try {
+                const std::string response = HTTP::get(
+                    "https://kick.com/api/v2/channels/" +
+                        percentEncode(normalizeChannel(channel)),
+                    kickPlaybackHeaders(),
+                    HTTP::Timeout{10000});
+                const json root = json::parse(response);
+                if (root.is_object() && root.contains("livestream")) {
+                    known = true;
+                    live = root["livestream"].is_object();
+                }
+            } catch (const std::exception& error) {
+                brls::Logger::warning(
+                    "Kick live-status check failed for {}: {}", channel, error.what());
+            }
+            brls::sync(std::bind(std::move(done), known, live));
+        });
+}
+
 std::string mpvExtra() {
-    // All required HTTP headers (Referer, User-Agent, tls-verify, ca-file, timeout)
-    // are already configured globally in MPVCore::init(). Passing raw option strings
-    // with unquoted spaces/symbols into loadfile breaks MPV's per-file option parser.
-    return "";
+    // HTTP headers, TLS and the network timeout are configured globally in
+    // MPVCore::init() because values with spaces break the per-file option
+    // parser. The cache options contain none, and match twiNX's Twitch
+    // playback: force the demuxer cache on and read ahead a fixed 8 seconds.
+    return "cache=yes,cache-secs=8";
+}
+
+namespace {
+std::vector<SubtitleTrack> currentLiveSubtitles;
+std::string chosenLiveCaptionLanguage;
+}  // namespace
+
+void setLiveSubtitles(std::vector<SubtitleTrack> tracks) {
+    currentLiveSubtitles = std::move(tracks);
+}
+
+const std::vector<SubtitleTrack>& liveSubtitles() {
+    return currentLiveSubtitles;
+}
+
+void setLiveCaptionLanguage(const std::string& language) {
+    chosenLiveCaptionLanguage = language;
+}
+
+const std::string& liveCaptionLanguage() {
+    return chosenLiveCaptionLanguage;
 }
 
 }  // namespace kick

@@ -10,7 +10,7 @@ namespace kick {
 
 struct Config {
     std::string channel;
-    std::string preferredQuality = "1080p60";
+    std::string preferredQuality = "auto";
     std::string oauthClientId = "kicknx-switch-client";
 };
 
@@ -36,7 +36,7 @@ enum class DecoderMode {
 };
 
 // Software decoding remains the safest mode. Hardware is the original
-// experimental path. Hybrid starts in hardware, falls back to software for a
+// path. Hybrid starts in hardware, falls back to software for a
 // Kick presentation transition, and only restores hardware after a second
 // transition has completed and playback has remained stable.
 DecoderMode loadDecoderMode();
@@ -49,6 +49,22 @@ void resolveLiveAsync(
     ResolveCallback success,
     ErrorCallback failure);
 
+// Asks Kick whether a channel currently has a livestream. `known` is false
+// when the answer could not be determined (network error, unexpected reply),
+// so callers never treat a failed lookup as "offline".
+using LiveCheckCallback = std::function<void(bool known, bool live)>;
+void checkChannelLiveAsync(const std::string& channel, LiveCheckCallback done);
+
+// Per-file mpv options for Kick live playback, mirroring twiNX's Twitch setup.
 std::string mpvExtra();
+
+// Live caption tracks advertised by the current stream's master playlist.
+// They are loaded into mpv only when the viewer picks one, because each
+// caption track is a separate live HLS feed that competes with the video.
+void setLiveSubtitles(std::vector<SubtitleTrack> tracks);
+const std::vector<SubtitleTrack>& liveSubtitles();
+// Language of the caption the viewer chose ("" = captions off).
+void setLiveCaptionLanguage(const std::string& language);
+const std::string& liveCaptionLanguage();
 
 }  // namespace kick

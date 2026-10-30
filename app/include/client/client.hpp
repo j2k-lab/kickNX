@@ -3,6 +3,13 @@
 #include <utils/config.hpp>
 #include <api/http.hpp>
 
+#include <cstdint>
+#include <ctime>
+#include <exception>
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace remote {
 
 class remote_error : public std::exception {
@@ -45,10 +52,6 @@ public:
 
 protected:
     std::string extra;
-
-    void init(const AppRemote& conf, HTTP& cilent);
 };
-
-std::shared_ptr<Client> create(const AppRemote& c);
 
 }  // namespace remote

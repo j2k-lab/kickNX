@@ -1,4 +1,6 @@
 #include "activity/kicknx_home.hpp"
+#include "utils/theme.hpp"
+#include "view/theme_header.hpp"
 #include "activity/kick_channel.hpp"
 #include "api/kick.hpp"
 #include "api/kick_auth.hpp"
@@ -158,7 +160,7 @@ public:
         // Kick-toned placeholder while the image is downloading.
         nvgBeginPath(vg);
         nvgCircle(vg, centerX, centerY, radius);
-        nvgFillColor(vg, nvgRGB(24, 115, 36));
+        nvgFillColor(vg, kicknx::theme::current().button);
         nvgFill(vg);
 
         if (loader && loader->getTexture() > 0) {
@@ -187,10 +189,10 @@ public:
         nvgCircle(vg, centerX, centerY, radius);
         if (focused) {
             // Bright Kick green ring on hover/focus (#53FC18)
-            nvgStrokeColor(vg, nvgRGB(83, 252, 24));
+            nvgStrokeColor(vg, kicknx::theme::current().accent);
             nvgStrokeWidth(vg, 4.0f);
         } else {
-            nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 90));
+            nvgStrokeColor(vg, kicknx::theme::current().outline);
             nvgStrokeWidth(vg, 2.0f);
         }
         nvgStroke(vg);
@@ -209,14 +211,14 @@ brls::Box* makeButton(const std::string& text, brls::Label** outLabel = nullptr)
     button->setAxis(brls::Axis::ROW);
     button->setPadding(12, 22, 12, 22);
     button->setCornerRadius(8);
-    button->setBackgroundColor(nvgRGB(24, 115, 36));
+    button->setBackgroundColor(kicknx::theme::current().button);
     button->setMarginRight(12);
     button->addGestureRecognizer(new brls::TapGestureRecognizer(button));
 
     auto* label = new brls::Label();
     label->setText(text);
     label->setFontSize(19);
-    label->setTextColor(nvgRGB(250, 250, 252));
+    label->setTextColor(kicknx::theme::current().buttonText);
     button->addView(label);
     if (outLabel) *outLabel = label;
     return button;
@@ -244,11 +246,27 @@ std::string categoryKey(const kick::Category& item) {
     return item.id.empty() ? item.name : item.id;
 }
 
+std::string clipKey(const kick::ChannelClip& item) {
+    return item.id;
+}
+
+std::string viewsText(int views) {
+    if (views >= 1000000) return fmt::format("{:.1f}M views", views / 1000000.0);
+    if (views >= 1000) return fmt::format("{:.1f}K views", views / 1000.0);
+    return std::to_string(views) + " views";
+}
+
+std::string clipDurationText(float seconds) {
+    const int total = static_cast<int>(seconds + 0.5f);
+    return fmt::format("{}:{:02}", total / 60, total % 60);
+}
+
 std::string joinErrors(const kick::HomeData& data) {
     std::vector<std::string> errors;
     if (!data.followedError.empty()) errors.push_back("followed channels");
     if (!data.offlineFollowedError.empty()) errors.push_back("offline followed channels");
     if (!data.popularError.empty()) errors.push_back("popular streams");
+    if (!data.popularClipsError.empty()) errors.push_back("popular clips");
     if (!data.categoriesError.empty()) errors.push_back("categories");
 
     std::string result;
@@ -265,7 +283,7 @@ public:
         this->setAxis(brls::Axis::COLUMN);
         this->setFocusable(true);
         this->setCornerRadius(8);
-        this->setBackgroundColor(nvgRGB(32, 35, 45));
+        this->setBackgroundColor(kicknx::theme::current().surface);
         this->setPadding(0, 0, 10, 0);
 
         picture = new brls::Image();
@@ -280,7 +298,7 @@ public:
         title->setMarginTop(8);
         title->setMarginLeft(10);
         title->setMarginRight(10);
-        title->setTextColor(nvgRGB(245, 246, 250));
+        title->setTextColor(kicknx::theme::current().textPrimary);
         this->addView(title);
 
         subtitle = new brls::Label();
@@ -289,7 +307,7 @@ public:
         subtitle->setMarginTop(3);
         subtitle->setMarginLeft(10);
         subtitle->setMarginRight(10);
-        subtitle->setTextColor(nvgRGB(170, 177, 193));
+        subtitle->setTextColor(kicknx::theme::current().textMuted);
         this->addView(subtitle);
 
         this->getFocusEvent()->subscribe([this](brls::View*) {
@@ -336,7 +354,7 @@ public:
         this->setAxis(brls::Axis::COLUMN);
         this->setFocusable(true);
         this->setCornerRadius(8);
-        this->setBackgroundColor(nvgRGB(32, 35, 45));
+        this->setBackgroundColor(kicknx::theme::current().surface);
         this->setPadding(0, 0, 10, 0);
 
         picture = new brls::Image();
@@ -352,7 +370,7 @@ public:
         title->setMarginTop(8);
         title->setMarginLeft(8);
         title->setMarginRight(8);
-        title->setTextColor(nvgRGB(245, 246, 250));
+        title->setTextColor(kicknx::theme::current().textPrimary);
         this->addView(title);
 
         this->getFocusEvent()->subscribe([this](brls::View*) {
@@ -474,6 +492,79 @@ private:
     std::function<brls::View*()> upTarget;
 };
 
+// Clips reuse StreamCell (thumbnail, title, subtitle); only the data differs.
+class ClipDataSource : public RecyclingGridDataSource {
+public:
+    using Selection = std::function<void(const kick::ChannelClip&)>;
+    using Focus = std::function<void(const kick::ChannelClip&, size_t)>;
+
+    ClipDataSource(
+        std::vector<kick::ChannelClip> data,
+        Selection selected,
+        Focus focused,
+        std::function<brls::View*()> up)
+        : items(std::move(data)),
+          onSelected(std::move(selected)),
+          onFocused(std::move(focused)),
+          upTarget(up) {}
+
+    size_t getItemCount() override { return items.size(); }
+
+    RecyclingGridItem* cellForRow(RecyclingView* recycler, size_t index) override {
+        auto* cell = dynamic_cast<StreamCell*>(recycler->dequeueReusableCell("Clip"));
+        const auto& item = items.at(index);
+        cell->upTarget = upTarget;
+        cell->title->setText(item.title);
+
+        std::string detail = item.channelName.empty() ? item.creatorName : item.channelName;
+        if (!detail.empty()) detail += " · ";
+        detail += viewsText(item.viewCount);
+        if (item.duration > 0.0f) detail += " · " + clipDurationText(item.duration);
+        cell->subtitle->setText(detail);
+        if (!item.thumbnailUrl.empty()) Image::with(cell->picture, item.thumbnailUrl);
+
+        const kick::ChannelClip focusedItem = item;
+        const Focus focusedCallback = onFocused;
+        cell->onFocused = [focusedItem, index, focusedCallback]() {
+            if (focusedCallback) focusedCallback(focusedItem, index);
+        };
+        return cell;
+    }
+
+    void onItemSelected(brls::Box*, size_t index) override {
+        if (onSelected) onSelected(items.at(index));
+    }
+
+    void clearData() override { items.clear(); }
+
+    size_t append(std::vector<kick::ChannelClip> incoming) {
+        size_t added = 0;
+        for (auto& item : incoming) {
+            const std::string key = clipKey(item);
+            const auto duplicate = std::find_if(items.begin(), items.end(), [&](const kick::ChannelClip& current) {
+                return clipKey(current) == key;
+            });
+            if (duplicate != items.end()) continue;
+            items.push_back(std::move(item));
+            ++added;
+        }
+        return added;
+    }
+
+    size_t find(const std::string& key) const {
+        for (size_t index = 0; index < items.size(); ++index) {
+            if (clipKey(items[index]) == key) return index;
+        }
+        return items.size();
+    }
+
+private:
+    std::vector<kick::ChannelClip> items;
+    Selection onSelected;
+    Focus onFocused;
+    std::function<brls::View*()> upTarget;
+};
+
 class CategoryDataSource : public RecyclingGridDataSource {
 public:
     using Selection = std::function<void(const kick::Category&)>;
@@ -550,7 +641,7 @@ private:
 
 class KickRow : public brls::Box {
 public:
-    enum class Kind { Streams, Categories };
+    enum class Kind { Streams, Categories, Clips };
     using FocusCallback = std::function<void(const std::string&, const std::string&)>;
     using StreamFocusCallback = std::function<void(const kick::Stream&)>;
 
@@ -559,18 +650,21 @@ public:
         this->setAxis(brls::Axis::COLUMN);
         this->setMarginBottom(18);
 
-        header = new brls::Header();
+        header = new ThemeHeader();
         header->setTitle(text);
         header->setHeight(38);
         this->addView(header);
 
         recycler = new HRecyclerFrame();
-        recycler->setHeight(kind == Kind::Streams ? 225 : 285);
-        recycler->estimatedRowWidth = kind == Kind::Streams ? 315 : 175;
+        const bool cardRow = kind != Kind::Categories;
+        recycler->setHeight(cardRow ? 225 : 285);
+        recycler->estimatedRowWidth = cardRow ? 315 : 175;
         recycler->estimatedRowSpace = 18;
         recycler->setPadding(0, 4, 0, 4);
         if (kind == Kind::Streams) {
             recycler->registerCell("Stream", []() { return new StreamCell(); });
+        } else if (kind == Kind::Clips) {
+            recycler->registerCell("Clip", []() { return new StreamCell(); });
         } else {
             recycler->registerCell("Category", []() { return new CategoryCell(); });
         }
@@ -581,10 +675,10 @@ public:
         emptyBox->setHeight(70);
         emptyBox->setPadding(14, 18, 14, 18);
         emptyBox->setCornerRadius(8);
-        emptyBox->setBackgroundColor(nvgRGB(28, 31, 40));
+        emptyBox->setBackgroundColor(kicknx::theme::current().surfaceAlt);
         emptyLabel = new brls::Label();
         emptyLabel->setFontSize(17);
-        emptyLabel->setTextColor(nvgRGB(170, 177, 193));
+        emptyLabel->setTextColor(kicknx::theme::current().textMuted);
         emptyBox->addView(emptyLabel);
         emptyBox->setVisibility(brls::Visibility::GONE);
         this->addView(emptyBox);
@@ -607,8 +701,34 @@ public:
                 if (streamFocusCallback) streamFocusCallback(stream);
             }, upTarget);
         categorySource = nullptr;
+        clipSource = nullptr;
         recycler->setDataSource(streamSource);
         showResult(count > 0, emptyText);
+    }
+
+    void setClips(
+        std::vector<kick::ChannelClip> items,
+        std::function<void(const kick::ChannelClip&)> selected,
+        const std::string& emptyText,
+        std::function<brls::View*()> upTarget = {}) {
+        count = items.size();
+        clipSource = new ClipDataSource(std::move(items), std::move(selected),
+            [this](const kick::ChannelClip& clip, size_t) {
+                if (focusCallback) focusCallback(id, clipKey(clip));
+            }, upTarget);
+        streamSource = nullptr;
+        categorySource = nullptr;
+        recycler->setDataSource(clipSource);
+        showResult(count > 0, emptyText);
+    }
+
+    size_t appendClips(std::vector<kick::ChannelClip> items) {
+        if (!clipSource) return 0;
+        const size_t added = clipSource->append(std::move(items));
+        count += added;
+        if (added) recycler->notifyDataChanged();
+        updateSubtitle();
+        return added;
     }
 
     void setCategories(
@@ -622,6 +742,7 @@ public:
                 if (focusCallback) focusCallback(id, categoryKey(category));
             }, upTarget);
         streamSource = nullptr;
+        clipSource = nullptr;
         recycler->setDataSource(categorySource);
         showResult(count > 0, emptyText);
     }
@@ -659,6 +780,7 @@ public:
         recycler->clearData();
         streamSource = nullptr;
         categorySource = nullptr;
+        clipSource = nullptr;
         count = 0;
         hasMore = false;
     }
@@ -669,6 +791,7 @@ public:
         size_t index = count;
         if (streamSource) index = streamSource->find(key);
         if (categorySource) index = categorySource->find(key);
+        if (clipSource) index = clipSource->find(key);
         if (index >= count) return false;
         recycler->selectRowAt(index, false);
         if (auto* focus = recycler->getDefaultFocus()) {
@@ -695,12 +818,13 @@ private:
     Kind kind;
     FocusCallback focusCallback;
     StreamFocusCallback streamFocusCallback;
-    brls::Header* header = nullptr;
+    ThemeHeader* header = nullptr;
     HRecyclerFrame* recycler = nullptr;
     brls::Box* emptyBox = nullptr;
     brls::Label* emptyLabel = nullptr;
     StreamDataSource* streamSource = nullptr;
     CategoryDataSource* categorySource = nullptr;
+    ClipDataSource* clipSource = nullptr;
     size_t count = 0;
     bool hasMore = false;
 };
@@ -709,7 +833,7 @@ KickNXHome::KickNXHome() {
     instance = this;
     this->setAxis(brls::Axis::COLUMN);
     this->setDimensions(brls::Application::contentWidth, brls::Application::contentHeight);
-    this->setBackgroundColor(nvgRGB(0, 0, 0));
+    this->setBackgroundColor(kicknx::theme::current().background);
 
     // Borealis already uses an LRU texture cache. Tighten its absolute runtime
     // cap for this thumbnail-heavy client so stale channel/category artwork is
@@ -720,7 +844,7 @@ KickNXHome::KickNXHome() {
     auto* top = new brls::Box();
     top->setAxis(brls::Axis::COLUMN);
     top->setWidthPercentage(100);
-    top->setBackgroundColor(nvgRGB(16, 18, 24));
+    top->setBackgroundColor(kicknx::theme::current().header);
     top->setPadding(24, 48, 12, 48);
     this->addView(top);
 
@@ -750,7 +874,7 @@ KickNXHome::KickNXHome() {
     auto* title = new brls::Label();
     title->setText("· Kick for Nintendo Switch");
     title->setFontSize(33);
-    title->setTextColor(nvgRGB(83, 252, 24));
+    title->setTextColor(kicknx::theme::current().accent);
     title->setMarginLeft(14);
     // Keep the title on one line: during abrupt screen transitions the label
     // can be laid out while its parent is momentarily narrow, which wrapped
@@ -761,13 +885,13 @@ KickNXHome::KickNXHome() {
 
     accountLabel = new brls::Label();
     accountLabel->setFontSize(18);
-    accountLabel->setTextColor(nvgRGB(180, 187, 203));
+    accountLabel->setTextColor(kicknx::theme::current().textSecondary);
     accountLabel->setMarginTop(5);
     headingText->addView(accountLabel);
 
     profileAvatar = new KickNXProfileAvatar();
-    profileAvatar->setWidth(76);
-    profileAvatar->setHeight(76);
+    profileAvatar->setWidth(104);
+    profileAvatar->setHeight(104);
     profileAvatar->setMarginLeft(24);
     profileAvatar->registerClickAction([this](brls::View*) {
         const auto session = kick::loadOAuth();
@@ -783,7 +907,7 @@ KickNXHome::KickNXHome() {
 
     statusLabel = new brls::Label();
     statusLabel->setFontSize(17);
-    statusLabel->setTextColor(nvgRGB(166, 173, 190));
+    statusLabel->setTextColor(kicknx::theme::current().textMuted);
     statusLabel->setMarginTop(6);
     statusLabel->setMarginBottom(14);
     top->addView(statusLabel);
@@ -820,9 +944,19 @@ KickNXHome::KickNXHome() {
     });
     actions->addView(aboutButton);
 
+    themeButton = makeButton("Theme");
+    themeButton->registerClickAction([this](brls::View*) {
+        showThemePicker();
+        return true;
+    });
+    actions->addView(themeButton);
+
     auto* avatar = static_cast<KickNXProfileAvatar*>(profileAvatar);
     avatar->downTarget = [this]() -> brls::View* {
         return aboutButton ? aboutButton : loginButton;
+    };
+    static_cast<KickNXActionButton*>(themeButton)->upTarget = [this]() -> brls::View* {
+        return (profileAvatar && profileAvatar->getVisibility() == brls::Visibility::VISIBLE) ? profileAvatar : nullptr;
     };
     static_cast<KickNXActionButton*>(aboutButton)->upTarget = [this]() -> brls::View* {
         return (profileAvatar && profileAvatar->getVisibility() == brls::Visibility::VISIBLE) ? profileAvatar : nullptr;
@@ -843,13 +977,13 @@ KickNXHome::KickNXHome() {
     errorBox->setPadding(12, 16, 12, 16);
     errorBox->setMarginTop(12);
     errorBox->setCornerRadius(8);
-    errorBox->setBackgroundColor(nvgRGB(75, 35, 42));
+    errorBox->setBackgroundColor(kicknx::theme::current().errorBackground);
     errorBox->setVisibility(brls::Visibility::GONE);
 
     errorLabel = new brls::Label();
     errorLabel->setGrow(1.0f);
     errorLabel->setFontSize(16);
-    errorLabel->setTextColor(nvgRGB(245, 220, 224));
+    errorLabel->setTextColor(kicknx::theme::current().errorText);
     errorBox->addView(errorLabel);
 
     retryButton = makeButton("Retry");
@@ -876,7 +1010,7 @@ KickNXHome::KickNXHome() {
     heroBox->setAxis(brls::Axis::ROW);
     heroBox->setHeight(278);
     heroBox->setCornerRadius(12);
-    heroBox->setBackgroundColor(nvgRGB(25, 27, 36));
+    heroBox->setBackgroundColor(kicknx::theme::current().surfaceAlt);
     heroBox->setMarginBottom(20);
     heroBox->setVisibility(brls::Visibility::GONE);
 
@@ -885,31 +1019,31 @@ KickNXHome::KickNXHome() {
     heroInfo->setWidthPercentage(44);
     heroInfo->setHeightPercentage(100);
     heroInfo->setPadding(24, 26, 24, 26);
-    heroInfo->setBackgroundColor(nvgRGBA(18, 20, 28, 245));
+    heroInfo->setBackgroundColor(kicknx::theme::current().heroOverlay);
     heroBox->addView(heroInfo);
 
     heroLiveLabel = new brls::Label();
     heroLiveLabel->setFontSize(16);
-    heroLiveLabel->setTextColor(nvgRGB(83, 252, 24));
+    heroLiveLabel->setTextColor(kicknx::theme::current().accent);
     heroLiveLabel->setMarginBottom(8);
     heroInfo->addView(heroLiveLabel);
 
     heroChannelLabel = new brls::Label();
     heroChannelLabel->setFontSize(27);
-    heroChannelLabel->setTextColor(nvgRGB(248, 249, 252));
+    heroChannelLabel->setTextColor(kicknx::theme::current().textPrimary);
     heroChannelLabel->setSingleLine(true);
     heroChannelLabel->setMarginBottom(8);
     heroInfo->addView(heroChannelLabel);
 
     heroTitleLabel = new brls::Label();
     heroTitleLabel->setFontSize(20);
-    heroTitleLabel->setTextColor(nvgRGB(232, 235, 242));
+    heroTitleLabel->setTextColor(kicknx::theme::current().textPrimary);
     heroTitleLabel->setMarginBottom(12);
     heroInfo->addView(heroTitleLabel);
 
     heroMetaLabel = new brls::Label();
     heroMetaLabel->setFontSize(17);
-    heroMetaLabel->setTextColor(nvgRGB(172, 180, 198));
+    heroMetaLabel->setTextColor(kicknx::theme::current().textMuted);
     heroInfo->addView(heroMetaLabel);
 
     heroPreview = new brls::Image();
@@ -926,6 +1060,7 @@ KickNXHome::KickNXHome() {
     followedRow = new KickRow("followed", "Followed channels", KickRow::Kind::Streams, remember);
     offlineFollowedRow = new KickRow("offline-followed", "Followed channels — offline", KickRow::Kind::Streams, remember);
     popularRow = new KickRow("popular", "Popular live streams", KickRow::Kind::Streams, remember);
+    popularClipsRow = new KickRow("popular-clips", "Popular clips", KickRow::Kind::Clips, remember);
     categoryStreamsRow = new KickRow("category-streams", "Category streams", KickRow::Kind::Streams, remember);
     categoriesRow = new KickRow("categories", "Top categories", KickRow::Kind::Categories, remember);
     searchRow = new KickRow("search", "Search results", KickRow::Kind::Streams, remember);
@@ -973,6 +1108,7 @@ KickNXHome::KickNXHome() {
 
     content->addView(followedRow);
     content->addView(popularRow);
+    content->addView(popularClipsRow);
     content->addView(categoryStreamsRow);
     content->addView(categoriesRow);
     content->addView(searchRow);
@@ -982,6 +1118,7 @@ KickNXHome::KickNXHome() {
         for (auto* row : {
                  followedRow,
                  popularRow,
+                 popularClipsRow,
                  categoryStreamsRow,
                  categoriesRow,
                  searchRow,
@@ -991,7 +1128,7 @@ KickNXHome::KickNXHome() {
         return nullptr;
     };
 
-    for (auto* button : {loginButton, searchButton, refreshButton, aboutButton}) {
+    for (auto* button : {loginButton, searchButton, refreshButton, aboutButton, themeButton}) {
         if (auto* actionButton = dynamic_cast<KickNXActionButton*>(button))
             actionButton->downTarget = firstVisibleContentFocus;
     }
@@ -1062,6 +1199,235 @@ void KickNXHome::willAppear(bool resetState) {
         kick::clearFollowedChannelsDirty();
         refreshHome();
     }
+    // A theme chosen while another screen was on top is applied on return.
+    if (themeRebuildPending)
+        brls::delay(THEME_REBUILD_DELAY_MS, []() { KickNXHome::rebuildForTheme(); });
+}
+
+namespace {
+
+// Full-screen dimmed backdrop. Translucent, so Borealis keeps drawing Home
+// underneath and the picker reads as a pop-up rather than a new page.
+class ThemePickerOverlay : public brls::Box {
+public:
+    bool isTranslucent() override { return true; }
+};
+
+// A miniature Home drawn in a preset's own colours, so each card previews the
+// theme it applies rather than the one currently active.
+brls::Box* makeThemePreview(const kicknx::theme::Palette& preset) {
+    auto* preview = new brls::Box();
+    preview->setAxis(brls::Axis::COLUMN);
+    preview->setWidthPercentage(100);
+    preview->setHeight(150);
+    preview->setCornerRadius(8);
+    preview->setBackgroundColor(preset.background);
+
+    auto* bar = new brls::Box();
+    bar->setAxis(brls::Axis::ROW);
+    bar->setAlignItems(brls::AlignItems::CENTER);
+    bar->setHeight(40);
+    bar->setPadding(0, 14, 0, 14);
+    bar->setCornerRadius(8);
+    bar->setBackgroundColor(preset.header);
+    preview->addView(bar);
+
+    auto* logo = new brls::Label();
+    logo->setText("kickNX");
+    logo->setFontSize(17);
+    logo->setTextColor(preset.accent);
+    bar->addView(logo);
+
+    auto* cards = new brls::Box();
+    cards->setAxis(brls::Axis::ROW);
+    cards->setPadding(14, 14, 14, 14);
+    cards->setGrow(1.0f);
+    preview->addView(cards);
+
+    for (int index = 0; index < 2; ++index) {
+        auto* card = new brls::Box();
+        card->setAxis(brls::Axis::COLUMN);
+        card->setGrow(1.0f);
+        card->setCornerRadius(6);
+        card->setPadding(10, 10, 10, 10);
+        card->setBackgroundColor(preset.surface);
+        if (index == 0) card->setMarginRight(10);
+        cards->addView(card);
+
+        auto* thumb = new brls::Box();
+        thumb->setHeight(36);
+        thumb->setCornerRadius(4);
+        thumb->setBackgroundColor(preset.surfaceAlt);
+        card->addView(thumb);
+
+        auto* name = new brls::Label();
+        name->setText(index == 0 ? "Streamer" : "Category");
+        name->setFontSize(14);
+        name->setMarginTop(6);
+        name->setTextColor(preset.textPrimary);
+        card->addView(name);
+
+        auto* meta = new brls::Label();
+        meta->setText(index == 0 ? "12.4K viewers" : "Just Chatting");
+        meta->setFontSize(12);
+        meta->setTextColor(preset.textMuted);
+        card->addView(meta);
+    }
+    return preview;
+}
+
+void chooseTheme(kicknx::theme::Preset preset) {
+    brls::Application::popActivity();
+    if (preset == kicknx::theme::current().preset) return;
+    kicknx::theme::set(preset);
+    KickNXHome::scheduleThemeRebuild();
+}
+
+}  // namespace
+
+void KickNXHome::scheduleThemeRebuild() {
+    // The picker restores focus to this Home as it closes, so rebuild only
+    // after it is gone; deleting Home earlier would leave focus pointing at a
+    // destroyed view.
+    themeRebuildPending = true;
+    brls::delay(THEME_REBUILD_DELAY_MS, []() { KickNXHome::rebuildForTheme(); });
+}
+
+void KickNXHome::showThemePicker() {
+    const auto& palette = kicknx::theme::current();
+
+    auto* page = new ThemePickerOverlay();
+    page->setAxis(brls::Axis::COLUMN);
+    page->setDimensions(
+        brls::Application::contentWidth,
+        brls::Application::contentHeight);
+    page->setJustifyContent(brls::JustifyContent::CENTER);
+    page->setAlignItems(brls::AlignItems::CENTER);
+    page->setBackgroundColor(nvgRGBA(0, 0, 0, 160));
+
+    auto* panel = new brls::Box();
+    panel->setAxis(brls::Axis::COLUMN);
+    panel->setWidth(std::min(1040.0f, brls::Application::contentWidth - 96.0f));
+    panel->setCornerRadius(16);
+    panel->setBorderThickness(2.0f);
+    panel->setBorderColor(palette.outline);
+    panel->setBackgroundColor(palette.background);
+    page->addView(panel);
+
+    auto* heading = new brls::Box();
+    heading->setAxis(brls::Axis::ROW);
+    heading->setAlignItems(brls::AlignItems::CENTER);
+    heading->setPadding(20, 28, 16, 28);
+    heading->setWidthPercentage(100);
+    heading->setCornerRadius(16);
+    heading->setBackgroundColor(palette.header);
+    panel->addView(heading);
+
+    auto* headingText = new brls::Box();
+    headingText->setAxis(brls::Axis::COLUMN);
+    headingText->setGrow(1.0f);
+    heading->addView(headingText);
+
+    auto* title = new brls::Label();
+    title->setText("Theme");
+    title->setFontSize(34);
+    title->setTextColor(palette.accent);
+    headingText->addView(title);
+
+    auto* subtitle = new brls::Label();
+    subtitle->setText("Choose how kickNX looks. Video and the chat overlay stay dark.");
+    subtitle->setFontSize(17);
+    subtitle->setTextColor(palette.textMuted);
+    subtitle->setMarginTop(4);
+    headingText->addView(subtitle);
+
+    auto* backButton = makeButton("Back");
+    backButton->setMarginRight(0);
+    backButton->registerClickAction([](brls::View*) {
+        return brls::Application::popActivity();
+    });
+    heading->addView(backButton);
+
+    auto* row = new brls::Box();
+    row->setAxis(brls::Axis::ROW);
+    row->setPadding(24, 28, 28, 28);
+    panel->addView(row);
+
+    brls::View* currentCard = nullptr;
+    const auto& all = kicknx::theme::presets();
+    for (size_t index = 0; index < all.size(); ++index) {
+        const auto& preset = all[index];
+        const bool active = preset.preset == palette.preset;
+
+        auto* card = new KickNXActionButton();
+        card->setFocusable(true);
+        card->setAxis(brls::Axis::COLUMN);
+        card->setGrow(1.0f);
+        card->setPadding(14, 14, 16, 14);
+        card->setCornerRadius(12);
+        card->setBackgroundColor(palette.surface);
+        if (index + 1 < all.size()) card->setMarginRight(24);
+        card->addGestureRecognizer(new brls::TapGestureRecognizer(card));
+        card->upTarget = [backButton]() -> brls::View* { return backButton; };
+        const kicknx::theme::Preset choice = preset.preset;
+        card->registerClickAction([choice](brls::View*) {
+            chooseTheme(choice);
+            return true;
+        });
+        row->addView(card);
+
+        card->addView(makeThemePreview(preset));
+
+        auto* name = new brls::Label();
+        name->setText(preset.name);
+        name->setFontSize(20);
+        name->setMarginTop(12);
+        name->setTextColor(palette.textPrimary);
+        card->addView(name);
+
+        auto* state = new brls::Label();
+        state->setText(active ? "Current theme" : "Press A to apply");
+        state->setFontSize(15);
+        state->setMarginTop(4);
+        state->setTextColor(active ? palette.accent : palette.textMuted);
+        card->addView(state);
+
+        if (active) currentCard = card;
+    }
+
+    static_cast<KickNXActionButton*>(backButton)->downTarget = [currentCard]() -> brls::View* {
+        return currentCard;
+    };
+
+    page->registerAction("Back", brls::BUTTON_B, [](brls::View*) {
+        return brls::Application::popActivity();
+    });
+
+    brls::Application::pushActivity(new brls::Activity(page));
+    brls::View* initialFocus = currentCard ? currentCard : backButton;
+    brls::sync([initialFocus]() {
+        brls::Application::giveFocus(initialFocus);
+    });
+}
+
+void KickNXHome::rebuildForTheme() {
+    KickNXHome* old = instance;
+    if (!old || !themeRebuildPending) return;
+    brls::Activity* activity = old->getParentActivity();
+    const auto& stack = brls::Application::getActivitiesStack();
+    // Only swap while Home is the visible screen; otherwise willAppear retries.
+    if (!activity || stack.empty() || stack.back() != activity) return;
+    // Wait for in-flight browsing requests so none completes into a deleted Home.
+    if (old->busy) {
+        brls::delay(THEME_REBUILD_DELAY_MS, []() { KickNXHome::rebuildForTheme(); });
+        return;
+    }
+
+    themeRebuildPending = false;
+    auto* fresh = new KickNXHome();
+    // Move focus into the new Home before setContentView deletes the old one.
+    brls::Application::giveFocus(fresh->refreshButton);
+    activity->setContentView(fresh);
 }
 
 void KickNXHome::setBusy(bool value, const std::string& message) {
@@ -1149,6 +1515,7 @@ void KickNXHome::restoreContentFocus() {
     if (!isActiveActivity()) return;
     if (lastFocusedRow == "followed" && followedRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "popular" && popularRow->focusKey(lastFocusedKey)) return;
+    if (lastFocusedRow == "popular-clips" && popularClipsRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "category-streams" && categoryStreamsRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "categories" && categoriesRow->focusKey(lastFocusedKey)) return;
     if (lastFocusedRow == "search" && searchRow->focusKey(lastFocusedKey)) return;
@@ -1163,6 +1530,10 @@ void KickNXHome::focusFirstContentRow() {
         return;
     }
     if (auto* focus = popularRow->defaultFocus()) {
+        brls::Application::giveFocus(focus);
+        return;
+    }
+    if (auto* focus = popularClipsRow->defaultFocus()) {
         brls::Application::giveFocus(focus);
         return;
     }
@@ -1205,7 +1576,7 @@ void KickNXHome::beginLogin() {
     page->setDimensions(
         brls::Application::contentWidth,
         brls::Application::contentHeight);
-    page->setBackgroundColor(nvgRGB(16, 18, 24));
+    page->setBackgroundColor(kicknx::theme::current().header);
 
     auto* heading = new brls::Box();
     heading->setAxis(brls::Axis::ROW);
@@ -1222,14 +1593,14 @@ void KickNXHome::beginLogin() {
     auto* title = new brls::Label();
     title->setText("Sign in to Kick");
     title->setFontSize(32);
-    title->setTextColor(nvgRGB(244, 246, 251));
+    title->setTextColor(kicknx::theme::current().textPrimary);
     headingText->addView(title);
 
     auto* subtitle = new brls::Label();
     subtitle->setText(
         "Scan with the Kick mobile app to pair your account");
     subtitle->setFontSize(16);
-    subtitle->setTextColor(nvgRGB(171, 179, 196));
+    subtitle->setTextColor(kicknx::theme::current().textMuted);
     subtitle->setMarginTop(4);
     headingText->addView(subtitle);
 
@@ -1262,7 +1633,7 @@ void KickNXHome::beginLogin() {
     qrCard->setJustifyContent(brls::JustifyContent::CENTER);
     qrCard->setWidth(480);
     qrCard->setCornerRadius(18);
-    qrCard->setBackgroundColor(nvgRGB(24, 28, 38));
+    qrCard->setBackgroundColor(kicknx::theme::current().surfaceAlt);
     qrCard->setPadding(24, 24, 24, 24);
     body->addView(qrCard);
 
@@ -1272,7 +1643,7 @@ void KickNXHome::beginLogin() {
     auto* qrHint = new brls::Label();
     qrHint->setText("Point your phone camera at this QR code");
     qrHint->setFontSize(16);
-    qrHint->setTextColor(nvgRGB(175, 183, 201));
+    qrHint->setTextColor(kicknx::theme::current().textSecondary);
     qrHint->setMarginTop(18);
     qrCard->addView(qrHint);
 
@@ -1284,7 +1655,7 @@ void KickNXHome::beginLogin() {
     infoCard->setGrow(1.0f);
     infoCard->setMarginLeft(32);
     infoCard->setCornerRadius(18);
-    infoCard->setBackgroundColor(nvgRGB(24, 28, 38));
+    infoCard->setBackgroundColor(kicknx::theme::current().surfaceAlt);
     infoCard->setPadding(32, 40, 28, 40);
     infoCard->setJustifyContent(brls::JustifyContent::SPACE_BETWEEN);
     body->addView(infoCard);
@@ -1296,27 +1667,27 @@ void KickNXHome::beginLogin() {
     auto* qrHeading = new brls::Label();
     qrHeading->setText("Instant QR & TV Code Sign-In");
     qrHeading->setFontSize(26);
-    qrHeading->setTextColor(nvgRGB(244, 246, 251));
+    qrHeading->setTextColor(kicknx::theme::current().textPrimary);
     infoTop->addView(qrHeading);
 
     auto* step1 = new brls::Label();
     step1->setText("1. Open the Kick app on your phone (signed into your account).");
     step1->setFontSize(16);
-    step1->setTextColor(nvgRGB(180, 188, 204));
+    step1->setTextColor(kicknx::theme::current().textSecondary);
     step1->setMarginTop(16);
     infoTop->addView(step1);
 
     auto* step2 = new brls::Label();
     step2->setText("2. Point your phone camera or QR scanner at the code on the left.");
     step2->setFontSize(16);
-    step2->setTextColor(nvgRGB(180, 188, 204));
+    step2->setTextColor(kicknx::theme::current().textSecondary);
     step2->setMarginTop(10);
     infoTop->addView(step2);
 
     auto* step3 = new brls::Label();
     step3->setText("3. Confirm that this 6-digit verification code matches in the app:");
     step3->setFontSize(16);
-    step3->setTextColor(nvgRGB(180, 188, 204));
+    step3->setTextColor(kicknx::theme::current().textSecondary);
     step3->setMarginTop(10);
     infoTop->addView(step3);
 
@@ -1326,14 +1697,14 @@ void KickNXHome::beginLogin() {
     codeBox->setJustifyContent(brls::JustifyContent::CENTER);
     codeBox->setPadding(14, 32, 14, 32);
     codeBox->setCornerRadius(12);
-    codeBox->setBackgroundColor(nvgRGB(16, 19, 27));
+    codeBox->setBackgroundColor(kicknx::theme::current().header);
     codeBox->setMarginTop(18);
     codeBox->setWidth(320);
     infoTop->addView(codeBox);
 
     state->pairCodeLabel = new brls::Label();
     state->pairCodeLabel->setFontSize(44);
-    state->pairCodeLabel->setTextColor(nvgRGB(83, 252, 24));
+    state->pairCodeLabel->setTextColor(kicknx::theme::current().accent);
     codeBox->addView(state->pairCodeLabel);
 
     auto* infoBottom = new brls::Box();
@@ -1343,7 +1714,7 @@ void KickNXHome::beginLogin() {
     state->statusText = new brls::Label();
     state->statusText->setText("Waiting for confirmation in the Kick mobile app…");
     state->statusText->setFontSize(16);
-    state->statusText->setTextColor(nvgRGB(83, 252, 24));
+    state->statusText->setTextColor(kicknx::theme::current().accent);
     state->statusText->setMarginBottom(16);
     infoBottom->addView(state->statusText);
 
@@ -1496,12 +1867,14 @@ void KickNXHome::showHomeData(kick::HomeData data) {
 
     followedCursor = data.followed.loaded ? data.followed.cursor : "";
     popularCursor = data.popular.loaded ? data.popular.cursor : "";
+    popularClipsCursor = data.popularClips.loaded ? data.popularClips.cursor : "";
     categoriesCursor = data.categories.loaded ? data.categories.cursor : "";
 
     const bool signedIn = data.account.signedIn();
     const bool followedHasItems = signedIn && !data.followed.items.empty();
     const bool offlineFollowedHasItems = signedIn && !data.offlineFollowed.items.empty();
     const bool popularHasItems = !data.popular.items.empty();
+    const bool popularClipsHaveItems = !data.popularClips.items.empty();
     const bool categoriesHaveItems = !data.categories.items.empty();
 
     auto focusTopActions = [this]() -> brls::View* {
@@ -1512,12 +1885,15 @@ void KickNXHome::showHomeData(kick::HomeData data) {
     std::function<brls::View*()> followedUpTarget;
     std::function<brls::View*()> offlineFollowedUpTarget;
     std::function<brls::View*()> popularUpTarget;
+    std::function<brls::View*()> popularClipsUpTarget;
     std::function<brls::View*()> categoriesUpTarget;
 
     if (followedHasItems) {
         followedUpTarget = focusTopActions;
     } else if (popularHasItems) {
         popularUpTarget = focusTopActions;
+    } else if (popularClipsHaveItems) {
+        popularClipsUpTarget = focusTopActions;
     } else if (categoriesHaveItems) {
         categoriesUpTarget = focusTopActions;
     } else if (offlineFollowedHasItems) {
@@ -1545,6 +1921,18 @@ void KickNXHome::showHomeData(kick::HomeData data) {
             ? "Kick returned no featured live streams."
             : "Popular streams could not be loaded. Use Retry to try again.",
         popularUpTarget);
+    popularClipsRow->setClips(std::move(data.popularClips.items),
+        [](const kick::ChannelClip& clip) {
+            const std::string channel = clip.channelName.empty() ? clip.creatorName : clip.channelName;
+            RemoteView::playClip(
+                clip.id,
+                clip.title,
+                channel + " · " + viewsText(clip.viewCount));
+        },
+        data.popularClipsError.empty()
+            ? "Kick returned no popular clips."
+            : "Popular clips could not be loaded. Use Retry to try again.",
+        popularClipsUpTarget);
     categoriesRow->setCategories(std::move(data.categories.items),
         [this](const kick::Category& category) { openCategory(category); },
         data.categoriesError.empty()
@@ -1554,9 +1942,11 @@ void KickNXHome::showHomeData(kick::HomeData data) {
 
     followedRow->setHasMore(!followedCursor.empty());
     popularRow->setHasMore(!popularCursor.empty());
+    popularClipsRow->setHasMore(!popularClipsCursor.empty());
     categoriesRow->setHasMore(!categoriesCursor.empty());
     followedRow->onNextPage(!followedCursor.empty(), [this]() { loadMoreFollowed(); });
     popularRow->onNextPage(!popularCursor.empty(), [this]() { loadMorePopular(); });
+    popularClipsRow->onNextPage(!popularClipsCursor.empty(), [this]() { loadMorePopularClips(); });
     categoriesRow->onNextPage(!categoriesCursor.empty(), [this]() { loadMoreCategories(); });
 
     categoryStreamsRow->clear();
@@ -1584,14 +1974,14 @@ void KickNXHome::showAbout() {
     page->setDimensions(
         brls::Application::contentWidth,
         brls::Application::contentHeight);
-    page->setBackgroundColor(nvgRGB(0, 0, 0));
+    page->setBackgroundColor(kicknx::theme::current().background);
 
     auto* heading = new brls::Box();
     heading->setAxis(brls::Axis::ROW);
     heading->setAlignItems(brls::AlignItems::CENTER);
     heading->setPadding(24, 48, 18, 48);
     heading->setWidthPercentage(100);
-    heading->setBackgroundColor(nvgRGB(16, 18, 24));
+    heading->setBackgroundColor(kicknx::theme::current().header);
     page->addView(heading);
 
     auto* headingText = new brls::Box();
@@ -1607,7 +1997,7 @@ void KickNXHome::showAbout() {
     auto* title = new brls::Label();
     title->setText("About");
     title->setFontSize(34);
-    title->setTextColor(nvgRGB(83, 252, 24));
+    title->setTextColor(kicknx::theme::current().accent);
     titleRow->addView(title);
 
     auto* titleLogo = new brls::Image();
@@ -1623,7 +2013,7 @@ void KickNXHome::showAbout() {
         "Version " + AppVersion::getVersion() +
         " · Kick for Nintendo Switch");
     subtitle->setFontSize(17);
-    subtitle->setTextColor(nvgRGB(171, 179, 196));
+    subtitle->setTextColor(kicknx::theme::current().textMuted);
     subtitle->setMarginTop(4);
     headingText->addView(subtitle);
 
@@ -1650,7 +2040,7 @@ void KickNXHome::showAbout() {
         auto* label = new brls::Label();
         label->setText(text);
         label->setFontSize(25);
-        label->setTextColor(nvgRGB(242, 243, 248));
+        label->setTextColor(kicknx::theme::current().textPrimary);
         label->setMarginTop(18);
         label->setMarginBottom(8);
         content->addView(label);
@@ -1658,7 +2048,7 @@ void KickNXHome::showAbout() {
 
     auto addBody = [content](
                        const std::string& text,
-                       NVGcolor color = nvgRGB(194, 200, 214)) {
+                       NVGcolor color = kicknx::theme::current().textSecondary) {
         auto* label = new brls::Label();
         label->setText(text);
         label->setFontSize(18);
@@ -1671,14 +2061,14 @@ void KickNXHome::showAbout() {
     creditCard->setAxis(brls::Axis::COLUMN);
     creditCard->setPadding(18, 22, 18, 22);
     creditCard->setCornerRadius(10);
-    creditCard->setBackgroundColor(nvgRGB(28, 31, 41));
+    creditCard->setBackgroundColor(kicknx::theme::current().surfaceAlt);
     creditCard->setMarginBottom(8);
     content->addView(creditCard);
 
     auto* createdBy = new brls::Label();
     createdBy->setText("Created by j2k & Gemini");
     createdBy->setFontSize(24);
-    createdBy->setTextColor(nvgRGB(83, 252, 24));
+    createdBy->setTextColor(kicknx::theme::current().accent);
     creditCard->addView(createdBy);
 
     auto* projectDescription = new brls::Label();
@@ -1686,7 +2076,7 @@ void KickNXHome::showAbout() {
         "kickNX is a controller-first, native Kick client for "
         "Nintendo Switch homebrew, forked from twiNX.");
     projectDescription->setFontSize(18);
-    projectDescription->setTextColor(nvgRGB(190, 197, 212));
+    projectDescription->setTextColor(kicknx::theme::current().textSecondary);
     projectDescription->setMarginTop(7);
     creditCard->addView(projectDescription);
 
@@ -1764,7 +2154,7 @@ void KickNXHome::showAbout() {
     addBody(
         "kickNX is an independent homebrew project. It is not affiliated "
         "with, endorsed by or sponsored by Kick Streaming Pty Ltd or Nintendo.",
-        nvgRGB(150, 158, 176));
+        kicknx::theme::current().textFaint);
 
     page->registerAction("Back", brls::BUTTON_B, [](brls::View*) {
         return brls::Application::popActivity();
@@ -1909,6 +2299,30 @@ void KickNXHome::loadMorePopular() {
         }, requestCancel);
 }
 
+void KickNXHome::loadMorePopularClips() {
+    if (popularClipsCursor.empty() || busy) return;
+    const std::string cursor = popularClipsCursor;
+    const uint64_t requestId = beginBrowsingRequest("Loading more popular clips…");
+    if (!requestId) return;
+    const HTTP::Cancel requestCancel = activeRequest;
+    kick::loadPopularClipsPageAsync(kick::loadConfig(), cursor,
+        [this, requestId](kick::ClipPage page) {
+            if (!finishBrowsingRequest(requestId)) return;
+            const size_t added = popularClipsRow->appendClips(std::move(page.items));
+            popularClipsCursor = page.cursor;
+            popularClipsRow->setHasMore(!popularClipsCursor.empty());
+            popularClipsRow->onNextPage(!popularClipsCursor.empty(), [this]() { loadMorePopularClips(); });
+            clearRequestError();
+            setBusy(false, added ? "More popular clips loaded." : "No additional popular clips.");
+        },
+        [this, requestId](const std::string& error) {
+            if (!finishBrowsingRequest(requestId)) return;
+            showRequestError("Could not load more popular clips: " + error,
+                [this]() { loadMorePopularClips(); });
+            setBusy(false, "Pagination error: " + error);
+        }, requestCancel);
+}
+
 void KickNXHome::loadMoreCategories() {
     if (categoriesCursor.empty() || busy) return;
     const std::string cursor = categoriesCursor;
@@ -2012,7 +2426,7 @@ void KickNXHome::playChannel(const kick::Stream& stream) {
     auto config = kick::loadConfig();
     config.channel = stream.userLogin;
     config.preferredQuality = kick::loadPreferredQuality();
-    if (config.preferredQuality.empty()) config.preferredQuality = "1080p60";
+    if (config.preferredQuality.empty()) config.preferredQuality = "auto";
     if (config.channel.empty()) {
         statusLabel->setText("This result did not contain a Kick channel slug.");
         return;
@@ -2028,7 +2442,7 @@ void KickNXHome::playConfiguredChannel() {
         return;
     }
     config.preferredQuality = kick::loadPreferredQuality();
-    if (config.preferredQuality.empty()) config.preferredQuality = "1080p60";
+    if (config.preferredQuality.empty()) config.preferredQuality = "auto";
     RemoteView::playLive(config);
 }
 
@@ -2037,11 +2451,13 @@ void KickNXHome::clearRows() {
     followedRow->clear();
     offlineFollowedRow->clear();
     popularRow->clear();
+    popularClipsRow->clear();
     categoryStreamsRow->clear();
     categoriesRow->clear();
     searchRow->clear();
     followedCursor.clear();
     popularCursor.clear();
+    popularClipsCursor.clear();
     categoriesCursor.clear();
     searchCursor.clear();
     categoryStreamsCursor.clear();

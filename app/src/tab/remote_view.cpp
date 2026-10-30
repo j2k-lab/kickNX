@@ -5,7 +5,6 @@
 #include "view/video_view.hpp"
 #include "view/video_profile.hpp"
 #include "view/mpv_core.hpp"
-#include "view/music_view.hpp"
 #include "activity/kick_channel.hpp"
 #include "api/kick_helix.hpp"
 #include "view/player_setting.hpp"
@@ -13,12 +12,13 @@
 #include "api/kick_chat.hpp"
 #include "api/kick.hpp"
 #include "utils/thread.hpp"
-#include "client/local.hpp"
 #include "utils/misc.hpp"
 #include "utils/config.hpp"
 #include "utils/image.hpp"
 #include "utils/haptics.hpp"
 #include "utils/orientation.hpp"
+#include "utils/theme.hpp"
+#include <borealis/core/cache_helper.hpp>
 
 #include <utility>
 #include <algorithm>
@@ -323,6 +323,10 @@ private:
     };
 
 public:
+    /// Docked chat follows the app theme; the overlay on top of the video
+    /// keeps its light-on-dark colours.
+    void setThemed(bool value) { themed = value; }
+
     void configure(
         const kick::ChatMessage& value,
         const kick::ChatPreferences& preferences,
@@ -590,8 +594,11 @@ public:
         if (showTimestamp && !message.timestamp.empty()) {
             drawWord(
                 "[" + message.timestamp + "] ",
-                nvgRGB(145, 154, 174));
+                themed ? kicknx::theme::current().textFaint : nvgRGB(145, 154, 174));
         }
+
+        const NVGcolor messageColor =
+            themed ? kicknx::theme::current().textPrimary : nvgRGB(245, 246, 250);
 
         drawWord(
             message.userName + ": ",
@@ -641,19 +648,19 @@ public:
                 } else {
                     drawWord(
                         fragment.text + " ",
-                        nvgRGB(245, 246, 250));
+                        messageColor);
                 }
             } else {
                 drawWrappedText(
                     fragment.text,
-                    nvgRGB(245, 246, 250));
+                    messageColor);
             }
         }
 
         nvgBeginPath(vg);
         nvgMoveTo(vg, x, y + height - 1);
         nvgLineTo(vg, right, y + height - 1);
-        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 18));
+        nvgStrokeColor(vg, themed ? kicknx::theme::current().divider : nvgRGBA(255, 255, 255, 18));
         nvgStrokeWidth(vg, 1.0f);
         nvgStroke(vg);
 
@@ -699,6 +706,7 @@ private:
     float contentWidth = 300.0f;
     float contentHeightLimit = brls::Application::contentHeight;
     bool showTimestamp = false;
+    bool themed = false;
 };
 
 
@@ -732,6 +740,7 @@ public:
                 const auto found = byName.find(segment.text);
                 if (found != byName.end()) {
                     segment.emote = true;
+                    segment.url = found->second->imageUrl;
                     segment.image = KickEmoteTexturePool::instance().get(
                         found->second->imageUrl);
                 }
@@ -785,6 +794,8 @@ public:
             ++line;
         };
 
+        bool needsTextureRefresh = false;
+
         for (const auto& segment : segments) {
             if (line >= MAX_LINES) break;
             const float segmentWidth = segment.emote
@@ -793,23 +804,39 @@ public:
             if (cursorX > x && cursorX + segmentWidth > right) nextLine();
             if (line >= MAX_LINES) break;
 
-            if (segment.emote && segment.image &&
-                segment.image->getTexture() > 0) {
-                const float imageY = cursorY - FONT_SIZE - 5.0f;
-                const NVGpaint paint = nvgImagePattern(
-                    vg,
-                    cursorX,
-                    imageY,
-                    EMOTE_SIZE,
-                    EMOTE_SIZE,
-                    0,
-                    segment.image->getTexture(),
-                    1.0f);
-                nvgBeginPath(vg);
-                nvgRect(vg, cursorX, imageY, EMOTE_SIZE, EMOTE_SIZE);
-                nvgFillPaint(vg, paint);
-                nvgFill(vg);
-                cursorX += EMOTE_SIZE + 4.0f;
+            if (segment.emote) {
+                int tex = segment.image ? segment.image->getTexture() : 0;
+                if (tex <= 0 && !segment.url.empty()) {
+                    tex = brls::TextureCache::instance().getCache(segment.url);
+                }
+
+                if (tex > 0) {
+                    const float imageY = cursorY - FONT_SIZE - 5.0f;
+                    const NVGpaint paint = nvgImagePattern(
+                        vg,
+                        cursorX,
+                        imageY,
+                        EMOTE_SIZE,
+                        EMOTE_SIZE,
+                        0,
+                        tex,
+                        1.0f);
+                    nvgBeginPath(vg);
+                    nvgRect(vg, cursorX, imageY, EMOTE_SIZE, EMOTE_SIZE);
+                    nvgFillPaint(vg, paint);
+                    nvgFill(vg);
+                    cursorX += EMOTE_SIZE + 4.0f;
+                } else {
+                    needsTextureRefresh = true;
+                    nvgFillColor(vg, nvgRGB(244, 246, 250));
+                    nvgText(
+                        vg,
+                        cursorX,
+                        cursorY,
+                        segment.text.c_str(),
+                        nullptr);
+                    cursorX += textWidth(segment.text);
+                }
             } else {
                 nvgFillColor(vg, nvgRGB(244, 246, 250));
                 nvgText(
@@ -822,11 +849,16 @@ public:
             }
         }
         nvgRestore(vg);
+
+        if (needsTextureRefresh) {
+            this->invalidate();
+        }
     }
 
 private:
     struct Segment {
         std::string text;
+        std::string url;
         bool emote = false;
         brls::Image* image = nullptr;
     };
@@ -1303,6 +1335,36 @@ private:
 
     void eraseLastCodepoint() {
         if (draft.empty()) return;
+
+        // Check if draft ends with an emote
+        std::string temp = draft;
+        while (!temp.empty() && std::isspace(static_cast<unsigned char>(temp.back())))
+            temp.pop_back();
+
+        if (!temp.empty()) {
+            size_t lastSpace = temp.find_last_of(" \t\n\r");
+            size_t tokenStart = (lastSpace == std::string::npos) ? 0 : lastSpace + 1;
+            std::string lastToken = temp.substr(tokenStart);
+
+            bool isEmote = false;
+            auto checkEmote = [&](const kick::UserEmote& e) {
+                return !e.name.empty() && e.name == lastToken;
+            };
+            if (std::any_of(emotes.begin(), emotes.end(), checkEmote) ||
+                std::any_of(recentEmotes.begin(), recentEmotes.end(), checkEmote)) {
+                isEmote = true;
+            }
+
+            if (isEmote) {
+                size_t eraseStart = (tokenStart > 0 && std::isspace(static_cast<unsigned char>(draft[tokenStart - 1])))
+                                        ? tokenStart - 1
+                                        : tokenStart;
+                draft.erase(eraseStart);
+                return;
+            }
+        }
+
+        // Normal single-codepoint erase
         size_t position = draft.size() - 1;
         while (position > 0 &&
             (static_cast<unsigned char>(draft[position]) & 0xC0) == 0x80)
@@ -1347,7 +1409,16 @@ private:
     }
 
     void refreshDraft() {
-        draftPreview->configure(draft, emotes);
+        std::vector<kick::UserEmote> allKnown = emotes;
+        for (const auto& r : recentEmotes) {
+            if (!r.name.empty() &&
+                std::none_of(allKnown.begin(), allKnown.end(), [&](const kick::UserEmote& e) {
+                    return e.name == r.name;
+                })) {
+                allKnown.push_back(r);
+            }
+        }
+        draftPreview->configure(draft, allKnown);
         counter->setText(
             fmt::format("{} / {}", draft.size(), MAX_MESSAGE_BYTES));
         this->invalidate();
@@ -1401,20 +1472,27 @@ public:
         headerBox->setAlignItems(brls::AlignItems::CENTER);
         headerBox->setMarginBottom(7);
 
+        // Docked chat sits beside the video and follows the app theme; the
+        // overlay is drawn over the video and keeps its light-on-dark look.
+        const auto& palette = kicknx::theme::current();
+        const NVGcolor primaryText = docked ? palette.textPrimary : nvgRGB(245, 246, 250);
+        const NVGcolor mutedText = docked ? palette.textMuted : nvgRGB(173, 181, 199);
+        const NVGcolor accent = docked ? palette.accent : nvgRGB(83, 252, 24);
+
         titlePrefix = new brls::Label();
         titlePrefix->setText("LIVE CHAT");
         titlePrefix->setFontSize(16);
-        titlePrefix->setTextColor(nvgRGB(245, 246, 250));
+        titlePrefix->setTextColor(primaryText);
 
         chattersCountLabel = new brls::Label();
         chattersCountLabel->setFontSize(16);
-        chattersCountLabel->setTextColor(nvgRGB(83, 252, 24)); // Bright Kick green
+        chattersCountLabel->setTextColor(accent);
         chattersCountLabel->setVisibility(brls::Visibility::GONE);
 
         chattersSuffix = new brls::Label();
         chattersSuffix->setText(" active chatters");
         chattersSuffix->setFontSize(14);
-        chattersSuffix->setTextColor(nvgRGB(173, 181, 199));
+        chattersSuffix->setTextColor(mutedText);
         chattersSuffix->setVisibility(brls::Visibility::GONE);
 
         headerBox->addView(titlePrefix);
@@ -1425,7 +1503,7 @@ public:
         status = new brls::Label();
         status->setText("");
         status->setFontSize(13);
-        status->setTextColor(nvgRGB(173, 181, 199));
+        status->setTextColor(mutedText);
         status->setMarginBottom(7);
         status->setVisibility(brls::Visibility::GONE);
         this->addView(status);
@@ -1437,6 +1515,7 @@ public:
 
         for (size_t index = 0; index < ROW_POOL; ++index) {
             auto* row = new KickChatMessageView();
+            row->setThemed(docked);
             row->setVisibility(brls::Visibility::GONE);
             messagesBox->addView(row);
             rows.push_back(row);
@@ -1448,10 +1527,10 @@ public:
         composeButton->setHeight(46);
         composeButton->setStyle(&brls::BUTTONSTYLE_BORDERED);
         composeButton->setBorderThickness(2.0f);
-        composeButton->setBorderColor(nvgRGB(83, 252, 24));
-        composeButton->setBackgroundColor(nvgRGB(24, 115, 36));
+        composeButton->setBorderColor(accent);
+        composeButton->setBackgroundColor(docked ? palette.button : nvgRGB(24, 115, 36));
         composeButton->setCornerRadius(8);
-        composeButton->setTextColor(nvgRGB(255, 255, 255));
+        composeButton->setTextColor(docked ? palette.buttonText : nvgRGB(255, 255, 255));
         composeButton->setMarginTop(8);
         composeButton->setVisibility(brls::Visibility::GONE);
         composeButton->registerClickAction(
@@ -1484,7 +1563,7 @@ public:
         if (docked) {
             panelHeight = brls::Application::contentHeight;
             this->setHeight(panelHeight);
-            this->setBackgroundColor(nvgRGBA(0, 0, 0, 255));
+            this->setBackgroundColor(kicknx::theme::current().background);
         } else {
             const bool compact =
                 value.overlaySize == kick::ChatOverlaySize::Compact;
@@ -1600,7 +1679,7 @@ public:
         panelHeight = height;
         this->setWidth(width);
         this->setHeight(height);
-        this->setBackgroundColor(nvgRGBA(0, 0, 0, 255));
+        this->setBackgroundColor(kicknx::theme::current().background);
         composeButton->setVisibility(brls::Visibility::GONE);
         refresh();
     }
@@ -1771,6 +1850,11 @@ struct KickPlaybackRecoveryState {
     int recentRecoveries = 0;
     int reuseStreak = 0;
     std::atomic_bool backoffDone{false};
+    // Set once Kick has confirmed the streamer ended the broadcast; all
+    // further recovery attempts are abandoned while the player exits.
+    std::atomic_bool offlineHandled{false};
+    std::atomic_bool offlineCheckRunning{false};
+    std::atomic_int offlineStrikes{0};
     std::string channel;
     std::function<void(std::vector<kick::SubtitleTrack>)> onSubtitlesResolved;
 };
@@ -1982,6 +2066,60 @@ void scheduleKickHardwareActivationCheck(
         });
 }
 
+constexpr int KICK_OFFLINE_CONFIRMATIONS = 2;
+constexpr long KICK_OFFLINE_EXIT_DELAY_MS = 3500;
+constexpr long KICK_OFFLINE_RECHECK_MS = 3000;
+
+void handleKickStreamOffline(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state) {
+    if (!state || !state->alive.load()) return;
+    if (state->offlineHandled.exchange(true)) return;
+
+    state->retryScheduled.store(false);
+    state->recovering.store(false);
+
+    const std::string name = state->channel.empty() ? "The streamer" : state->channel;
+    brls::Logger::info("kickNX: {} went offline; leaving the player", name);
+    brls::Application::notify(name + " went offline. Returning to the previous screen…");
+
+    // `alive` is cleared when the player is torn down, so a viewer who already
+    // backed out never has an unrelated screen closed underneath them.
+    brls::delay(KICK_OFFLINE_EXIT_DELAY_MS, [state]() {
+        if (!state->alive.load()) return;
+        VideoView::close(true);
+    });
+}
+
+// Called whenever playback is interrupted. Commercials and brief CDN drops
+// leave the channel live, so the player is only closed after Kick reports no
+// livestream on consecutive checks. A failed lookup never counts as offline.
+void checkKickStreamOffline(
+    const std::shared_ptr<KickPlaybackRecoveryState>& state) {
+    if (!state || !state->alive.load() || state->offlineHandled.load()) return;
+    if (state->channel.empty()) return;
+
+    bool expected = false;
+    if (!state->offlineCheckRunning.compare_exchange_strong(expected, true)) return;
+
+    kick::checkChannelLiveAsync(state->channel, [state](bool known, bool live) {
+        state->offlineCheckRunning.store(false);
+        if (!state->alive.load() || state->offlineHandled.load()) return;
+
+        if (!known || live) {
+            if (known) state->offlineStrikes.store(0);
+            return;
+        }
+
+        if (state->offlineStrikes.fetch_add(1) + 1 >= KICK_OFFLINE_CONFIRMATIONS) {
+            handleKickStreamOffline(state);
+            return;
+        }
+        brls::delay(KICK_OFFLINE_RECHECK_MS, [state]() {
+            checkKickStreamOffline(state);
+        });
+    });
+}
+
 void finishKickRecoveryFailure(
     const std::shared_ptr<KickPlaybackRecoveryState>& state,
     const std::string& error) {
@@ -1991,13 +2129,15 @@ void finishKickRecoveryFailure(
 
     if (state->alive.load()) {
         brls::Logger::warning("kickNX could not resume the live stream: {}", error);
+        checkKickStreamOffline(state);
     }
 }
 
 void scheduleKickPlaybackRetry(
     const std::shared_ptr<KickPlaybackRecoveryState>& state,
     const std::string& error) {
-    if (!state || !state->alive.load()) return;
+    if (!state || !state->alive.load() || state->offlineHandled.load()) return;
+    checkKickStreamOffline(state);
 
     bool expected = false;
     if (!state->retryScheduled.compare_exchange_strong(expected, true))
@@ -2064,7 +2204,7 @@ void resolveKickReplacementPlaylist(
     if (attempt < 2 && !state->lastUrl.empty()) {
         brls::Logger::info("kickNX: retrying the same edge server playlist (attempt {})", attempt);
         MPVCore::BOTTOM_BAR = false;
-        MPVCore::instance().setUrl(state->lastUrl, "");
+        MPVCore::instance().setUrl(state->lastUrl, kick::mpvExtra());
         return;
     }
 
@@ -2083,7 +2223,7 @@ void resolveKickReplacementPlaylist(
             MPVCore::BOTTOM_BAR = false;
             MPVCore::instance().setUrl(
                 result.selected.url,
-                "");
+                kick::mpvExtra());
 
             // Recovery remains active until MPV_LOADED confirms that this
             // replacement playlist actually opened.
@@ -2151,7 +2291,7 @@ void scheduleHardwareStopWatchdog(
 void performKickPlaybackRecovery(
     const std::shared_ptr<KickPlaybackRecoveryState>& state,
     int attempt) {
-    if (!state || !state->alive.load()) return;
+    if (!state || !state->alive.load() || state->offlineHandled.load()) return;
 
     const kick::DecoderMode mode = kick::loadDecoderMode();
     state->decoderMode.store(static_cast<int>(mode));
@@ -2226,6 +2366,7 @@ bool requestKickPlaybackRecovery(
         state && state->decoderSwitching.load() ? 1 : 0);
 #endif
     if (!state || !state->alive.load()) return true;
+    if (state->offlineHandled.load()) return true;
 
     if (state->decoderSwitching.load()) {
         brls::Logger::debug(
@@ -2293,6 +2434,7 @@ bool requestKickPlaybackRecovery(
             "resolving a fresh playlist",
             static_cast<int>(event));
 
+        checkKickStreamOffline(state);
         performKickPlaybackRecovery(state, 0);
     } else {
         // If the replacement playlist fails before MPV_LOADED, schedule one
@@ -2428,6 +2570,7 @@ public:
           kickSubtitles(std::move(kickSubtitles)),
           playbackSessionId(++nextPlaybackSession) {
         activePlaybackSession.store(playbackSessionId);
+        kick::setLiveSubtitles({});
 #if defined(KICKNX_PLAYBACK_DEBUG)
         kicknx::debug::log(
             "TW_PLAYER",
@@ -2735,11 +2878,20 @@ public:
                 if (titles.empty()) this->loadList();
                 mpv.command("set", "pause", "no");
                 view->getProfile()->init("Local");
+                // Every Kick caption language is its own live HLS feed, and an
+                // added track keeps downloading for as long as it is loaded.
+                // Adding all of them on each load starved the video cache, so
+                // only the caption the viewer chose in player settings is
+                // re-added after a load or recovery.
+                kick::setLiveSubtitles(this->kickSubtitles);
                 for (const auto& sub : this->kickSubtitles) {
+                    if (kick::liveCaptionLanguage().empty() ||
+                        sub.language != kick::liveCaptionLanguage())
+                        continue;
                     mpv.command(
                         "sub-add",
                         sub.url.c_str(),
-                        "auto",
+                        "select",
                         sub.name.c_str(),
                         sub.language.c_str());
 #if defined(KICKNX_PLAYBACK_DEBUG)
@@ -2752,6 +2904,7 @@ public:
                         sub.url.c_str(),
                         sub.isDefault ? 1 : 0);
 #endif
+                    break;
                 }
                 const char* flag = MPVCore::SUBS_FALLBACK ? "select" : "auto";
                 for (auto& it : this->subtitles) {
@@ -2772,7 +2925,7 @@ public:
             }
         });
         settingSubscribeID = view->getSettingEvent()->subscribe([this]() {
-            brls::View* setting = new PlayerSetting(nullptr, this->kickChannel);
+            brls::View* setting = new PlayerSetting(this->kickChannel);
             brls::Application::pushActivity(new brls::Activity(setting));
         });
     }
@@ -3513,246 +3666,6 @@ private:
     std::shared_ptr<std::atomic_bool> asyncCancelToken;
 };
 
-class FileCard : public RecyclingGridItem {
-public:
-    FileCard() { this->inflateFromXMLRes("xml/view/dir_entry.xml"); }
-
-    void setCard(const remote::DirEntry& item) {
-        if (item.type == remote::EntryType::UP) {
-            this->icon->setImageFromSVGRes("icon/ico-folder-up.svg");
-            this->name->setText("main/remote/up"_i18n);
-            this->size->setText("");
-            return;
-        }
-        this->name->setText(item.name);
-        if (item.type == remote::EntryType::DIR) {
-            this->icon->setImageFromSVGRes("icon/ico-folder.svg");
-            this->size->setText("main/remote/folder"_i18n);
-            return;
-        }
-        if (item.type == remote::EntryType::DEVICE) {
-            this->icon->setImageFromSVGRes("icon/ico-folder.svg");
-            this->size->setText(item.path);
-            return;
-        }
-        this->size->setText(misc::formatSize(item.fileSize));
-        switch (item.type) {
-        case remote::EntryType::VIDEO:
-            this->icon->setImageFromSVGRes("icon/ico-file-video.svg");
-            break;
-        case remote::EntryType::AUDIO:
-            this->icon->setImageFromSVGRes("icon/ico-file-audio.svg");
-            break;
-        case remote::EntryType::IMAGE:
-            this->icon->setImageFromSVGRes("icon/ico-file-image.svg");
-            break;
-        case remote::EntryType::PLAYLIST:
-            this->icon->setImageFromSVGRes("icon/ico-list.svg");
-            break;
-        default:
-            this->icon->setImageFromSVGRes("icon/ico-file.svg");
-        }
-    }
-
-private:
-    BRLS_BIND(SVGImage, icon, "file/icon");
-    BRLS_BIND(brls::Label, name, "file/name");
-    BRLS_BIND(brls::Label, size, "file/misc");
-};
-
-static std::set<std::string> videoExt = {
-    ".mp4", ".mkv", ".avi", ".flv", ".mov", ".wmv", ".webm", ".rm", ".rmvb", ".mpg"};
-static std::set<std::string> audioExt = {".mp3", ".flac", ".wav", ".ogg", ".m4a", ".aac", ".wma", ".ape"};
-static std::set<std::string> imageExt = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"};
-static std::set<std::string> playlistExt = {".m3u", ".m3u8"};
-static std::set<std::string> subtitleExt = {".srt", ".ass", ".ssa", ".sub", ".smi"};
-
-class FileDataSource : public RecyclingGridDataSource {
-public:
-    FileDataSource(const DirList& r, RemoteView::Client c) : list(std::move(r)), client(c) {
-        for (auto& it : this->list) {
-            if (it.type != remote::EntryType::FILE) continue;
-
-            auto pos = it.name.find_last_of('.');
-            if (pos == std::string::npos) continue;
-            std::string ext = it.name.substr(pos);
-            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (videoExt.count(ext)) {
-                it.type = remote::EntryType::VIDEO;
-            } else if (audioExt.count(ext)) {
-                it.type = remote::EntryType::AUDIO;
-            } else if (imageExt.count(ext)) {
-                it.type = remote::EntryType::IMAGE;
-            } else if (subtitleExt.count(ext)) {
-                it.type = remote::EntryType::SUBTITLE;
-            } else if (playlistExt.count(ext)) {
-                it.type = remote::EntryType::PLAYLIST;
-            }
-        }
-    }
-
-    size_t getItemCount() override { return this->list.size(); }
-
-    RecyclingGridItem* cellForRow(RecyclingView* recycler, size_t index) override {
-        FileCard* cell = dynamic_cast<FileCard*>(recycler->dequeueReusableCell("Cell"));
-        auto& item = this->list.at(index);
-        cell->setCard(item);
-        return cell;
-    }
-
-    void onItemSelected(brls::Box* recycler, size_t index) override {
-        auto& item = this->list.at(index);
-        if (item.type == remote::EntryType::UP) {
-            recycler->getParent()->dismiss();
-            return;
-        }
-
-        if (item.type == remote::EntryType::DIR || item.type == remote::EntryType::DEVICE) {
-            auto* view = dynamic_cast<RemoteView*>(recycler->getParent());
-            if (view) view->push(item.path);
-            return;
-        }
-
-        if (item.type == remote::EntryType::VIDEO) {
-            RemotePlayer* view = new RemotePlayer(item);
-            view->setList(this->list, index, client->extraOption());
-            brls::Application::pushActivity(new brls::Activity(view), brls::TransitionAnimation::NONE);
-            return;
-        }
-
-        if (item.type == remote::EntryType::AUDIO) {
-            DirList urls;
-            for (size_t i = 1; i < this->list.size(); i++) {
-                auto& it = this->list.at(i);
-                if (it.type == remote::EntryType::AUDIO) {
-                    if (i == index) index = urls.size();
-                    urls.push_back(it);
-                }
-            }
-            MusicView::instance().load(urls, index, client->extraOption());
-            return;
-        }
-
-        if (item.type == remote::EntryType::IMAGE) {
-            return;
-        }
-
-        if (item.type == remote::EntryType::PLAYLIST) {
-            RemotePlayer* view = new RemotePlayer(item);
-            MPVCore::instance().setUrl(item.url(), client->extraOption());
-            brls::Application::pushActivity(new brls::Activity(view), brls::TransitionAnimation::NONE);
-        }
-    }
-
-    void clearData() override { this->list.clear(); }
-
-private:
-    DirList list;
-    RemoteView::Client client;
-};
-
-UmsView::UmsView() : RemoteView(std::make_shared<remote::Local>()) {
-    RecyclingGrid* view = this->newRecycler();
-    this->stack.push_back(view);
-    this->setContent(view);
-
-    auto ev = Ums::instance().getEvent();
-    deviceSubscribeID = ev->subscribe([this, view](const Ums::DeviceList& r) {
-        DirList dirs;
-        dirs.reserve(r.size());
-        for (auto& it : r) {
-            remote::DirEntry entry;
-            entry.type = it.id < 0 ? remote::EntryType::DIR : remote::EntryType::DEVICE;
-            entry.name = it.name;
-            entry.path = it.mount + "/";
-            dirs.push_back(entry);
-        }
-        view->setDataSource(new FileDataSource(dirs, this->client));
-    });
-    ev->fire(Ums::instance().getDevice());
-}
-
-UmsView::~UmsView() { Ums::instance().getEvent()->unsubscribe(deviceSubscribeID); }
-
-RemoteView::RemoteView(Client c) : client(c) { brls::Logger::debug("RemoteView: create"); }
-
-RemoteView::~RemoteView() {
-    brls::Logger::debug("RemoteView: deleted");
-    this->setDimensions(View::AUTO, View::AUTO);
-    PlayerSetting::selectedSubtitle = 0;
-    PlayerSetting::selectedAudio = 0;
-
-    /// é€šçŸ¥ MusicView å·²å…³é—­
-    MusicView::instance().setParent(nullptr);
-}
-
-brls::View* RemoteView::getDefaultFocus() { return this->recycler; }
-
-void RemoteView::push(const std::string& path) {
-    RecyclingGrid* view = this->newRecycler();
-    this->stack.push_back(view);
-    this->setContent(view);
-
-    ASYNC_RETAIN
-    brls::async([ASYNC_TOKEN, &path]() {
-        try {
-            auto r = client->list(path);
-            brls::sync([ASYNC_TOKEN, r]() {
-                ASYNC_RELEASE
-                this->recycler->setDataSource(new FileDataSource(r, client));
-                if (this->stack.size() > 1) brls::Application::giveFocus(this->recycler);
-            });
-        } catch (const std::exception& ex) {
-            std::string error = ex.what();
-            brls::sync([ASYNC_TOKEN, error]() {
-                ASYNC_RELEASE
-                this->recycler->setError(error);
-            });
-        }
-    });
-}
-
-void RemoteView::dismiss(std::function<void(void)> cb) {
-    if (this->stack.size() > 1) {
-        brls::View* lastView = this->recycler;
-        this->stack.pop_back();
-        this->setContent(this->stack.back());
-        cb();
-        lastView->freeView();
-    } else if (brls::Application::getInputType() == brls::InputType::TOUCH) {
-        brls::View::dismiss(cb);
-    } else {
-        AutoTabFrame::focus2Sidebar(this);
-    }
-}
-
-void RemoteView::setContent(RecyclingGrid* view) {
-    if (this->recycler) {
-        this->removeView(this->recycler, false);
-        this->recycler = nullptr;
-    }
-
-    this->recycler = view;
-    this->recycler->setDimensions(View::AUTO, View::AUTO);
-    this->recycler->setGrow(1.0f);
-    this->addView(this->recycler);
-    brls::Application::giveFocus(this->recycler);
-}
-
-RecyclingGrid* RemoteView::newRecycler() {
-    RecyclingGrid* view = new RecyclingGrid();
-    view->spanCount = 1;
-    view->estimatedRowHeight = 48;
-    view->estimatedRowSpace = 10;
-    view->setDefaultCellFocus(1);
-    view->registerCell("Cell", []() { return new FileCard(); });
-    view->registerAction("hints/back"_i18n, brls::BUTTON_B, [this](...) {
-        this->dismiss();
-        return true;
-    });
-    return view;
-}
-
 void RemoteView::play(
     const std::string& path,
     const std::string& name,
@@ -3810,7 +3723,7 @@ void RemoteView::playLive(
             player->setTitle("Kick - " + channel);
             player->setKickSubtitles(result.subtitles);
             MPVCore::BOTTOM_BAR = false;
-            player->setUrl(result.selected.url, "");
+            player->setUrl(result.selected.url, kick::mpvExtra());
         },
         [sessionId, channel](const std::string& error) {
             if (activePlaybackSession.load() != sessionId) return;

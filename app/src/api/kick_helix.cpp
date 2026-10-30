@@ -794,20 +794,10 @@ std::vector<ChannelVideo> getChannelVideos(
     return result;
 }
 
-std::vector<ChannelClip> getChannelClips(
-    const Config& config,
-    OAuthSession& session,
-    const std::string& channelSlug,
-    const HTTP::Cancel& cancel) {
-    const std::string slug = normalizeChannel(channelSlug);
-    if (slug.empty()) return {};
-
-    const json root = json::parse(kickGet(
-        config,
-        session,
-        "https://kick.com/api/v2/channels/" + percentEncode(slug) + "/clips?sort=view",
-        cancel));
-
+std::vector<ChannelClip> parseClipList(
+    const json& root,
+    const std::string& fallbackCreator,
+    size_t limit) {
     const json* list = nullptr;
     if (root.is_object()) {
         if (root.contains("clips") && root["clips"].is_array()) {
@@ -837,17 +827,54 @@ std::vector<ChannelClip> getChannelClips(
         if (item.contains("creator") && item["creator"].is_object()) {
             clip.creatorName = jsonString(item["creator"], "username");
         } else {
-            clip.creatorName = slug;
+            clip.creatorName = fallbackCreator;
+        }
+        if (item.contains("channel") && item["channel"].is_object()) {
+            clip.channelName = jsonString(item["channel"], "username");
         }
         clip.viewCount = jsonInt(item, "views", jsonInt(item, "view_count", 0));
         clip.duration = jsonFloat(item, "duration", 0.0f);
 
         if (!clip.id.empty()) {
             result.push_back(std::move(clip));
-            if (result.size() >= 16) break;
+            if (result.size() >= limit) break;
         }
     }
     return result;
+}
+
+std::vector<ChannelClip> getChannelClips(
+    const Config& config,
+    OAuthSession& session,
+    const std::string& channelSlug,
+    const HTTP::Cancel& cancel) {
+    const std::string slug = normalizeChannel(channelSlug);
+    if (slug.empty()) return {};
+
+    const json root = json::parse(kickGet(
+        config,
+        session,
+        "https://kick.com/api/v2/channels/" + percentEncode(slug) + "/clips?sort=view",
+        cancel));
+    return parseClipList(root, slug, 16);
+}
+
+// Site-wide most-viewed clips for the last week, paged by Kick's own cursor.
+ClipPage getPopularClips(
+    const Config& config,
+    OAuthSession& session,
+    const std::string& cursor,
+    const HTTP::Cancel& cancel) {
+    std::string url = "https://kick.com/api/v2/clips?sort=view&time=week";
+    if (!cursor.empty()) url += "&cursor=" + percentEncode(cursor);
+
+    const json root = json::parse(kickGet(config, session, url, cancel));
+    ClipPage page;
+    page.loaded = true;
+    page.items = parseClipList(root, "", 40);
+    if (root.is_object() && root.contains("nextCursor") && root["nextCursor"].is_string())
+        page.cursor = root["nextCursor"].get<std::string>();
+    return page;
 }
 
 StreamPage parseKickStreamListResponse(const std::string& response, const std::string& nextCursor = "") {
@@ -1324,7 +1351,7 @@ MediaPlayback resolveVod(
             auto qualities = kick::parseMasterPlaylist(source, playlistText);
             if (qualities.size() > 1) {
                 std::string preferred = kick::loadPreferredQuality();
-                if (preferred.empty()) preferred = "1080p60";
+                if (preferred.empty()) preferred = "auto";
                 if (preferred != "auto") {
                     kick::Quality selected = kick::selectQuality(qualities, preferred);
                     if (!selected.url.empty() && selected.url != source) {
@@ -1926,6 +1953,13 @@ void loadHomeAsync(
                 }
 
                 try {
+                    result.popularClips = getPopularClips(config, result.account, "", cancel);
+                } catch (const std::exception& exception) {
+                    throwIfCancelled(cancel);
+                    result.popularClipsError = sectionError(exception);
+                }
+
+                try {
                     result.categories = getCategories(config, result.account, "", cancel);
                 } catch (const std::exception& exception) {
                     throwIfCancelled(cancel);
@@ -2003,6 +2037,20 @@ void loadPopularPageAsync(
         },
         std::move(success), std::move(failure), std::move(cancel),
         "Unknown popular-streams request error");
+}
+
+void loadPopularClipsPageAsync(
+    const Config& config,
+    const std::string& cursor,
+    ClipPageCallback success,
+    ErrorCallback failure,
+    HTTP::Cancel cancel) {
+    loadPageAsync<ClipPage>(config,
+        [cursor](const Config& c, OAuthSession& session, const HTTP::Cancel& requestCancel) {
+            return getPopularClips(c, session, cursor, requestCancel);
+        },
+        std::move(success), std::move(failure), std::move(cancel),
+        "Unknown popular-clips request error");
 }
 
 void loadCategoriesPageAsync(

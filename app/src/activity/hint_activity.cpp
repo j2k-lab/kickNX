@@ -4,7 +4,6 @@
 
 #include "activity/hint_activity.hpp"
 #include "view/gallery_view.hpp"
-#include "api/analytics.hpp"
 
 #ifdef BUILTIN_NSP
 #include <nspmini.hpp>
@@ -73,7 +72,6 @@ private:
 
 HintActivity::HintActivity() {
     brls::Logger::debug("HintActivityActivity: create");
-    GA("tutorial_begin")
 }
 
 void HintActivity::onContentAvailable() {
@@ -98,5 +96,4 @@ void HintActivity::onContentAvailable() {
 
 HintActivity::~HintActivity() {
     brls::Logger::debug("HintActivityActivity: delete");
-    GA("tutorial_complete")
 }

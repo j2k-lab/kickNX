@@ -4,18 +4,14 @@
 #include "utils/thread.hpp"
 #include "utils/debug_log.hpp"
 #include "utils/orientation.hpp"
-#include "api/analytics.hpp"
+#include "utils/theme.hpp"
 
 #include "view/svg_image.hpp"
 #include "view/custom_button.hpp"
-#include "view/context_menu.hpp"
-#include "view/auto_tab_frame.hpp"
 #include "view/recycling_grid.hpp"
 #include "view/h_recycling.hpp"
-#include "view/recyling_video.hpp"
 #include "view/video_progress_slider.hpp"
 #include "view/gallery_view.hpp"
-#include "view/search_list.hpp"
 #include "view/video_view.hpp"
 #include "view/selector_cell.hpp"
 #include "view/button_close.hpp"
@@ -24,17 +20,9 @@
 #include "view/kick_loading_view.hpp"
 #include "view/mpv_core.hpp"
 
-#include "activity/main_activity.hpp"
-#include "activity/server_list.hpp"
 #include "activity/hint_activity.hpp"
-#include "tab/server_add.hpp"
-#include "tab/home_tab.hpp"
-#include "tab/media_folder.hpp"
-#include "tab/search_tab.hpp"
-#include "tab/remote_tab.hpp"
 #include "tab/remote_view.hpp"
 #include "activity/kicknx_home.hpp"
-#include "tab/setting_tab.hpp"
 
 #if defined(__SDL2__)
 #include <SDL2/SDL_main.h>
@@ -114,6 +102,8 @@ int main(int argc, char* argv[]) {
     }
 
     conf.initThemes();
+    // Apply the saved colour preset after the default theme colours exist.
+    kicknx::theme::load();
 
     // Clean watch-later cache on startup
     cleanWatchLaterCache(conf.configDir() + "/watch-later");
@@ -133,25 +123,15 @@ int main(int argc, char* argv[]) {
     // Register custom views (including tabs, which are views)
     brls::Application::registerXMLView("SVGImage", SVGImage::create);
     brls::Application::registerXMLView("IconButton", IconButton::create);
-    brls::Application::registerXMLView("MenuItem", MenuItem::create);
     brls::Application::registerXMLView("CustomButton", CustomButton::create);
     brls::Application::registerXMLView("SelectorCell", SelectorCell::create);
     brls::Application::registerXMLView("TextBox", TextBox::create);
     brls::Application::registerXMLView("ButtonClose", ButtonClose::create);
-    brls::Application::registerXMLView("AutoTabFrame", AutoTabFrame::create);
     brls::Application::registerXMLView("RecyclingGrid", RecyclingGrid::create);
     brls::Application::registerXMLView("HRecyclerFrame", HRecyclerFrame::create);
-    brls::Application::registerXMLView("RecylingVideo", RecylingVideo::create);
     brls::Application::registerXMLView("GalleryView", GalleryView::create);
-    brls::Application::registerXMLView("SearchList", SearchList::create);
     brls::Application::registerXMLView("VideoProgressSlider", VideoProgressSlider::create);
     brls::Application::registerXMLView("KickLoadingView", kick::KickLoadingView::create);
-
-    brls::Application::registerXMLView("HomeTab", HomeTab::create);
-    brls::Application::registerXMLView("MediaFolders", MediaFolders::create);
-    brls::Application::registerXMLView("SearchTab", SearchTab::create);
-    brls::Application::registerXMLView("RemoteTab", RemoteTab::create);
-    brls::Application::registerXMLView("SettingTab", SettingTab::create);
 
     if (!brls::Application::getPlatform()->isApplicationMode()) {
         brls::Application::pushActivity(new HintActivity());

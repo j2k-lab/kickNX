@@ -53,6 +53,7 @@ struct ChannelClip {
     std::string url;
     std::string embedUrl;
     std::string creatorName;
+    std::string channelName;
     std::string createdAt;
     std::string thumbnailUrl;
     std::string language;
@@ -116,22 +117,31 @@ struct CategoryPage {
     bool loaded = false;
 };
 
+struct ClipPage {
+    std::vector<ChannelClip> items;
+    std::string cursor;
+    bool loaded = false;
+};
+
 struct HomeData {
     OAuthSession account;
     UserProfile profile;
     StreamPage followed;
     StreamPage offlineFollowed;
     StreamPage popular;
+    ClipPage popularClips;
     CategoryPage categories;
     std::string followedError;
     std::string offlineFollowedError;
     std::string popularError;
+    std::string popularClipsError;
     std::string categoriesError;
 
     bool hasErrors() const {
         return !followedError.empty() ||
                !offlineFollowedError.empty() ||
                !popularError.empty() ||
+               !popularClipsError.empty() ||
                !categoriesError.empty();
     }
 
@@ -139,6 +149,7 @@ struct HomeData {
         return followed.loaded ||
                offlineFollowed.loaded ||
                popular.loaded ||
+               popularClips.loaded ||
                categories.loaded;
     }
 };
@@ -151,6 +162,7 @@ using ChannelPageCallback =
 using FollowCallback = std::function<void(bool isFollowing)>;
 using StreamPageCallback = std::function<void(StreamPage)>;
 using CategoryPageCallback = std::function<void(CategoryPage)>;
+using ClipPageCallback = std::function<void(ClipPage)>;
 using MediaPlaybackCallback = std::function<void(MediaPlayback)>;
 
 void loadChannelProfileAsync(
@@ -203,6 +215,13 @@ void loadPopularPageAsync(
     const Config& config,
     const std::string& cursor,
     StreamPageCallback success,
+    ErrorCallback failure,
+    HTTP::Cancel cancel = nullptr);
+
+void loadPopularClipsPageAsync(
+    const Config& config,
+    const std::string& cursor,
+    ClipPageCallback success,
     ErrorCallback failure,
     HTTP::Cancel cancel = nullptr);
 

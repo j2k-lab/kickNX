@@ -5,14 +5,13 @@
 #pragma once
 
 #include <borealis.hpp>
-#include <api/jellyfin/media.hpp>
 #include <string>
 
 class ButtonClose;
 
 class PlayerSetting : public brls::Box {
 public:
-    PlayerSetting(const jellyfin::Source* src = nullptr, std::string kickChannel = "");
+    PlayerSetting(std::string kickChannel = "");
     ~PlayerSetting() override;
 
     bool isTranslucent() override { return true; }

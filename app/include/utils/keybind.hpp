@@ -42,7 +42,6 @@ public:
     // 视频详情快捷键
     DECL_KEYBIND(VideoProfile);
     // 弹幕快捷键
-    DECL_KEYBIND(Danmaku);
     // 快进快捷键
     DECL_KEYBIND(Forward);
     // 快退快捷键

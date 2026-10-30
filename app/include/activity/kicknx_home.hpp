@@ -26,6 +26,9 @@ public:
 
     void willAppear(bool resetState = false) override;
 
+    /// Rebuilds Home shortly, once any picker on top of it has closed.
+    static void scheduleThemeRebuild();
+
 private:
     void setBusy(bool value, const std::string& message = "");
     void updateAccount();
@@ -35,6 +38,9 @@ private:
     void refreshHome();
     void search();
     void showAbout();
+    void showThemePicker();
+    /// Replaces Home with a freshly built one so the new theme takes effect.
+    static void rebuildForTheme();
     void searchFor(const std::string& query);
     void openCategory(const kick::Category& category);
     void openChannelPage(const kick::Stream& stream);
@@ -58,6 +64,7 @@ private:
 
     void loadMoreFollowed();
     void loadMorePopular();
+    void loadMorePopularClips();
     void loadMoreCategories();
     void loadMoreSearch();
     void loadMoreCategoryStreams();
@@ -70,6 +77,7 @@ private:
     brls::Box* searchButton = nullptr;
     brls::Box* refreshButton = nullptr;
     brls::Box* aboutButton = nullptr;
+    brls::Box* themeButton = nullptr;
 
     brls::Box* errorBox = nullptr;
     brls::Label* errorLabel = nullptr;
@@ -88,6 +96,7 @@ private:
     KickRow* followedRow = nullptr;
     KickRow* offlineFollowedRow = nullptr;
     KickRow* popularRow = nullptr;
+    KickRow* popularClipsRow = nullptr;
     KickRow* categoryStreamsRow = nullptr;
     KickRow* categoriesRow = nullptr;
     KickRow* searchRow = nullptr;
@@ -97,6 +106,7 @@ private:
 
     std::string followedCursor;
     std::string popularCursor;
+    std::string popularClipsCursor;
     std::string categoriesCursor;
     std::string searchCursor;
     std::string categoryStreamsCursor;
@@ -110,4 +120,6 @@ private:
     bool busy = false;
 
     inline static KickNXHome* instance = nullptr;
+    inline static bool themeRebuildPending = false;
+    static constexpr long THEME_REBUILD_DELAY_MS = 500;
 };
