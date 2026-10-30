@@ -2658,7 +2658,9 @@ void KickNXHome::openEvent(const kick::LiveEvent& event) {
         banner->setHeight(230);
         banner->setCornerRadius(12);
         banner->setScalingType(brls::ImageScalingType::FILL);
-        banner->setImageFromRes("img/video-card-bg.png");
+        // Made at Kick's 1620x328 banner size so it is only ever scaled down;
+        // the small stream-card placeholder looked blurry stretched this wide.
+        banner->setImageFromRes("img/event-banner-bg.png");
         Image::with(banner, event.bannerUrl);
         content->addView(banner);
     }
