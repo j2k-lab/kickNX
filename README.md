@@ -151,13 +151,14 @@ reducing the discontinuities that previously stressed hardware decoding.
 
 ## Building from source
 
-See [BUILDING.md](BUILDING.md) for the supported MPV 0.36 package, guarded
-FFmpeg 7.1/NVTEGRA recipe and Nintendo Switch build commands.
+See [BUILDING.md](BUILDING.md) for the guarded FFmpeg 7.1/NVTEGRA recipe, the
+Docker build image and Nintendo Switch build commands.
 
-Quick build after dependencies are prepared:
+Quick build with Docker after the guarded FFmpeg is prepared:
 
 ```powershell
-.\build-switch.ps1
+docker build -t kicknx-switch-builder .
+docker run --rm -v "${PWD}:/workspace" -w /workspace kicknx-switch-builder bash build-switch.sh
 ```
 
 The generated executable is:
@@ -165,9 +166,6 @@ The generated executable is:
 ```text
 build_switch/kickNX.nro
 ```
-
-The historical build-target filename retains `KickNX`; the visible application
-name is **kickNX**.
 
 ## Project history
 
