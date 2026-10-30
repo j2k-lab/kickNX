@@ -24,6 +24,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 - **Live events**: a Live events row on Home lists Kick events that are live now. Each event opens a page with its banner, details, live streams and its most-viewed clips, which load more as you scroll.
 - **In-app chat keyboard in landscape**: the landscape composer opens on an on-screen keyboard (with Caps Lock and symbols) instead of the system keyboard, with a green Emotes key to switch to the emote picker. Its keys are see-through so the stream stays visible. The Nintendo keyboard is still available under Player Settings → Message composer.
 - **Stream title on the live OSD**: the top of the player shows the channel and stream title, like VODs and clips.
+- **Scrub with the controller**: select the progress bar, hold A and move the left stick or D-pad to pick a new spot, then let go of A to jump there. A light stick tilt or a D-pad tap (5 seconds) moves precisely, and holding a direction speeds up for long VODs. While A is held, L and R nudge the spot by 10 seconds instead of seeking. Tapping A without moving still plays or pauses. The progress bar can now always be selected with the controller.
 - **Check for updates**: a button on the About page asks GitHub for the newest kickNX release and says whether it is newer than the version you have. It only checks when you press it.
 - **ZL hint in chat**: a small "Tap or press ZL" note under "Send message", inside the button, in docked and overlay chat. On the Kick theme the button's text and outline are black.
 

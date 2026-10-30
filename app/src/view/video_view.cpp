@@ -11,6 +11,8 @@
 #include "view/video_progress_slider.hpp"
 
 const int VIDEO_SEEK_NODELAY = 0;
+// Seconds L/R move the preview while A is held on the progress bar.
+const double SCRUB_SHOULDER_STEP = 10.0;
 
 using namespace brls::literals;
 
@@ -35,7 +37,9 @@ VideoView::VideoView() {
     mpv.reset();
     mpv.enableVO(true);
 
-    if (MPVCore::OSD_TV_MODE) this->setTvMode(true);
+    // The progress bar is always reachable with the controller so it can be
+    // scrubbed by holding A. TV mode only changes what B does.
+    this->setTvMode(true);
 
     this->input = brls::Application::getPlatform()->getInputManager();
 
@@ -53,6 +57,11 @@ VideoView::VideoView() {
     this->registerActions(
         "\uE08F", brls::BUTTON_LB, KeyBind::getRewind(),
         [this](brls::View* view) -> bool {
+            // While A is held on the progress bar, L/R fine-tune the scrub.
+            if (this->scrubbing) {
+                this->moveScrub(-SCRUB_SHOULDER_STEP);
+                return true;
+            }
             this->seekingRange -= getSeekRange(this->seekingRange);
             this->requestSeeking(seekingRange);
             return true;
@@ -62,6 +71,10 @@ VideoView::VideoView() {
     this->registerActions(
         "\uE08E", brls::BUTTON_RB, KeyBind::getForward(),
         [this](brls::View* view) -> bool {
+            if (this->scrubbing) {
+                this->moveScrub(SCRUB_SHOULDER_STEP);
+                return true;
+            }
             this->seekingRange += getSeekRange(this->seekingRange);
             this->requestSeeking(seekingRange);
             return true;
@@ -153,6 +166,23 @@ VideoView::VideoView() {
         }
         MPVCore::instance().seek(progress * 100, "absolute-percent");
     });
+
+    // Hold-A scrubbing. A on the progress bar no longer toggles play straight
+    // away: releasing it without moving does, otherwise it seeks. While A is
+    // held, the D-pad and left stick move the position instead of focus.
+    osdSlider->setHideClickAnimation(true);
+    osdSlider->registerAction(
+        "Scrub", brls::BUTTON_A,
+        [this](brls::View*) {
+            this->beginScrub();
+            return true;
+        },
+        true);
+    for (auto button : {brls::BUTTON_NAV_LEFT, brls::BUTTON_NAV_RIGHT,
+                        brls::BUTTON_NAV_UP, brls::BUTTON_NAV_DOWN}) {
+        osdSlider->registerAction(
+            "", button, [this](brls::View*) { return this->scrubbing; }, true, true);
+    }
 
     osdSlider->getProgressEvent().subscribe([this](float progress) {
         this->showOSD(false);
@@ -533,7 +563,7 @@ void VideoView::draw(NVGcontext* vg, float x, float y, float w, float h, brls::S
 
         osdTopBox->setVisibility(brls::Visibility::VISIBLE);
         osdBottomBox->setVisibility(brls::Visibility::VISIBLE);
-        if (this->isLiveMode && (current - this->lastLiveProgressTick > 500000)) {
+        if (this->isLiveMode && !this->scrubbing && (current - this->lastLiveProgressTick > 500000)) {
             this->lastLiveProgressTick = current;
             this->updateLiveProgressUI();
         }
@@ -619,6 +649,11 @@ void VideoView::onChildFocusGained(View* directChild, View* focusedView) {
 }
 
 void VideoView::buttonProcessing() {
+    if (this->scrubbing) {
+        this->scrubProcessing();
+        if (this->scrubbing) return;
+    }
+
     // The player keeps drawing underneath overlays such as the chat composer.
     // Only react to stick/d-pad input while focus belongs to the player;
     // otherwise waking the OSD would pull focus out of the overlay on top.
@@ -656,6 +691,132 @@ void VideoView::buttonProcessing() {
     }
 }
 
+bool VideoView::isProgressBarFocused() {
+    brls::View* focus = brls::Application::getCurrentFocus();
+    return focus && (focus == osdSlider || focus->getParent() == osdSlider);
+}
+
+/// Length of the bar in seconds: the VOD, or the live rewind window.
+static double scrubLength(bool liveMode) {
+    auto& mpv = MPVCore::instance();
+    return liveMode ? std::max<double>(120.0, mpv.duration) : mpv.duration;
+}
+
+void VideoView::beginScrub() {
+    if (scrubLength(this->isLiveMode) <= 0) return;
+    // An L/R seek still waiting to fire would land in the middle of the
+    // scrub; finish it now so the scrub starts from where it was going.
+    if (this->seekingRange != 0) this->requestSeeking(this->seekingRange, VIDEO_SEEK_NODELAY);
+    this->scrubbing = true;
+    this->scrubMoved = false;
+    this->scrubProgress = osdSlider->getProgress();
+    this->scrubDirection = 0;
+    this->scrubLastTick = brls::getCPUTimeUsec();
+    // Keep the OSD up while the button is held.
+    this->showOSD(false);
+}
+
+void VideoView::scrubProcessing() {
+    auto& state = brls::Application::getControllerState();
+    auto stack = brls::Application::getActivitiesStack();
+    const bool playerOnTop = !stack.empty() && stack.back() == getParentActivity();
+    const double length = scrubLength(this->isLiveMode);
+
+    if (!playerOnTop || !isProgressBarFocused() || length <= 0) {
+        this->endScrub(false);
+        return;
+    }
+    if (!state.buttons[brls::BUTTON_A]) {
+        this->endScrub(true);
+        return;
+    }
+
+    const brls::Time now = brls::getCPUTimeUsec();
+    const float dt = std::min(0.1f, static_cast<float>(now - this->scrubLastTick) / 1000000.0f);
+    this->scrubLastTick = now;
+
+    // The left stick is analog (a light tilt moves slowly); the D-pad moves
+    // one 5 s step per press and then glides while held.
+    const float stick = state.axes[brls::ControllerAxis::LEFT_X];
+    const bool dpadLeft = state.buttons[brls::BUTTON_LEFT];
+    const bool dpadRight = state.buttons[brls::BUTTON_RIGHT];
+    float amount = 0;
+    bool dpad = false;
+    if (std::fabs(stick) > 0.2f) {
+        amount = (std::fabs(stick) - 0.2f) / 0.8f * (stick < 0 ? -1.0f : 1.0f);
+    } else if (dpadLeft != dpadRight) {
+        amount = dpadLeft ? -1.0f : 1.0f;
+        dpad = true;
+    }
+
+    const int direction = amount < 0 ? -1 : (amount > 0 ? 1 : 0);
+    double deltaSeconds = 0;
+    if (direction != this->scrubDirection) {
+        this->scrubDirection = direction;
+        this->scrubDirectionSince = now;
+        if (dpad) deltaSeconds += direction * 5.0;
+    }
+
+    if (direction != 0) {
+        const float held = static_cast<float>(now - this->scrubDirectionSince) / 1000000.0f;
+        // Base speed scales with the length so long VODs stay quick to cross;
+        // holding a direction speeds up further, up to 5x after 6 s.
+        const double base = std::clamp(length / 120.0, 10.0, 120.0);
+        const double accel = 1.0 + std::min(held, 6.0f) * 0.7;
+        if (!dpad || held > 0.35f) deltaSeconds += amount * base * accel * dt;
+    }
+
+    this->moveScrub(deltaSeconds);
+}
+
+void VideoView::moveScrub(double deltaSeconds) {
+    const double length = scrubLength(this->isLiveMode);
+    if (deltaSeconds == 0 || length <= 0) return;
+
+    this->scrubProgress = std::clamp(
+        this->scrubProgress + static_cast<float>(deltaSeconds / length), 0.0f, 1.0f);
+    this->scrubMoved = true;
+    osdSlider->setProgress(this->scrubProgress);
+
+    std::string label;
+    if (this->isLiveMode) {
+        const auto behind = static_cast<int64_t>((1.0f - this->scrubProgress) * length);
+        label = this->scrubProgress >= 0.98f ? "LIVE" : "-" + misc::sec2Time(behind);
+    } else {
+        label = misc::sec2Time(static_cast<int64_t>(this->scrubProgress * length));
+        leftStatusLabel->setText(label);
+    }
+    if (osdInfoBox->getVisibility() != brls::Visibility::VISIBLE) {
+        infoIcon->setImageFromSVGRes("icon/ico-seeking.svg");
+        osdInfoBox->setVisibility(brls::Visibility::VISIBLE);
+    }
+    infoLabel->setText(label);
+}
+
+void VideoView::endScrub(bool released) {
+    const bool moved = this->scrubMoved;
+    this->scrubbing = false;
+    this->scrubMoved = false;
+    this->scrubDirection = 0;
+
+    if (moved) osdInfoBox->setVisibility(brls::Visibility::GONE);
+    if (!released) {
+        // Focus left the bar (or the player closed): drop the preview.
+        this->showOSD(true);
+        return;
+    }
+
+    if (moved) {
+        // Seeks (VOD or live rewind) and brings back the auto-hiding OSD.
+        osdSlider->getProgressSetEvent().fire(this->scrubProgress);
+        return;
+    }
+
+    // A tap without moving keeps the old behaviour: play / pause.
+    MPVCore::instance().togglePlay();
+    this->showOSD(true);
+}
+
 void VideoView::registerMpvEvent() {
     auto& mpv = MPVCore::instance();
     this->eventSubscribeID = mpv.getEvent()->subscribe([this](MpvEventEnum event) {
@@ -689,7 +850,7 @@ void VideoView::registerMpvEvent() {
             this->hideLoading();
             break;
         case MpvEventEnum::UPDATE_DURATION:
-            if (this->seekingRange == 0) {
+            if (this->seekingRange == 0 && !this->scrubbing) {
                 if (this->isLiveMode) {
                     this->updateLiveProgressUI();
                 } else {
@@ -699,7 +860,7 @@ void VideoView::registerMpvEvent() {
             }
             break;
         case MpvEventEnum::UPDATE_PROGRESS:
-            if (this->seekingRange == 0) {
+            if (this->seekingRange == 0 && !this->scrubbing) {
                 if (this->isLiveMode) {
                     this->updateLiveProgressUI();
                 } else {

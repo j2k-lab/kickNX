@@ -150,6 +150,13 @@ private:
     void requestVolume(int value, int delay = 400);
     void requestBrightness(float value);
     void buttonProcessing();
+    /// Hold A on the progress bar and move the left stick or D-pad to pick
+    /// a new position; releasing A seeks there. A tap still plays/pauses.
+    bool isProgressBarFocused();
+    void beginScrub();
+    void scrubProcessing();
+    void moveScrub(double deltaSeconds);
+    void endScrub(bool released);
     /// @brief notify videoview closed
     static void disableDimming(bool disable);
 
@@ -173,6 +180,14 @@ private:
 
     int64_t seekingRange = 0;
     size_t seekingIter = 0;
+
+    // Hold-A scrubbing
+    bool scrubbing = false;      // A went down while the progress bar had focus
+    bool scrubMoved = false;     // the position changed, so releasing A seeks
+    float scrubProgress = 0;     // previewed position, 0..1 of the bar
+    int scrubDirection = 0;      // -1, 0 or 1
+    brls::Time scrubDirectionSince = 0;
+    brls::Time scrubLastTick = 0;
 
     MPVEvent::Subscription eventSubscribeID;
     brls::Rect oldRect = brls::Rect(-1, -1, -1, -1);
