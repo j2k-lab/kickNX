@@ -41,6 +41,7 @@ constexpr uint32_t MINIMUM_WINDOW_HEIGHT = 360;
 #include <borealis/core/cache_helper.hpp>
 #include <borealis/views/edit_text_dialog.hpp>
 #include <algorithm>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include "api/http.hpp"
@@ -202,8 +203,15 @@ bool AppConfig::init() {
             nlohmann::json::parse(f).get_to(*this);
             brls::Logger::info("Load config from: {}", path);
         } catch (const std::exception& ex) {
+            // A damaged config.json (e.g. an interrupted write) used to make
+            // the app exit at launch. Keep a copy and start with defaults.
             brls::Logger::error("AppConfig::load: {}", ex.what());
-            return false;
+            f.close();
+            const std::string backup = path + ".bak";
+            std::remove(backup.c_str());
+            std::rename(path.c_str(), backup.c_str());
+            this->device.clear();
+            this->setting = nlohmann::json::object();
         }
     }
 
