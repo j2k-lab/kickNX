@@ -95,8 +95,8 @@ const std::vector<std::string>& chatParticipationLabels() {
 
 const std::vector<std::string>& chatComposerLabels() {
     static const std::vector<std::string> labels = {
-        "Nintendo keyboard (recommended)",
-        "kickNX emote composer",
+        "Nintendo keyboard",
+        "kickNX keyboard (recommended)",
     };
     return labels;
 }

@@ -12,6 +12,7 @@
 
 class RecyclingGrid;
 class KickDraftPreview;
+class KickKeyboard;
 
 class KickChatComposer : public brls::Box {
 public:
@@ -22,9 +23,7 @@ public:
         return true;
     }
 
-    brls::View* getDefaultFocus() override {
-        return draftButton ? draftButton : this;
-    }
+    brls::View* getDefaultFocus() override;
 
 private:
     // Closes this overlay when the display rotates, since its fixed-size
@@ -39,7 +38,9 @@ private:
         All = 2,
     };
 
-    void openKeyboard();
+    void setEmotePanelVisible(bool visible);
+    void appendText(const std::string& value);
+    void updateSendRoute();
     void insertEmote(const kick::UserEmote& emote);
     void backspaceDraft();
     void sendMessage();
@@ -61,8 +62,12 @@ private:
     bool sending = false;
     bool channelSubscribed = false;
     bool subscriptionPermissionGranted = false;
+    bool emotePanelVisible = false;
 
     brls::Label* statusLabel = nullptr;
+    brls::Label* footerLabel = nullptr;
+    KickKeyboard* keyboard = nullptr;
+    brls::Box* emotePanel = nullptr;
     KickDraftPreview* draftPreview = nullptr;
     brls::Label* counterLabel = nullptr;
     brls::Label* focusedEmoteLabel = nullptr;

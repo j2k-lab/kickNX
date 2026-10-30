@@ -1098,7 +1098,7 @@ ChatPreferences loadChatPreferences() {
 
         const int composerMode = root.value(
             "chat_composer_mode",
-            static_cast<int>(ChatComposerMode::NintendoKeyboard));
+            static_cast<int>(ChatComposerMode::KickNXComposer));
         if (composerMode >=
                 static_cast<int>(ChatComposerMode::NintendoKeyboard) &&
             composerMode <=

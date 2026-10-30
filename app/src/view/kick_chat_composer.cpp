@@ -1,6 +1,7 @@
 #include "view/kick_chat_composer.hpp"
 
 #include "utils/image.hpp"
+#include "view/kick_keyboard.hpp"
 #include "view/recycling_grid.hpp"
 #include <borealis/core/cache_helper.hpp>
 
@@ -488,7 +489,7 @@ KickChatComposer::KickChatComposer(
     auto* sheet = new brls::Box();
     sheet->setAxis(brls::Axis::COLUMN);
     sheet->setWidthPercentage(100.0f);
-    sheet->setHeight(460.0f);
+    sheet->setHeight(540.0f);
     sheet->setCornerRadius(16);
     sheet->setBackgroundColor(
         nvgRGBA(15, 17, 23, 90));
@@ -560,7 +561,7 @@ KickChatComposer::KickChatComposer(
             draftButton));
     draftButton->registerClickAction(
         [this](brls::View*) {
-            openKeyboard();
+            setEmotePanelVisible(!emotePanelVisible);
             return true;
         });
     composerRow->addView(draftButton);
@@ -617,10 +618,46 @@ KickChatComposer::KickChatComposer(
     draftPreview->setHeight(54);
     draftButton->addView(draftPreview);
 
+    // The Send button beside the draft sends, so the keyboard swaps its own
+    // Send key for Caps Lock, and its keys let the stream show through.
+    KickKeyboard::Options keyboardOptions;
+    keyboardOptions.keyHeight = 56.0f;
+    keyboardOptions.sendKey = false;
+    keyboardOptions.translucent = true;
+    keyboard = new KickKeyboard(
+        {
+            [this](const std::string& value) { appendText(value); },
+            [this]() { backspaceDraft(); },
+            [this]() { setEmotePanelVisible(true); },
+            {},
+        },
+        keyboardOptions);
+    keyboard->setGrow(1.0f);
+    sheet->addView(keyboard);
+
+    // Emote picker, shown in place of the keyboard by its Emotes key.
+    emotePanel = new brls::Box();
+    emotePanel->setAxis(brls::Axis::COLUMN);
+    emotePanel->setWidthPercentage(100.0f);
+    emotePanel->setGrow(1.0f);
+    emotePanel->setVisibility(brls::Visibility::GONE);
+    sheet->addView(emotePanel);
+
     auto* tabRow = new brls::Box();
     tabRow->setAxis(brls::Axis::ROW);
     tabRow->setMarginBottom(8);
-    sheet->addView(tabRow);
+    emotePanel->addView(tabRow);
+
+    auto* keyboardTab = makeActionButton("< Keyboard");
+    keyboardTab->registerClickAction(
+        [this](brls::View*) {
+            setEmotePanelVisible(false);
+            return true;
+        });
+    keyboardTab->setCustomNavigationRoute(
+        brls::FocusDirection::UP,
+        draftButton);
+    tabRow->addView(keyboardTab);
 
     recentTab = makeActionButton("Recent");
     channelTab = makeActionButton("Channel");
@@ -668,7 +705,7 @@ KickChatComposer::KickChatComposer(
     focusedEmoteLabel->setTextColor(
         nvgRGB(167, 176, 195));
     focusedEmoteLabel->setMarginBottom(6);
-    sheet->addView(focusedEmoteLabel);
+    emotePanel->addView(focusedEmoteLabel);
 
     grid = new RecyclingGrid();
     grid->setGrow(1.0f);
@@ -697,17 +734,14 @@ KickChatComposer::KickChatComposer(
                 return allTab;
             }
         });
-    sheet->addView(grid);
+    emotePanel->addView(grid);
 
-    auto* footer = new brls::Label();
-    footer->setText(
-        "A Insert   Y Delete   X Keyboard   "
-        "L/R Tabs   ZR/+ Send   B Back");
-    footer->setFontSize(14);
-    footer->setTextColor(
+    footerLabel = new brls::Label();
+    footerLabel->setFontSize(14);
+    footerLabel->setTextColor(
         nvgRGB(154, 165, 187));
-    footer->setMarginTop(6);
-    sheet->addView(footer);
+    footerLabel->setMarginTop(6);
+    sheet->addView(footerLabel);
 
     this->registerAction(
         "Delete",
@@ -718,10 +752,10 @@ KickChatComposer::KickChatComposer(
         });
 
     this->registerAction(
-        "Keyboard",
+        "Emotes",
         brls::BUTTON_X,
         [this](brls::View*) {
-            openKeyboard();
+            setEmotePanelVisible(!emotePanelVisible);
             return true;
         });
 
@@ -767,6 +801,9 @@ KickChatComposer::KickChatComposer(
     updateDraft();
     updateTabs();
     refreshGrid();
+    updateSendRoute();
+    footerLabel->setText(
+        "A Type   Y Delete   X Emotes   ZR/+ Send   B Back");
 
     if (!kick::hasUserEmotesScope()) {
         loading = false;
@@ -815,7 +852,7 @@ KickChatComposer::KickChatComposer(
 
     brls::sync([this]() {
         brls::Application::giveFocus(
-            draftButton);
+            keyboard->getStartKey());
     });
 
     {
@@ -844,38 +881,79 @@ KickChatComposer::~KickChatComposer() {
         "KickChatComposer: deleted");
 }
 
-void KickChatComposer::openKeyboard() {
-    auto* ime =
-        brls::Application::getImeManager();
-    if (!ime) {
-        brls::Application::notify(
-            "The software keyboard is unavailable");
+brls::View* KickChatComposer::getDefaultFocus() {
+    if (!emotePanelVisible && keyboard)
+        return keyboard->getStartKey();
+    return draftButton ? draftButton : this;
+}
+
+void KickChatComposer::setEmotePanelVisible(
+    bool visible) {
+    if (emotePanelVisible == visible) return;
+    emotePanelVisible = visible;
+
+    keyboard->setVisibility(
+        visible
+            ? brls::Visibility::GONE
+            : brls::Visibility::VISIBLE);
+    emotePanel->setVisibility(
+        visible
+            ? brls::Visibility::VISIBLE
+            : brls::Visibility::GONE);
+    footerLabel->setText(
+        visible
+            ? "A Insert   Y Delete   X Keyboard   "
+              "L/R Tabs   ZR/+ Send   B Back"
+            : "A Type   Y Delete   X Emotes   ZR/+ Send   B Back");
+    updateSendRoute();
+
+    if (visible) {
+        grid->invalidate();
+        brls::sync([this]() {
+            if (!emotePanelVisible) return;
+            if (!visibleEmotes().empty()) {
+                brls::Application::giveFocus(grid);
+                return;
+            }
+            brls::View* activeTab = recentTab;
+            if (tab == Tab::Channel && channelSubscribed)
+                activeTab = channelTab;
+            else if (tab == Tab::All)
+                activeTab = allTab;
+            brls::Application::giveFocus(activeTab);
+        });
+    } else {
+        brls::Application::giveFocus(
+            keyboard->getStartKey());
+    }
+    this->invalidate();
+}
+
+void KickChatComposer::appendText(
+    const std::string& value) {
+    if (draft.size() + value.size() > 500) return;
+    draft += value;
+    updateDraft();
+}
+
+void KickChatComposer::updateSendRoute() {
+    if (!sendButton) return;
+    if (!emotePanelVisible) {
+        sendButton->setCustomNavigationRoute(
+            brls::FocusDirection::DOWN,
+            keyboard);
         return;
     }
 
-    ime->openForText(
-        [this](const std::string& text) {
-            draft = text.substr(
-                0,
-                std::min<size_t>(
-                    text.size(),
-                    500));
-            updateDraft();
+    brls::View* activeTab = recentTab;
+    if (tab == Tab::Channel && channelSubscribed)
+        activeTab = channelTab;
+    else if (tab == Tab::All)
+        activeTab = allTab;
 
-            // The system keyboard can leave focus on a control from the
-            // underlying player activity. Explicitly return focus to the
-            // composer so B and every composer shortcut work immediately.
-            brls::sync([this]() {
-                brls::Application::giveFocus(
-                    draftButton);
-            });
-        },
-        "Kick chat",
-        "Type message text, then return "
-        "to choose emotes",
-        500,
-        draft,
-        0);
+    sendButton->setCustomNavigationRoute(
+        brls::FocusDirection::DOWN,
+        activeTab);
 }
 
 void KickChatComposer::insertEmote(
@@ -1161,17 +1239,7 @@ void KickChatComposer::updateTabs() {
             ? active
             : inactive);
 
-    if (sendButton) {
-        brls::View* activeTab = recentTab;
-        if (tab == Tab::Channel && channelSubscribed)
-            activeTab = channelTab;
-        else if (tab == Tab::All)
-            activeTab = allTab;
-
-        sendButton->setCustomNavigationRoute(
-            brls::FocusDirection::DOWN,
-            activeTab);
-    }
+    updateSendRoute();
 }
 
 std::vector<kick::UserEmote>

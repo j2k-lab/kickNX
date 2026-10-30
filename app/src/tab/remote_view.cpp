@@ -9,6 +9,7 @@
 #include "api/kick_helix.hpp"
 #include "view/player_setting.hpp"
 #include "view/kick_chat_composer.hpp"
+#include "view/kick_keyboard.hpp"
 #include "api/kick_chat.hpp"
 #include "api/kick.hpp"
 #include "utils/thread.hpp"
@@ -1000,15 +1001,21 @@ public:
         draftPreview->setWidthPercentage(100.0f);
         draftBox->addView(draftPreview);
 
-        keyboardContainer = new brls::Box();
-        keyboardContainer->setAxis(brls::Axis::COLUMN);
-        keyboardContainer->setWidthPercentage(100.0f);
+        keyboardContainer = new KickKeyboard(
+            {
+                [this](const std::string& value) { append(value); },
+                [this]() {
+                    eraseLastCodepoint();
+                    refreshDraft();
+                },
+                [this]() { setEmotePanelVisible(true); },
+                [this]() { send(); },
+            },
+            KickKeyboard::Options{});
         keyboardContainer->setGrow(1.0f);
         this->addView(keyboardContainer);
 
-        buildRows();
         buildEmotePanel();
-        refreshKeys();
         refreshDraft();
     }
 
@@ -1038,142 +1045,6 @@ public:
     bool isEmotePanelVisible() const { return emotePanelVisible; }
 
 private:
-    enum class KeyAction {
-        Character,
-        Shift,
-        Symbols,
-        Backspace,
-        Space,
-        Emotes,
-        Send,
-    };
-
-    struct KeySlot {
-        brls::Button* button = nullptr;
-        size_t row = 0;
-        size_t column = 0;
-    };
-
-    static const std::vector<std::vector<std::string>>& alphaLayout() {
-        static const std::vector<std::vector<std::string>> layout = {
-            {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
-            {"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
-            {"a", "s", "d", "f", "g", "h", "j", "k", "l", "'"},
-            {"Shift", "z", "x", "c", "v", "b", "n", "m", "Back"},
-            {"#+=", "Emotes", "Space", ".", "Send"},
-        };
-        return layout;
-    }
-
-    static const std::vector<std::vector<std::string>>& symbolLayout() {
-        static const std::vector<std::vector<std::string>> layout = {
-            {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
-            {"!", "@", "#", "$", "%", "^", "&", "*", "(", ")"},
-            {"-", "_", "=", "+", "[", "]", "{", "}", "\\", "/"},
-            {"ABC", ":", ";", "\"", "'", "<", ">", "?", "Back"},
-            {"ABC", "Emotes", "Space", ".", "Send"},
-        };
-        return layout;
-    }
-
-    const std::vector<std::vector<std::string>>& currentLayout() const {
-        return symbols ? symbolLayout() : alphaLayout();
-    }
-
-    void buildRows() {
-        const auto& layout = alphaLayout();
-        for (size_t rowIndex = 0; rowIndex < layout.size(); ++rowIndex) {
-            auto* row = new brls::Box();
-            row->setAxis(brls::Axis::ROW);
-            row->setWidthPercentage(100.0f);
-            row->setHeight(68.0f);
-            row->setMarginBottom(rowIndex + 1 == layout.size() ? 0.0f : 5.0f);
-            keyboardContainer->addView(row);
-
-            for (size_t column = 0; column < layout[rowIndex].size(); ++column) {
-                auto* key = new brls::Button();
-                key->setHeight(68.0f);
-                key->setGrow(
-                    rowIndex == 4 && column == 1 ? 1.4f :
-                    rowIndex == 4 && column == 2 ? 3.8f :
-                    rowIndex == 4 && column == 4 ? 2.0f : 1.0f);
-                key->setMarginRight(
-                    column + 1 == layout[rowIndex].size() ? 0.0f : 5.0f);
-                key->setStyle(
-                    rowIndex == 4 && column == 4
-                        ? &brls::BUTTONSTYLE_PRIMARY
-                        : &brls::BUTTONSTYLE_DEFAULT);
-                key->setFontSize(18.0f);
-                key->registerClickAction(
-                    [this, rowIndex, column](brls::View*) {
-                        pressKey(rowIndex, column);
-                        return true;
-                    });
-                key->addGestureRecognizer(new brls::TapGestureRecognizer(key));
-                row->addView(key);
-                slots.push_back({key, rowIndex, column});
-            }
-        }
-    }
-
-    void refreshKeys() {
-        const auto& layout = currentLayout();
-        for (auto& slot : slots) {
-            std::string label = layout[slot.row][slot.column];
-            if (!symbols && shifted && label.size() == 1 &&
-                label[0] >= 'a' && label[0] <= 'z')
-                label[0] = static_cast<char>(label[0] - 'a' + 'A');
-            slot.button->setText(label);
-        }
-    }
-
-    void pressKey(size_t row, size_t column) {
-        kicknx::haptics::keyboardPulse();
-        const std::string key = currentLayout()[row][column];
-        KeyAction action = KeyAction::Character;
-        if (key == "Shift") action = KeyAction::Shift;
-        else if (key == "#+=" || key == "ABC") action = KeyAction::Symbols;
-        else if (key == "Back") action = KeyAction::Backspace;
-        else if (key == "Space") action = KeyAction::Space;
-        else if (key == "Emotes") action = KeyAction::Emotes;
-        else if (key == "Send") action = KeyAction::Send;
-
-        switch (action) {
-            case KeyAction::Emotes:
-                setEmotePanelVisible(true);
-                return;
-            case KeyAction::Shift:
-                shifted = !shifted;
-                refreshKeys();
-                return;
-            case KeyAction::Symbols:
-                symbols = !symbols;
-                shifted = false;
-                refreshKeys();
-                return;
-            case KeyAction::Backspace:
-                eraseLastCodepoint();
-                refreshDraft();
-                return;
-            case KeyAction::Space:
-                append(" ");
-                return;
-            case KeyAction::Send:
-                send();
-                return;
-            case KeyAction::Character:
-                std::string value = key;
-                if (!symbols && shifted && value.size() == 1 &&
-                    value[0] >= 'a' && value[0] <= 'z') {
-                    value[0] = static_cast<char>(value[0] - 'a' + 'A');
-                    shifted = false;
-                    refreshKeys();
-                }
-                append(value);
-                return;
-        }
-    }
-
     void append(const std::string& value) {
         if (draft.size() + value.size() > MAX_MESSAGE_BYTES) return;
         draft += value;
@@ -1402,8 +1273,7 @@ private:
         }
         if (sendRequested(wireMessage)) {
             draft.clear();
-            shifted = false;
-            refreshKeys();
+            keyboardContainer->resetShift();
             refreshDraft();
         }
     }
@@ -1428,11 +1298,9 @@ private:
     std::string channel;
     SendCallback sendRequested;
     std::string draft;
-    bool shifted = false;
-    bool symbols = false;
     PortraitDraftPreview* draftPreview = nullptr;
     brls::Label* counter = nullptr;
-    brls::Box* keyboardContainer = nullptr;
+    KickKeyboard* keyboardContainer = nullptr;
     brls::Box* emotePanel = nullptr;
     brls::Label* emoteStatus = nullptr;
     RecyclingGrid* emoteGrid = nullptr;
@@ -1445,7 +1313,6 @@ private:
     bool loading = true;
     bool emoteLoadStarted = false;
     bool emotePanelVisible = false;
-    std::vector<KeySlot> slots;
 };
 
 class KickChatPanel : public brls::Box {

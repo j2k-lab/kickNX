@@ -63,7 +63,7 @@ enum class ChatFragmentType {
 struct ChatPreferences {
     ChatMode mode = ChatMode::Overlay;
     ChatParticipation participation = ChatParticipation::ReadOnly;
-    ChatComposerMode composerMode = ChatComposerMode::NintendoKeyboard;
+    ChatComposerMode composerMode = ChatComposerMode::KickNXComposer;
     ChatEmoteMode emoteMode = ChatEmoteMode::Static;
     ChatOverlaySize overlaySize = ChatOverlaySize::FullHeight;
     ChatOverlayPosition overlayPosition = ChatOverlayPosition::TopRight;
