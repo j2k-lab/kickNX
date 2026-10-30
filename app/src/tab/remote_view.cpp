@@ -3434,7 +3434,7 @@ public:
 
         applyChatPreferences(currentChatPreferences);
 
-        if (!portraitLayout)
+        if (!portraitLayout && !playerShuttingDown)
             brls::Application::giveFocus(view);
     }
 

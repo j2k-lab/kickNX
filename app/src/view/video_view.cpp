@@ -624,6 +624,10 @@ void VideoView::buttonProcessing() {
     // otherwise waking the OSD would pull focus out of the overlay on top.
     brls::View* currentFocus = brls::Application::getCurrentFocus();
     if (currentFocus != this && !isChildFocused()) return;
+    // While the player is closing it is still drawn for a frame but is no
+    // longer the top screen; never pull focus back into it.
+    auto stack = brls::Application::getActivitiesStack();
+    if (stack.empty() || stack.back() != getParentActivity()) return;
 
     // 获取按键数据
     auto& state = brls::Application::getControllerState();
@@ -910,8 +914,24 @@ bool VideoView::close(bool quit) {
     MPVCore::instance().stop();
     disableDimming(false);
 
-    if (brls::Application::getActivitiesStack().size() > 1) {
-        return brls::Application::popActivity(brls::TransitionAnimation::NONE);
+    auto stack = brls::Application::getActivitiesStack();
+    if (stack.size() > 1) {
+        // Borealis moves focus to the screen below before the player is
+        // deleted. Anything that hands focus back to the player in between
+        // (stick input, orientation changes) would leave focus on a deleted
+        // view, so move it off the player right before it is freed.
+        brls::Activity* leaving = stack.back();
+        return brls::Application::popActivity(brls::TransitionAnimation::NONE, [leaving]() {
+            brls::View* focus = brls::Application::getCurrentFocus();
+            if (!focus || focus->getParentActivity() != leaving) return;
+            auto remaining = brls::Application::getActivitiesStack();
+            for (auto it = remaining.rbegin(); it != remaining.rend(); ++it) {
+                if (*it != leaving && (*it)->getContentView()) {
+                    brls::Application::giveFocus((*it)->getContentView());
+                    return;
+                }
+            }
+        });
     }
 
     if (quit) {
