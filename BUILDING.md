@@ -99,7 +99,7 @@ KICKNX_FFMPEG_ROOT=/path/to/switch-portlibs ./build-switch.sh
 ## Output
 
 ```text
-build_switch/KickNX.nro
+build_switch/kickNX.nro
 build_switch/KickNX.elf
 ```
 

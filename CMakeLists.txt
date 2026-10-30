@@ -319,11 +319,17 @@ elseif (PLATFORM_SWITCH)
     if (USE_DEKO3D)
         gen_dksh("${PROJECT_RESOURCES}/shaders")
     endif ()
-    add_custom_target(${PROJECT_NAME}.nro DEPENDS ${PROJECT_NAME}
+    # The release file is kickNX.nro. PROJECT_NAME stays KickNX because it
+    # also names the save folder (sdmc:/switch/KickNX) and the user agent.
+    # The old file is removed first: on a case-insensitive drive, writing
+    # over KickNX.nro would keep its old capitalisation.
+    set(PROJECT_NRO_NAME kickNX)
+    add_custom_target(${PROJECT_NRO_NAME}.nro DEPENDS ${PROJECT_NAME}
         COMMAND ${NX_NACPTOOL_EXE} --create "${PROJECT_DISPLAY_NAME}" "${PROJECT_AUTHOR}" "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_ALTER}" ${PROJECT_NAME}.nacp
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_RESOURCES} ${CMAKE_BINARY_DIR}/resources
         COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/resources/font/keymap*.ttf ${CMAKE_BINARY_DIR}/resources/font/*_fallback.ttf ${CMAKE_BINARY_DIR}/resources/font/switch_font.ttf
-        COMMAND ${NX_ELF2NRO_EXE} ${PROJECT_NAME}.elf ${PROJECT_NAME}.nro --icon=${PROJECT_ICON} --nacp=${PROJECT_NAME}.nacp --romfsdir=${CMAKE_BINARY_DIR}/resources
+        COMMAND ${CMAKE_COMMAND} -E remove ${PROJECT_NAME}.nro ${PROJECT_NRO_NAME}.nro
+        COMMAND ${NX_ELF2NRO_EXE} ${PROJECT_NAME}.elf ${PROJECT_NRO_NAME}.nro --icon=${PROJECT_ICON} --nacp=${PROJECT_NAME}.nacp --romfsdir=${CMAKE_BINARY_DIR}/resources
     )
 elseif (PLATFORM_PSV)
     set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -d ATTRIBUTE2=12") # max heap size mode

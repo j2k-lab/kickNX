@@ -65,5 +65,5 @@ if (-not [string]::IsNullOrWhiteSpace($FfmpegRoot)) {
 & cmake @cmakeArgs
 if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed with exit code $LASTEXITCODE." }
 
-& ninja -C build_switch "-j$Jobs" KickNX.nro
+& ninja -C build_switch "-j$Jobs" kickNX.nro
 if ($LASTEXITCODE -ne 0) { throw "Nintendo Switch build failed with exit code $LASTEXITCODE." }

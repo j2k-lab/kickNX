@@ -23,4 +23,4 @@ if [[ -n "${KICKNX_FFMPEG_ROOT:-}" ]]; then
 fi
 
 cmake "${cmake_args[@]}"
-ninja -C build_switch -j"$JOBS" KickNX.nro
+ninja -C build_switch -j"$JOBS" kickNX.nro

@@ -113,7 +113,7 @@ chat, and Joy-Con portrait mode.
 2. Extract the release so the SD card contains:
 
    ```text
-   /switch/KickNX/KickNX.nro
+   /switch/KickNX/kickNX.nro
    ```
 
 3. Launch kickNX from the Nintendo Switch Homebrew Menu.
@@ -163,7 +163,7 @@ Quick build after dependencies are prepared:
 The generated executable is:
 
 ```text
-build_switch/KickNX.nro
+build_switch/kickNX.nro
 ```
 
 The historical build-target filename retains `KickNX`; the visible application
