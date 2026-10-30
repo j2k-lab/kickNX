@@ -172,8 +172,8 @@ Major milestones:
 - `0.3.0` - TV QR code login, live AWS IVS master playback, 60 FPS presentation, and fast VOD streaming
 - `0.3.1` - Fast VOD/clip launch, active chatter counter, and WebVTT subtitle track selection
 - `0.3.2` - Kick signature playback bar with live uptime, channel category navigation, and bottom sheet emote composer
-- `0.5.0` - Colour themes with a Home pop-up picker, Kick-only cleanup, offline stream handling and playback fixes
 - `0.4.0` - Channel follow/unfollow on streamer profiles, clickable user avatar, and Kick bright green UI theme, plus chat, playback and settings fixes
+- `0.5.0` - Colour themes with a Home pop-up picker, Kick-only cleanup, offline stream handling and playback fixes
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
