@@ -3563,13 +3563,17 @@ void RemoteView::play(
 
 void RemoteView::playLive(
     const kick::Config& config,
-    int64_t uptimeSeconds) {
+    int64_t uptimeSeconds,
+    const std::string& streamTitle) {
     MPVCore::LIVE_STREAM_RECOVERY = true;
     MPVCore::instance().stop();
     resetPlayerVideoLayout();
 
     const std::string channel = config.channel;
-    const std::string fullTitle = "Kick - " + channel;
+    // Like VODs and clips, the OSD shows what is being watched.
+    const std::string fullTitle = streamTitle.empty()
+        ? "Kick - " + channel
+        : channel + " · " + streamTitle;
     const std::string loadingNote = "";
 
     RemotePlayer* player = new RemotePlayer(
@@ -3586,9 +3590,9 @@ void RemoteView::playLive(
 
     kick::resolveLiveAsync(
         config,
-        [player, sessionId, channel](kick::Resolution result) {
+        [player, sessionId, fullTitle](kick::Resolution result) {
             if (activePlaybackSession.load() != sessionId) return;
-            player->setTitle("Kick - " + channel);
+            player->setTitle(fullTitle);
             player->setKickSubtitles(result.subtitles);
             MPVCore::BOTTOM_BAR = false;
             player->setUrl(result.selected.url, kick::mpvExtra());

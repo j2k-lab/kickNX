@@ -202,5 +202,5 @@ void KickNXDetails::watchLive() {
         return;
     }
 
-    RemoteView::playLive(config, this->stream.uptimeSeconds);
+    RemoteView::playLive(config, this->stream.uptimeSeconds, this->stream.title);
 }

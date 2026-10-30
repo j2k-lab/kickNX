@@ -1215,7 +1215,7 @@ void KickChannelPage::playLive() {
     if (config.preferredQuality.empty())
         config.preferredQuality = "auto";
 
-    RemoteView::playLive(config, data.liveStream.uptimeSeconds);
+    RemoteView::playLive(config, data.liveStream.uptimeSeconds, data.liveStream.title);
 }
 
 

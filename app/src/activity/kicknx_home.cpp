@@ -2798,7 +2798,7 @@ void KickNXHome::playChannel(const kick::Stream& stream) {
         return;
     }
 
-    RemoteView::playLive(config, stream.uptimeSeconds);
+    RemoteView::playLive(config, stream.uptimeSeconds, stream.title);
 }
 
 void KickNXHome::playConfiguredChannel() {

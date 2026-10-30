@@ -28,7 +28,8 @@ public:
 
     static void playLive(
         const kick::Config& config,
-        int64_t uptimeSeconds = 0);
+        int64_t uptimeSeconds = 0,
+        const std::string& streamTitle = "");
 
     static void playVod(
         const std::string& videoId,
