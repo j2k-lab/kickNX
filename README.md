@@ -153,9 +153,9 @@ chat, decoder, orientation and interface preferences remain under
 ## Decoder modes
 
 - **Software:** compatibility mode using CPU video decoding.
-- **Hardware - Experimental:** NVTEGRA decoding with the validated kickNX frame,
+- **Hardware:** NVTEGRA decoding with the validated kickNX frame,
   reference and transfer guards.
-- **Hybrid - Experimental:** starts in hardware and can use software recovery
+- **Hybrid:** starts in hardware and can use software recovery
   during a disruptive playback transition.
 
 The embedded-player resolver prevents the generic Kick
@@ -169,7 +169,6 @@ reducing the discontinuities that previously stressed hardware decoding.
 - Kick may change its undocumented playback-token behavior without notice.
 - Automatic portrait detection requires at least one compatible attached
   Joy-Con; manual orientation remains available from player settings.
-- Hardware and Hybrid decoding remain experimental across untested stream formats.
 
 ## Building from source
 
