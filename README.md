@@ -147,7 +147,6 @@ reducing the discontinuities that previously stressed hardware decoding.
 - Kick may change its undocumented playback-token behavior without notice.
 - Automatic portrait detection requires at least one compatible attached
   Joy-Con; manual orientation remains available from player settings.
-- Hardware and Hybrid decoding remain experimental across untested stream formats.
 
 ## Building from source
 
