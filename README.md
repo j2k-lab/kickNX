@@ -36,6 +36,28 @@ Kick TV QR code pairing, Kick-styled playback controls with live stream uptime,
 channel category navigation, bottom-sheet emote composer, real-time Pusher
 chat, and Joy-Con portrait mode.
 
+## Screenshots
+
+| | |
+|:---:|:---:|
+| <img src="images/screenshots/home.jpg" alt="Home" width="100%"> | <img src="images/screenshots/live-chat.jpg" alt="Live stream with chat overlay" width="100%"> |
+| Home | Live stream with chat |
+| <img src="images/screenshots/theme-picker.jpg" alt="Theme picker" width="100%"> | <img src="images/screenshots/live-event.jpg" alt="Live event page" width="100%"> |
+| Theme picker | Live event page |
+| <img src="images/screenshots/channel.jpg" alt="Channel page" width="100%"> | <img src="images/screenshots/sign-in.jpg" alt="QR code sign-in" width="100%"> |
+| Channel page | QR code sign-in |
+| <img src="images/screenshots/chat-keyboard.jpg" alt="In-app chat keyboard" width="100%"> | <img src="images/screenshots/chat-emotes.jpg" alt="Emote picker" width="100%"> |
+| In-app chat keyboard | Emote picker |
+| <img src="images/screenshots/about.jpg" alt="About page" width="100%"> | |
+| About and update check | |
+
+<p align="center">
+  <img src="images/screenshots/portrait-keyboard.jpg" alt="Portrait mode keyboard" width="32%">
+  &nbsp;
+  <img src="images/screenshots/portrait-emotes.jpg" alt="Portrait mode emotes" width="32%">
+</p>
+<p align="center"><em>Portrait mode with chat, keyboard and emotes</em></p>
+
 ## Features
 
 ### Browse Kick
