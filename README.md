@@ -207,7 +207,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 - **j2k** - kickNX creator and developer
 - **Gemini** - AI co-development partner
 - **Claude** - AI co-development partner
-- **twiNX contributors** - upstream client foundation
+- **twiNX developer HiroshiYamauchi** - upstream client foundation
 - **Switchfin contributors** - original Nintendo Switch UI/player/platform base
 - **Borealis contributors** - controller-first UI framework
 - **Twire contributors** - reference behavior for embedded-player resolution
