@@ -3,6 +3,7 @@
 #include "api/http.hpp"
 #include "api/kick_auth.hpp"
 #include "api/kick_playlist.hpp"
+#include "utils/misc.hpp"
 #include "utils/thread.hpp"
 
 #include <borealis.hpp>
@@ -756,7 +757,10 @@ void dispatchKickChatEvent(
             message.userName = "viewer";
         }
 
-        const std::string rawContent = jsonFieldToString(eventData, "content");
+        // Text in scripts the Switch fonts lack becomes a short note; emote
+        // tokens are ASCII, so they come through unchanged.
+        const std::string rawContent =
+            misc::replaceUnsupportedText(jsonFieldToString(eventData, "content"));
         parseKickContentFragments(rawContent, message.text, message.fragments);
 
         if (!message.text.empty() && messageCallback) {
