@@ -28,10 +28,8 @@
     }
   },
   "hints": {
-    "hint1": "请从桌面选择任意游戏并按住  键",
-    "hint2": "点击  打开, 在应用开启期间保持按住  键，直到进入 hbmenu",
-    "hint3": "在 hbmenu 菜单中选择 Switchfin",
-    "hint4": "可选：安装 Switchfin NSP 通过桌面图标直接打开 Switchfin",
+    "hint1": "你以小程序模式打开了 kickNX。请不要从相册启动。",
+    "hint2": "使用 Sphaira 安装 kickNX 转发器，然后从 HOME 菜单打开。",
     "hint_nsp": "点击  安装桌面图标",
     "hint_confirm": "安装桌面图标可能导致ban机\n请再次确认",
     "hint_right": "掌机图片来源于网络，版权归任天堂 Nintendo Co., Ltd 所有"

@@ -28,10 +28,8 @@
     }
   },
   "hints": {
-    "hint1": "홈 화면에서 게임 선택하세요",
-    "hint2": " 키를 누르고 를 클릭하여 hbmenu로 들어갑니다",
-    "hint3": "hbmenu에서, Switchfin을 선택하세요",
-    "hint4": "선택 사항: Switchfin NSP를 설치하여 홈 화면 아이콘으로 Switchfin을 바로 여세요",
+    "hint1": "kickNX를 애플릿 모드로 실행했습니다. 앨범에서 실행하지 마세요.",
+    "hint2": "Sphaira로 kickNX 포워더를 설치한 뒤 HOME 메뉴에서 실행하세요.",
     "hint_nsp": "NSP 포워더를 설치하기 위해 를 선택하세요",
     "hint_confirm": "홈 화면 아이콘 설치는 기기가 밴 될 수 있습니다. 다시 확인하세요",
     "hint_right": "사진은 인터넷에서 가져온 것이며 저작권은 Nintendo Co., Ltd에 있습니다"

@@ -28,10 +28,8 @@
     }
   },
   "hints": {
-    "hint1": "Chọn một game từ màn hình chính",
-    "hint2": "Giữ \uE0E5 và \uE0E0 để vào hbmenu",
-    "hint3": "Trong hbmenu, chọn Switchfin",
-    "hint4": "Tuỳ chọn: Cài đặt Switchfin ra màn hình chính bằng NSP forwarder",
+    "hint1": "Bạn đã mở kickNX ở chế độ applet. Đừng mở nó từ Album.",
+    "hint2": "Cài forwarder kickNX bằng Sphaira rồi mở nó từ menu HOME.",
     "hint_nsp": "Bấm \uE0E0 để cài đặt ra màn hình chính",
     "hint_confirm": "Cài đặt NSP forwarder có thể bị ban\nVui lòng xác nhận",
     "hint_right": "Những hình ảnh này được lấy từ Internet, và bản quyền thuộc về Nintendo Co., Ltd."

@@ -28,10 +28,8 @@
     }
   },
   "hints": {
-    "hint1": "Selecione qualquer jogo na área de trabalho e mantenha pressionada a tecla .",
-    "hint2": "Mantenha pressionadp a tecla  e pressione em  para abrir o hbmenu",
-    "hint3": "No hbmenu, selecione Switchfin",
-    "hint4": "Opcional: Use o encaminhador NSP fornecido pelo Switchfin",
+    "hint1": "Você abriu o kickNX no modo applet. Não o abra pelo Álbum.",
+    "hint2": "Instale um encaminhador do kickNX com o Sphaira e abra-o pelo menu HOME.",
     "hint_nsp": "Clique em  para instalar o encaminhador NSP",
     "hint_confirm": "A instalação do encaminhador NSP pode resultar no banimento do sistema. Confirme novamente.",
     "hint_right": "As imagens da consola portátil foram obtidas na internet e os direitos de autor pertencem à Nintendo Co., Ltd."

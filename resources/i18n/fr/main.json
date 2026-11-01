@@ -28,10 +28,8 @@
     }
   },
   "hints": {
-    "hint1": "Veuillez sélectionner n'importe quel jeu sur le bureau et maintenir la touche  enfoncée",
-    "hint2": "Cliquez sur  pour ouvrir, maintenez la touche  enfoncée pendant que l'application est ouverte, jusqu'à ce que vous accédiez au hbmenu.",
-    "hint3": "Sélectionnez Switchfin dans le menu hbmenu",
-    "hint4": "Optionnel : Installez le fichier NSP de Switchfin pour ouvrir directement Switchfin via l'icône du bureau.",
+    "hint1": "Vous avez ouvert kickNX en mode applet. Ne le lancez pas depuis l'Album.",
+    "hint2": "Installez un forwarder kickNX avec Sphaira et ouvrez-le depuis le menu HOME.",
     "hint_nsp": "Cliquez sur  pour installer l'icône du bureau",
     "hint_confirm": "L'installation de l'icône du bureau peut entraîner un bannissement de la console. Veuillez confirmer à nouveau",
     "hint_right": "Les images de la console portable proviennent d'Internet, et les droits d'auteur appartiennent à Nintendo Co., Ltd"

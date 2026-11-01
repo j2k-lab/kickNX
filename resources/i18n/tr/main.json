@@ -28,10 +28,8 @@
     }
   },
   "hints": {
-    "hint1": "Ana ekrandan bir oyun seçin",
-    "hint2": " tuşuna basılı tutun ve  tuşuna basarak hbmenu'ye girin",
-    "hint3": "hbmenu arayüzünden Switchfin'i seçin",
-    "hint4": "İsteğe bağlı: Gömülü gelen Switchfin NSP yönlendiricisini kullanın",
+    "hint1": "kickNX'i applet modunda açtınız. Albüm'den başlatmayın.",
+    "hint2": "Sphaira ile bir kickNX yönlendiricisi kurun ve HOME menüsünden açın.",
     "hint_nsp": "NSP yönlendiricisini yüklemek için  tuşuna basın",
     "hint_confirm": "NSP yönlendiricisini kurmak konsolunuzun çevrim içi özelliklerden yasaklanmasına neden olabilir\n\nLütfen tekrar onaylayın",
     "hint_right": "Görseller internetten alınmıştır ve tüm telif hakları Nintendo Co., Ltd şirketine aittir"

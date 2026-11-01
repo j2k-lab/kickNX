@@ -37,7 +37,7 @@ const std::string galleryItemInstallNSPXML = R"xml(
                 positionType="absolute"
                 positionBottom="4%"
                 id="gallery/label"
-                text="@i18n/main/hints/hint4"
+                text="@i18n/main/hints/hint2"
                 fontSize="24"/>
     </brls:Box>
 )xml";
@@ -79,17 +79,13 @@ void HintActivity::onContentAvailable() {
 
 #ifdef BUILTIN_NSP
     gallery->setData({
-        {"img/hint_game_1.png", "main/hints/hint1"_i18n},
-        {"img/hint_game_2.png", "main/hints/hint2"_i18n},
-        {"img/hint_hbmenu.png", "main/hints/hint3"_i18n},
+        {"img/hint_hbmenu.png", "main/hints/hint1"_i18n},
     });
     gallery->addCustomView(new GalleryItemInstallNSP());
 #else
     gallery->setData({
-        {"img/hint_game_1.png", "main/hints/hint1"_i18n},
-        {"img/hint_game_2.png", "main/hints/hint2"_i18n},
-        {"img/hint_hbmenu.png", "main/hints/hint3"_i18n},
-        {"img/hint_app.png", "main/hints/hint4"_i18n},
+        {"img/hint_hbmenu.png", "main/hints/hint1"_i18n},
+        {"img/hint_app.png", "main/hints/hint2"_i18n},
     });
 #endif
 }

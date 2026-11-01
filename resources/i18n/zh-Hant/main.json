@@ -28,10 +28,8 @@
     }
   },
   "hints": {
-    "hint1": "請從桌面選擇任意遊戲並按住  鍵",
-    "hint2": "按下  開啟, 在遊戲開啟期間按住  鍵，直到進入 hbmenu",
-    "hint3": "在 hbmenu 選單中選擇 Switchfin",
-    "hint4": "選用：安裝 Switchfin NSP 通過桌面圖示 Switchfin",
+    "hint1": "你以小程式模式開啟了 kickNX。請不要從相簿啟動。",
+    "hint2": "使用 Sphaira 安裝 kickNX 轉發器，然後從 HOME 選單開啟。",
     "hint_nsp": "按下  安裝桌面圖示",
     "hint_confirm": "安裝桌面圖示可能導致主機被ban\n請再次確認",
     "hint_right": "掌機圖片來自於網路，版權歸任天堂 Nintendo Co., Ltd 所有"

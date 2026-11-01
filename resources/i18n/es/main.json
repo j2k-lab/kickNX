@@ -28,10 +28,8 @@
     }
   },
   "hints": {
-    "hint1": "Selecciona un juego de la pantalla de inicio",
-    "hint2": "Mantén pulsada la tecla  y pulsa en  para acceder a hbmenu",
-    "hint3": "En hbmenu, selecciona Switchfin",
-    "hint4": "Opcional: Usar NSP forwarder de Switchfin incluido",
+    "hint1": "Abriste kickNX en modo applet. No lo inicies desde el Álbum.",
+    "hint2": "Instala un forwarder de kickNX con Sphaira y ábrelo desde el menú HOME.",
     "hint_nsp": "Pulsa  para instalar el NSP forwarder",
     "hint_confirm": "Instalar el NSP forwarder puede resultar en un baneo\nPor favor confirma de nuevo",
     "hint_right": "Las capturas proceden de Internet, y el copyright pertenece a Nintendo Co., Ltd"
