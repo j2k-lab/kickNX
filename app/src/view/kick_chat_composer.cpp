@@ -1,6 +1,7 @@
 #include "view/kick_chat_composer.hpp"
 
 #include "utils/image.hpp"
+#include "view/kick_draft_preview.hpp"
 #include "view/kick_keyboard.hpp"
 #include "view/recycling_grid.hpp"
 #include <borealis/core/cache_helper.hpp>
@@ -10,280 +11,6 @@
 #include <functional>
 #include <unordered_map>
 #include <utility>
-
-class ComposerPreviewTexturePool {
-public:
-    static ComposerPreviewTexturePool& instance() {
-        // Application-lifetime loader views avoid asynchronous image
-        // completions targeting destroyed composer rows/previews.
-        static auto* pool =
-            new ComposerPreviewTexturePool();
-        return *pool;
-    }
-
-    brls::Image* get(const std::string& url) {
-        if (url.empty()) return nullptr;
-
-        const auto found = entries.find(url);
-        if (found != entries.end())
-            return found->second;
-
-        if (entries.size() >= MAX_ENTRIES)
-            return nullptr;
-
-        auto* image = new brls::Image();
-        image->setFreeTexture(false);
-        entries.emplace(url, image);
-        Image::with(image, url);
-        return image;
-    }
-
-private:
-    static constexpr size_t MAX_ENTRIES = 512;
-    std::unordered_map<
-        std::string,
-        brls::Image*> entries;
-};
-
-class KickDraftPreview : public brls::View {
-public:
-    void configure(
-        const std::string& value,
-        const std::vector<kick::UserEmote>& emotes) {
-        draft = value;
-        segments.clear();
-
-        std::unordered_map<
-            std::string,
-            const kick::UserEmote*> byName;
-        byName.reserve(emotes.size());
-        for (const auto& emote : emotes) {
-            if (!emote.name.empty())
-                byName.emplace(emote.name, &emote);
-        }
-
-        size_t position = 0;
-        while (position < draft.size()) {
-            if (std::isspace(
-                    static_cast<unsigned char>(
-                        draft[position]))) {
-                size_t end = position + 1;
-                while (end < draft.size() &&
-                    std::isspace(
-                        static_cast<unsigned char>(
-                            draft[end])))
-                    ++end;
-
-                Segment segment;
-                segment.text =
-                    draft.substr(
-                        position,
-                        end - position);
-                segments.push_back(
-                    std::move(segment));
-                position = end;
-                continue;
-            }
-
-            size_t end = position;
-            while (end < draft.size() &&
-                !std::isspace(
-                    static_cast<unsigned char>(
-                        draft[end])))
-                ++end;
-
-            const std::string token =
-                draft.substr(
-                    position,
-                    end - position);
-
-            Segment segment;
-            segment.text = token;
-
-            const auto found = byName.find(token);
-            if (found != byName.end()) {
-                segment.emote = true;
-                segment.url = found->second->imageUrl;
-                segment.image =
-                    ComposerPreviewTexturePool::
-                        instance().get(
-                            found->second->imageUrl);
-            }
-
-            segments.push_back(
-                std::move(segment));
-            position = end;
-        }
-
-        this->invalidate();
-    }
-
-    void draw(
-        NVGcontext* vg,
-        float x,
-        float y,
-        float width,
-        float height,
-        brls::Style style,
-        brls::FrameContext* ctx) override {
-        nvgSave(vg);
-        nvgIntersectScissor(
-            vg,
-            x,
-            y,
-            width,
-            height);
-
-        constexpr float FONT_SIZE = 19.0f;
-        constexpr float LINE_HEIGHT = 29.0f;
-        constexpr float EMOTE_SIZE = 27.0f;
-        constexpr int MAX_LINES = 2;
-
-        nvgFontFaceId(
-            vg,
-            brls::Application::getDefaultFont());
-        nvgFontSize(vg, FONT_SIZE);
-        nvgTextAlign(
-            vg,
-            NVG_ALIGN_LEFT |
-                NVG_ALIGN_BASELINE);
-
-        if (draft.empty()) {
-            nvgFillColor(
-                vg,
-                nvgRGB(166, 174, 191));
-            nvgText(
-                vg,
-                x,
-                y + FONT_SIZE,
-                "Press X or A to type a message",
-                nullptr);
-            nvgRestore(vg);
-            return;
-        }
-
-        float cursorX = x;
-        float cursorY = y + FONT_SIZE;
-        int line = 0;
-        const float right = x + width;
-
-        auto nextLine = [&]() {
-            cursorX = x;
-            cursorY += LINE_HEIGHT;
-            ++line;
-        };
-
-        auto textWidth = [&](const std::string& text) {
-            float bounds[4]{};
-            return nvgTextBounds(
-                vg,
-                0,
-                0,
-                text.c_str(),
-                nullptr,
-                bounds);
-        };
-
-        bool needsTextureRefresh = false;
-
-        for (const auto& segment : segments) {
-            if (line >= MAX_LINES) break;
-
-            if (segment.emote) {
-                if (cursorX > x &&
-                    cursorX + EMOTE_SIZE > right)
-                    nextLine();
-                if (line >= MAX_LINES) break;
-
-                int tex = segment.image ? segment.image->getTexture() : 0;
-                if (tex <= 0 && !segment.url.empty()) {
-                    tex = brls::TextureCache::instance().getCache(segment.url);
-                }
-
-                if (tex > 0) {
-                    const float imageY =
-                        cursorY -
-                        FONT_SIZE -
-                        5.0f;
-                    NVGpaint paint =
-                        nvgImagePattern(
-                            vg,
-                            cursorX,
-                            imageY,
-                            EMOTE_SIZE,
-                            EMOTE_SIZE,
-                            0,
-                            tex,
-                            1.0f);
-                    nvgBeginPath(vg);
-                    nvgRect(
-                        vg,
-                        cursorX,
-                        imageY,
-                        EMOTE_SIZE,
-                        EMOTE_SIZE);
-                    nvgFillPaint(vg, paint);
-                    nvgFill(vg);
-                    cursorX +=
-                        EMOTE_SIZE + 4.0f;
-                } else {
-                    needsTextureRefresh = true;
-                    const float size =
-                        textWidth(segment.text);
-                    if (cursorX > x &&
-                        cursorX + size > right)
-                        nextLine();
-                    nvgFillColor(
-                        vg,
-                        nvgRGB(245, 246, 250));
-                    nvgText(
-                        vg,
-                        cursorX,
-                        cursorY,
-                        segment.text.c_str(),
-                        nullptr);
-                    cursorX += size;
-                }
-                continue;
-            }
-
-            const float size =
-                textWidth(segment.text);
-            if (cursorX > x &&
-                cursorX + size > right)
-                nextLine();
-            if (line >= MAX_LINES) break;
-
-            nvgFillColor(
-                vg,
-                nvgRGB(245, 246, 250));
-            nvgText(
-                vg,
-                cursorX,
-                cursorY,
-                segment.text.c_str(),
-                nullptr);
-            cursorX += size;
-        }
-
-        nvgRestore(vg);
-
-        if (needsTextureRefresh) {
-            this->invalidate();
-        }
-    }
-
-private:
-    struct Segment {
-        std::string text;
-        std::string url;
-        bool emote = false;
-        brls::Image* image = nullptr;
-    };
-
-    std::string draft;
-    std::vector<Segment> segments;
-};
 
 namespace {
 
@@ -310,22 +37,6 @@ brls::Box* makeActionButton(
 
     if (output) *output = label;
     return button;
-}
-
-std::string trimmed(std::string value) {
-    while (!value.empty() &&
-        std::isspace(
-            static_cast<unsigned char>(
-                value.front())))
-        value.erase(value.begin());
-
-    while (!value.empty() &&
-        std::isspace(
-            static_cast<unsigned char>(
-                value.back())))
-        value.pop_back();
-
-    return value;
 }
 
 class EmoteCell : public RecyclingGridItem {
@@ -613,7 +324,12 @@ KickChatComposer::KickChatComposer(
     draftHeader->addView(counterLabel);
 
     draftPreview =
-        new KickDraftPreview();
+        new KickDraftPreview({
+            19.0f,
+            "Press X or A to type a message",
+            nvgRGB(166, 174, 191),
+            nvgRGB(245, 246, 250),
+        });
     draftPreview->setWidthPercentage(100);
     draftPreview->setHeight(54);
     draftButton->addView(draftPreview);
@@ -1006,42 +722,7 @@ void KickChatComposer::insertEmote(
 
 void KickChatComposer::backspaceDraft() {
     if (draft.empty()) return;
-
-    // Check if draft ends with an emote
-    std::string temp = draft;
-    while (!temp.empty() && std::isspace(static_cast<unsigned char>(temp.back())))
-        temp.pop_back();
-
-    if (!temp.empty()) {
-        size_t lastSpace = temp.find_last_of(" \t\n\r");
-        size_t tokenStart = (lastSpace == std::string::npos) ? 0 : lastSpace + 1;
-        std::string lastToken = temp.substr(tokenStart);
-
-        bool isEmote = false;
-        auto checkEmote = [&](const kick::UserEmote& e) {
-            return !e.name.empty() && e.name == lastToken;
-        };
-        if (std::any_of(emotes.begin(), emotes.end(), checkEmote) ||
-            std::any_of(recentEmotes.begin(), recentEmotes.end(), checkEmote)) {
-            isEmote = true;
-        }
-
-        if (isEmote) {
-            size_t eraseStart = (tokenStart > 0 && std::isspace(static_cast<unsigned char>(draft[tokenStart - 1])))
-                                    ? tokenStart - 1
-                                    : tokenStart;
-            draft.erase(eraseStart);
-            updateDraft();
-            return;
-        }
-    }
-
-    // Normal single-codepoint erase
-    size_t position = draft.size() - 1;
-    while (position > 0 &&
-        (static_cast<unsigned char>(draft[position]) & 0xC0) == 0x80)
-        --position;
-    draft.erase(position);
+    kicknx::draft::eraseLast(draft, emotes, recentEmotes);
     updateDraft();
 }
 
@@ -1049,7 +730,7 @@ void KickChatComposer::sendMessage() {
     if (sending) return;
 
     const std::string rawMessage =
-        trimmed(draft);
+        kicknx::draft::trimmed(draft);
     if (rawMessage.empty()) {
         brls::Application::notify(
             "Enter a chat message first");
@@ -1057,37 +738,8 @@ void KickChatComposer::sendMessage() {
     }
 
     // Encode standalone emote tokens into Kick's [emote:id:name] wire format.
-    std::unordered_map<std::string, const kick::UserEmote*> byName;
-    for (const auto& emote : emotes) {
-        if (!emote.name.empty() && !emote.id.empty())
-            byName.emplace(emote.name, &emote);
-    }
-    for (const auto& emote : recentEmotes) {
-        if (!emote.name.empty() && !emote.id.empty())
-            byName.emplace(emote.name, &emote);
-    }
-
-    std::string message;
-    size_t pos = 0;
-    while (pos < rawMessage.size()) {
-        const bool ws = std::isspace(static_cast<unsigned char>(rawMessage[pos]));
-        size_t end = pos + 1;
-        while (end < rawMessage.size() &&
-               static_cast<bool>(std::isspace(static_cast<unsigned char>(rawMessage[end]))) == ws)
-            ++end;
-        const std::string token = rawMessage.substr(pos, end - pos);
-        if (!ws) {
-            const auto found = byName.find(token);
-            if (found != byName.end()) {
-                message += "[emote:" + found->second->id + ":" + found->second->name + "]";
-            } else {
-                message += token;
-            }
-        } else {
-            message += token;
-        }
-        pos = end;
-    }
+    const std::string message =
+        kicknx::draft::encodeEmotes(rawMessage, emotes, recentEmotes);
 
     sending = true;
     if (sendLabel)
@@ -1147,18 +799,10 @@ void KickChatComposer::cycleTab(
 
 
 void KickChatComposer::updateDraft() {
-    std::vector<kick::UserEmote> allKnown = emotes;
-    for (const auto& r : recentEmotes) {
-        if (!r.name.empty() &&
-            std::none_of(allKnown.begin(), allKnown.end(), [&](const kick::UserEmote& e) {
-                return e.name == r.name;
-            })) {
-            allKnown.push_back(r);
-        }
-    }
     draftPreview->configure(
         draft,
-        allKnown);
+        emotes,
+        recentEmotes);
     counterLabel->setText(
         std::to_string(draft.size()) +
         " / 500");

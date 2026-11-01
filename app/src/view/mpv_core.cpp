@@ -265,7 +265,6 @@ void MPVCore::init() {
     check_error(mpv_observe_property(mpv, 2, "pause", MPV_FORMAT_FLAG));
     check_error(mpv_observe_property(mpv, 3, "duration", MPV_FORMAT_INT64));
     check_error(mpv_observe_property(mpv, 4, "playback-time", MPV_FORMAT_DOUBLE));
-    check_error(mpv_observe_property(mpv, 5, "cache-speed", MPV_FORMAT_INT64));
     check_error(mpv_observe_property(mpv, 9, "speed", MPV_FORMAT_DOUBLE));
     check_error(mpv_observe_property(mpv, 10, "volume", MPV_FORMAT_INT64));
 
@@ -358,8 +357,11 @@ void MPVCore::init() {
 #ifdef BOREALIS_USE_D3D11
     misc::initCrashDump();
 #endif
-    brls::Logger::info("version: {} ffmpeg {}", mpv_get_property_string(mpv, "mpv-version"),
-        mpv_get_property_string(mpv, "ffmpeg-version"));
+    char *mpvVersion = mpv_get_property_string(mpv, "mpv-version");
+    char *ffmpegVersion = mpv_get_property_string(mpv, "ffmpeg-version");
+    brls::Logger::info("version: {} ffmpeg {}", mpvVersion ? mpvVersion : "?", ffmpegVersion ? ffmpegVersion : "?");
+    mpv_free(mpvVersion);
+    mpv_free(ffmpegVersion);
 
     this->command("set", "audio-client-name", AppVersion::getPackageName().c_str());
     // set event callback
@@ -419,39 +421,6 @@ void MPVCore::clean() {
 #ifdef ANDROID
     deleteSurfaceObj();
 #endif
-}
-
-void MPVCore::restart() {
-    this->clean();
-    this->init();
-
-    setFrameSize(rect);
-}
-
-MPVMap MPVCore::supportCodecs() {
-    MPVMap codecs;
-    mpv_node node;
-    mpv_get_property(mpv, "decoder-list", MPV_FORMAT_NODE, &node);
-    if (node.format == MPV_FORMAT_NODE_ARRAY) {
-        mpv_node_list *codec_list = node.u.list;
-        for (int i = 0; i < codec_list->num; i++) {
-            if (codec_list->values[i].format == MPV_FORMAT_NODE_MAP) {
-                mpv_node_list *codec_map = codec_list->values[i].u.list;
-                std::string name, desc;
-                for (int n = 0; n < codec_map->num; n++) {
-                    char *key = codec_map->keys[n];
-                    if (strcmp(key, "codec") == 0) {
-                        name = codec_map->values[n].u.string;
-                    } else if (strcmp(key, "description") == 0) {
-                        desc = codec_map->values[n].u.string;
-                    }
-                }
-                codecs.insert(std::make_pair(name, desc));
-            }
-        }
-    }
-    mpv_free_node_contents(&node);
-    return codecs;
 }
 
 void MPVCore::setFrameSize(brls::Rect area) {
@@ -564,16 +533,6 @@ void MPVCore::draw(brls::Rect area, float alpha) {
         mpv_render_context_report_swap(this->mpv_context);
     }
 #endif
-}
-
-std::string MPVCore::getCacheSpeed() const {
-    if (cache_speed >> 20 > 0) {
-        return fmt::format("{:.2f} MB/s", (cache_speed >> 10) / 1024.0f);
-    } else if (cache_speed >> 10 > 0) {
-        return fmt::format("{:.2f} KB/s", cache_speed / 1024.0f);
-    } else {
-        return fmt::format("{} B/s", cache_speed);
-    }
 }
 
 void MPVCore::eventMainLoop() {
@@ -704,32 +663,18 @@ void MPVCore::eventMainLoop() {
             }
             break;
         }
-        case MPV_EVENT_COMMAND_REPLY: {
-            mpv_event_command *cmd = (mpv_event_command *)event->data;
+        case MPV_EVENT_COMMAND_REPLY:
             if (event->error) {
                 brls::Logger::error("MPVCore => COMMAND ERROR: {}", mpv_error_string(event->error));
-                break;
-            }
-            if (event->reply_userdata > 0 && cmd->result.format == MPV_FORMAT_NODE_MAP) {
-                mpv_node_list *node_list = cmd->result.u.list;
-                for (int i = 0; i < node_list->num; i++) {
-                    std::string key = node_list->keys[i];
-                    auto &value = node_list->values[i];
-                    if (key == "playlist_entry_id" && value.format == MPV_FORMAT_INT64) {
-                        this->mpvCommandReply.fire(event->reply_userdata, value.u.int64);
-                    }
-                }
             }
             break;
-        }
         case MPV_EVENT_PROPERTY_CHANGE: {
             /// https://mpv.io/manual/stable/#property-list
             mpv_event_property *prop = (mpv_event_property *)event->data;
             if (prop->format == MPV_FORMAT_NONE) break;
 
 #if defined(KICKNX_PLAYBACK_DEBUG)
-            if (event->reply_userdata != 4 &&
-                event->reply_userdata != 5) {
+            if (event->reply_userdata != 4) {
                 kicknx::debug::log(
                     "MPV_PROP",
                     "userdata=%llu name=%s format=%d",
@@ -778,10 +723,6 @@ void MPVCore::eventMainLoop() {
 #endif
                     mpvCoreEvent.fire(MpvEventEnum::UPDATE_PROGRESS);
                 }
-                break;
-            case 5:  // cache-speed
-                this->cache_speed = *(int64_t *)prop->data;
-                mpvCoreEvent.fire(MpvEventEnum::CACHE_SPEED_CHANGE);
                 break;
             case 9:  // speed
                 this->video_speed = *(double *)prop->data;
@@ -922,44 +863,13 @@ void MPVCore::logPlaybackPerformance(const char* reason) {
 }
 #endif
 
-void MPVCore::prepareHardwareDecoderRecovery() {
-    if (!mpv) return;
-
-    brls::Logger::warning(
-        "kickNX: flushing Kick buffers and rebuilding hardware decoder");
-
-    // Stop frame delivery while the old HLS presentation and its hardware
-    // frames are being discarded.
-    mpv_set_property_string(mpv, "pause", "yes");
-    mpv_command_string(mpv, "drop-buffers");
-
-    // Direct rendering is independent from hardware decoding. Disabling it
-    // avoids decoder-owned staging buffers across Kick presentation changes
-    // while keeping hardware decode enabled.
-    mpv_set_property_string(mpv, "vd-lavc-dr", "no");
-
-    // Writing hwdec at runtime asks mpv to reinitialize the decoder. Toggle it
-    // while paused, then restore the configured hardware method before any new
-    // media is loaded. No software-decoded playback is allowed.
-    mpv_set_property_string(mpv, "hwdec", "no");
-    mpv_set_property_string(
-        mpv,
-        "hwdec",
-        MPVCore::PLAYER_HWDEC_METHOD.c_str());
-
-#if defined(KICKNX_PLAYBACK_PERF_DEBUG)
-    this->logHardwareDecoderState("decoder-reset-requested");
-#endif
-}
-
 void MPVCore::reset() {
     brls::Logger::debug("MPVCore::reset");
     mpvCoreEvent.fire(MpvEventEnum::RESET);
     this->stop();
     this->video_stopped = true;
     this->video_paused = false;
-    this->duration = 0;     // second
-    this->cache_speed = 0;  // Bps
+    this->duration = 0;  // second
     this->playback_time = 0;
     this->video_progress = 0;
 
@@ -1007,8 +917,6 @@ void MPVCore::seek(int64_t value, const std::string &flags) {
 bool MPVCore::isStopped() const { return video_stopped; }
 
 bool MPVCore::isPaused() { return video_paused; }
-
-double MPVCore::getSpeed() const { return video_speed; }
 
 void MPVCore::setSpeed(double value) {
     std::string speed = std::to_string(value);
@@ -1081,60 +989,4 @@ std::unordered_map<std::string, mpv_node> MPVCore::getNodeMap(const std::string 
         mpv_free_node_contents(&node);
     }
     return nodeMap;
-}
-
-bool MPVCore::getNodeMapStringValue(
-    const std::string& property,
-    const std::string& wantedKey,
-    std::string& result) {
-    mpv_node node{};
-    if (mpv_get_property(
-            mpv,
-            property.c_str(),
-            MPV_FORMAT_NODE,
-            &node) < 0)
-        return false;
-
-    bool found = false;
-    if (node.format == MPV_FORMAT_NODE_MAP && node.u.list) {
-        const mpv_node_list* list = node.u.list;
-        for (int index = 0; index < list->num; ++index) {
-            const char* key = list->keys[index];
-            const mpv_node& value = list->values[index];
-            if (key && wantedKey == key &&
-                value.format == MPV_FORMAT_STRING && value.u.string) {
-                result = value.u.string;
-                found = true;
-                break;
-            }
-        }
-    }
-
-    mpv_free_node_contents(&node);
-    return found;
-}
-
-std::unordered_map<std::string, std::string> MPVCore::getNodeStringMap(
-    const std::string& property) {
-    mpv_node node{};
-    std::unordered_map<std::string, std::string> result;
-    if (mpv_get_property(
-            mpv,
-            property.c_str(),
-            MPV_FORMAT_NODE,
-            &node) < 0)
-        return result;
-
-    if (node.format == MPV_FORMAT_NODE_MAP && node.u.list) {
-        const mpv_node_list* list = node.u.list;
-        for (int index = 0; index < list->num; ++index) {
-            const char* key = list->keys[index];
-            const mpv_node& value = list->values[index];
-            if (key && value.format == MPV_FORMAT_STRING && value.u.string)
-                result.emplace(key, value.u.string);
-        }
-    }
-
-    mpv_free_node_contents(&node);
-    return result;
 }

@@ -193,10 +193,6 @@ HTTP::~HTTP() {
     if (this->easy != nullptr) curl_easy_cleanup(this->easy);
 }
 
-void HTTP::set_user_agent(const std::string& agent) { curl_easy_setopt(this->easy, CURLOPT_USERAGENT, agent.c_str()); }
-
-void HTTP::add_header(const std::string& header) { this->chunk = curl_slist_append(this->chunk, header.c_str()); }
-
 void HTTP::set_option(const Header& hs) {
     curl_slist* chunk = nullptr;
     for (auto& h : hs) {
@@ -207,11 +203,6 @@ void HTTP::set_option(const Header& hs) {
     if (chunk != nullptr) curl_easy_setopt(this->easy, CURLOPT_HTTPHEADER, chunk);
 }
 
-void HTTP::set_option(const Range& r) {
-    const std::string range_str = std::to_string(r.start) + "-" + std::to_string(r.end);
-    curl_easy_setopt(this->easy, CURLOPT_RANGE, range_str.c_str());
-}
-
 void HTTP::set_option(const Timeout& t) {
     curl_easy_setopt(this->easy, CURLOPT_TIMEOUT_MS, t.timeout);
     curl_easy_setopt(this->easy, CURLOPT_CONNECTTIMEOUT_MS, t.timeout);
@@ -219,9 +210,6 @@ void HTTP::set_option(const Timeout& t) {
 
 int HTTP::easy_progress_cb(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
     HTTP* ctx = reinterpret_cast<HTTP*>(clientp);
-    if (ctx->report_progress)
-        ctx->event.fire(dltotal, dlnow);
-
     // Returning CURL_PROGRESSFUNC_CONTINUE invokes libcurl's built-in
     // terminal meter. Returning zero continues silently.
     return ctx->is_cancel && ctx->is_cancel->load() ? 1 : 0;
@@ -229,41 +217,9 @@ int HTTP::easy_progress_cb(void* clientp, curl_off_t dltotal, curl_off_t dlnow, 
 
 void HTTP::set_option(const Cancel& c) {
     this->is_cancel = c;
-    this->event.clear();
-    this->report_progress = false;
     curl_easy_setopt(this->easy, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(this->easy, CURLOPT_XFERINFOFUNCTION, easy_progress_cb);
     curl_easy_setopt(this->easy, CURLOPT_XFERINFODATA, this);
-}
-
-void HTTP::set_option(Progress::Callback p) {
-    this->event.clear();
-    this->event.subscribe(std::move(p));
-    this->report_progress = true;
-    curl_easy_setopt(this->easy, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(this->easy, CURLOPT_XFERINFOFUNCTION, easy_progress_cb);
-    curl_easy_setopt(this->easy, CURLOPT_XFERINFODATA, this);
-}
-
-void HTTP::set_option(const Cookies& cookies) {
-    std::stringstream ss;
-    char* escaped;
-    for (auto& c : cookies) {
-        ss << c.name << "=";
-        escaped = curl_easy_escape(this->easy, c.value.c_str(), c.value.size());
-        if (escaped) {
-            ss << escaped;
-            curl_free(escaped);
-        }
-        ss << "; ";
-    }
-    curl_easy_setopt(this->easy, CURLOPT_COOKIE, ss.str().c_str());
-}
-
-void HTTP::set_basic_auth(const std::string& user, const std::string& passwd) {
-    curl_easy_setopt(this->easy, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-    curl_easy_setopt(this->easy, CURLOPT_USERNAME, user.c_str());
-    curl_easy_setopt(this->easy, CURLOPT_PASSWORD, passwd.c_str());
 }
 
 size_t HTTP::easy_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
@@ -286,14 +242,12 @@ int HTTP::perform(std::ostream* body) {
     allTransfers().release();
     if (pooled) imageTransfers().release();
 
-    // ThreadPool workers reuse HTTP handles. Do not leak cancellation,
-    // subscribers, or progress-meter state into the next image request.
+    // ThreadPool workers reuse HTTP handles. Do not leak cancellation or
+    // progress-meter state into the next image request.
     curl_easy_setopt(this->easy, CURLOPT_NOPROGRESS, 1L);
     curl_easy_setopt(this->easy, CURLOPT_XFERINFOFUNCTION, nullptr);
     curl_easy_setopt(this->easy, CURLOPT_XFERINFODATA, nullptr);
-    this->event.clear();
     this->is_cancel.reset();
-    this->report_progress = false;
 
     if (res != CURLE_OK) throw curl_error(res);
 
@@ -320,14 +274,6 @@ void HTTP::_get(const std::string& url, std::ostream* out) {
     curl_easy_setopt(this->easy, CURLOPT_HTTPGET, 1L);
     int code = this->perform(out);
     if (code >= 400) throw curl_error(fmt::format("http status {}", code));
-}
-
-bool HTTP::getinfo(char** arg) { return curl_easy_getinfo(this->easy, CURLINFO_CONTENT_TYPE, arg) == CURLE_OK; }
-
-int HTTP::propfind(const std::string& url, std::ostream* out) {
-    curl_easy_setopt(this->easy, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(this->easy, CURLOPT_CUSTOMREQUEST, "PROPFIND");
-    return this->perform(out);
 }
 
 std::string HTTP::_post(const std::string& url, const std::string& data) {

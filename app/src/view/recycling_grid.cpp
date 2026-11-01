@@ -403,32 +403,12 @@ RecyclingGridItem* RecyclingGrid::getGridItemByIndex(size_t index) {
     return nullptr;
 }
 
-std::vector<RecyclingGridItem*>& RecyclingGrid::getGridItems() {
-    return (std::vector<RecyclingGridItem*>&)contentBox->getChildren();
-}
-
 void RecyclingGrid::clearData() {
     if (dataSource) {
         dataSource->clearData();
         this->reloadData();
     }
 }
-
-void RecyclingGrid::setEmpty(std::string title, std::string icon) {
-    this->hintImage->setImageFromSVGRes(icon.empty() ? "icon/ico-list.svg" : icon);
-    this->hintLabel->setText(title);
-    this->clearData();
-}
-
-void RecyclingGrid::setError(std::string error) {
-    this->hintImage->setImageFromRes("img/net_error.png");
-    this->hintLabel->setText(error);
-    this->clearData();
-}
-
-void RecyclingGrid::setDefaultCellFocus(size_t index) { this->defaultCellFocus = index; }
-
-size_t RecyclingGrid::getDefaultCellFocus() const { return this->defaultCellFocus; }
 
 size_t RecyclingGrid::getItemCount() { return this->dataSource->getItemCount(); }
 
@@ -616,8 +596,6 @@ void RecyclingGrid::setIndexNavigationEnabled(bool enabled) {
     indexNavigationEnabled = enabled;
     logicalFocusIndex = defaultCellFocus;
 }
-
-void RecyclingGrid::forceRequestNextPage() { this->requestNextPage = false; }
 
 brls::View* RecyclingGrid::getNextCellFocus(
     brls::FocusDirection direction,

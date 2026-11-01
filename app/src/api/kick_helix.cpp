@@ -9,8 +9,11 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -138,12 +141,51 @@ void throwIfCancelled(const HTTP::Cancel& cancel) {
     if (cancel && cancel->load()) throw std::runtime_error("Request cancelled");
 }
 
+// While a SharedConnection is alive on a thread, kickGet sends that thread's
+// requests on one handle, so a batch such as Home reuses an open TLS
+// connection to kick.com instead of making a new handshake for every section.
+// The handles are looked up by thread id rather than kept in a thread_local:
+// libnx does not set up the register GCC reads thread_local variables from,
+// so on Switch a thread_local access crashes the app.
+std::mutex sharedConnectionsMutex;
+std::unordered_map<std::thread::id, HTTP*> sharedConnections;
+
+class SharedConnection {
+public:
+    SharedConnection() {
+        std::lock_guard<std::mutex> lock(sharedConnectionsMutex);
+        sharedConnections[std::this_thread::get_id()] = &http;
+    }
+    ~SharedConnection() {
+        std::lock_guard<std::mutex> lock(sharedConnectionsMutex);
+        sharedConnections.erase(std::this_thread::get_id());
+    }
+    SharedConnection(const SharedConnection&) = delete;
+    SharedConnection& operator=(const SharedConnection&) = delete;
+
+    static HTTP* forThisThread() {
+        std::lock_guard<std::mutex> lock(sharedConnectionsMutex);
+        const auto found = sharedConnections.find(std::this_thread::get_id());
+        return found == sharedConnections.end() ? nullptr : found->second;
+    }
+
+private:
+    HTTP http;
+};
+
 std::string kickGet(
     const Config& config,
     OAuthSession& session,
     const std::string& url,
     const HTTP::Cancel& cancel) {
     throwIfCancelled(cancel);
+    if (HTTP* sharedConnection = SharedConnection::forThisThread()) {
+        std::ostringstream body;
+        HTTP::set_option(*sharedConnection, kickHeaders(config, session), HTTP::Timeout{15000});
+        if (cancel) HTTP::set_option(*sharedConnection, cancel);
+        sharedConnection->_get(url, &body);
+        return body.str();
+    }
     if (cancel) {
         return HTTP::get(url, kickHeaders(config, session), HTTP::Timeout{15000}, cancel);
     }
@@ -2048,6 +2090,8 @@ void loadHomeAsync(
         [config, success = std::move(success), failure = std::move(failure),
             cancel = std::move(cancel)](HTTP&) mutable {
             try {
+                const auto startedAt = std::chrono::steady_clock::now();
+                SharedConnection connection;
                 HomeData result;
                 result.account = ensureOAuth(config);
                 throwIfCancelled(cancel);
@@ -2109,6 +2153,10 @@ void loadHomeAsync(
                     throw std::runtime_error(
                         "Kick did not return any home sections. Check the connection and retry.");
                 }
+                brls::Logger::info(
+                    "kickNX: Home loaded in {} ms",
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - startedAt).count());
                 brls::sync(std::bind(success, std::move(result)));
             } catch (const std::exception& exception) {
                 brls::sync(std::bind(failure, std::string(exception.what())));

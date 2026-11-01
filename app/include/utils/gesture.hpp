@@ -46,9 +46,6 @@ public:
     // Get current state of recognizer
     OsdGestureStatus getCurrentStatus();
 
-    // Get tap gesture event
-    [[nodiscard]] OsdGestureEvent getTapGestureEvent() const { return tapEvent; }
-
 private:
     OsdGestureEvent tapEvent;
     brls::Point position{};

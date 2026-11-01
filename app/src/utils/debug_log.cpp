@@ -1,4 +1,5 @@
 #include "utils/debug_log.hpp"
+#include "utils/event.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -192,24 +193,22 @@ uint64_t hashText(const std::string& value) {
 
 const char* playerEventName(int event) {
     switch (event) {
-    case 0: return "MPV_LOADED";
-    case 1: return "MPV_PAUSE";
-    case 2: return "MPV_RESUME";
-    case 3: return "MPV_STOP";
-    case 4: return "LOADING_START";
-    case 5: return "LOADING_END";
-    case 6: return "UPDATE_DURATION";
-    case 7: return "UPDATE_PROGRESS";
-    case 8: return "START_FILE";
-    case 9: return "END_OF_FILE";
-    case 10: return "CACHE_SPEED_CHANGE";
-    case 11: return "VIDEO_SPEED_CHANGE";
-    case 12: return "VIDEO_VOLUME_CHANGE";
-    case 13: return "VIDEO_MUTE";
-    case 14: return "VIDEO_UNMUTE";
-    case 15: return "MPV_FILE_ERROR";
-    case 16: return "VIDEO_RECONFIG";
-    case 17: return "RESET";
+    case MPV_LOADED: return "MPV_LOADED";
+    case MPV_PAUSE: return "MPV_PAUSE";
+    case MPV_RESUME: return "MPV_RESUME";
+    case MPV_STOP: return "MPV_STOP";
+    case LOADING_START: return "LOADING_START";
+    case LOADING_END: return "LOADING_END";
+    case UPDATE_DURATION: return "UPDATE_DURATION";
+    case UPDATE_PROGRESS: return "UPDATE_PROGRESS";
+    case START_FILE: return "START_FILE";
+    case END_OF_FILE: return "END_OF_FILE";
+    case VIDEO_SPEED_CHANGE: return "VIDEO_SPEED_CHANGE";
+    case VIDEO_MUTE: return "VIDEO_MUTE";
+    case VIDEO_UNMUTE: return "VIDEO_UNMUTE";
+    case MPV_FILE_ERROR: return "MPV_FILE_ERROR";
+    case VIDEO_RECONFIG: return "VIDEO_RECONFIG";
+    case RESET: return "RESET";
     default: return "UNKNOWN";
     }
 }

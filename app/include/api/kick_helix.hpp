@@ -170,14 +170,6 @@ struct HomeData {
                !popularClipsError.empty() ||
                !categoriesError.empty();
     }
-
-    bool hasAnySection() const {
-        return followed.loaded ||
-               offlineFollowed.loaded ||
-               popular.loaded ||
-               popularClips.loaded ||
-               categories.loaded;
-    }
 };
 
 using HomeCallback = std::function<void(HomeData)>;

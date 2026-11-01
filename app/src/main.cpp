@@ -7,7 +7,6 @@
 #include "utils/theme.hpp"
 
 #include "view/svg_image.hpp"
-#include "view/custom_button.hpp"
 #include "view/recycling_grid.hpp"
 #include "view/h_recycling.hpp"
 #include "view/video_progress_slider.hpp"
@@ -15,13 +14,10 @@
 #include "view/video_view.hpp"
 #include "view/selector_cell.hpp"
 #include "view/button_close.hpp"
-#include "view/text_box.hpp"
-#include "view/icon_button.hpp"
 #include "view/kick_loading_view.hpp"
 #include "view/mpv_core.hpp"
 
 #include "activity/hint_activity.hpp"
-#include "tab/remote_view.hpp"
 #include "activity/kicknx_home.hpp"
 
 #if defined(__SDL2__)
@@ -122,10 +118,7 @@ int main(int argc, char* argv[]) {
 
     // Register custom views (including tabs, which are views)
     brls::Application::registerXMLView("SVGImage", SVGImage::create);
-    brls::Application::registerXMLView("IconButton", IconButton::create);
-    brls::Application::registerXMLView("CustomButton", CustomButton::create);
     brls::Application::registerXMLView("SelectorCell", SelectorCell::create);
-    brls::Application::registerXMLView("TextBox", TextBox::create);
     brls::Application::registerXMLView("ButtonClose", ButtonClose::create);
     brls::Application::registerXMLView("RecyclingGrid", RecyclingGrid::create);
     brls::Application::registerXMLView("HRecyclerFrame", HRecyclerFrame::create);

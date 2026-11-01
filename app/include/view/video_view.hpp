@@ -18,14 +18,6 @@ enum class OSDState {
     ALWAYS_ON = 2,
 };
 
-enum class ClickState {
-    IDLE = 0,
-    PRESS = 1,
-    FAST_RELEASE = 3,
-    FAST_PRESS = 4,
-    CLICK_DOUBLE = 5,
-};
-
 class VideoView : public brls::Box {
 public:
     VideoView();
@@ -48,12 +40,6 @@ public:
     void showLoading();
     void hideLoading(bool dimming = true);
 
-    void setList(const std::vector<std::string>& values, int index = -1);
-
-    void setClipPoint(const std::vector<float>& clips);
-
-    void playNext(int offset);
-
     brls::Event<int>* getPlayEvent() { return &this->playIndexEvent; }
 
     brls::VoidEvent* getSettingEvent() { return &this->settingEvent; }
@@ -64,9 +50,7 @@ public:
 
     VideoProfile* getProfile() { return this->profile; }
 
-    void hideVideoProgressSlider();
     void hideVideoQuality();
-    void registerVideoQuality(brls::ActionListener action);
     void registerActions(const std::string& hintText, const brls::ControllerButton button,
         const brls::BrlsKeyCombination key, const brls::ActionListener& actionListener, bool hidden = false,
         bool allowRepeating = false);
@@ -93,8 +77,6 @@ public:
 private:
     /// OSD
     BRLS_BIND(brls::Label, titleLabel, "video/osd/title");
-    BRLS_BIND(brls::Box, btnForward, "video/osd/forward");
-    BRLS_BIND(brls::Box, btnBackward, "video/osd/backward");
     BRLS_BIND(brls::Box, btnSetting, "video/osd/setting");
     BRLS_BIND(brls::Box, btnChannel, "video/osd/channel");
     BRLS_BIND(brls::Image, channelImage, "video/osd/channel/image");
@@ -102,7 +84,6 @@ private:
     BRLS_BIND(brls::Box, btnToggle, "video/osd/toggle");
     BRLS_BIND(brls::Box, btnVideoQuality, "video/quality/box");
     BRLS_BIND(brls::Box, btnVideoSpeed, "video/speed/box");
-    BRLS_BIND(brls::Box, btnEpisode, "show/episode/box");
     BRLS_BIND(brls::Box, btnVolume, "video/osd/volume");
     BRLS_BIND(brls::Box, btnClose, "video/close/box");
     BRLS_BIND(brls::Box, iconBox, "video/osd/icon/box");
@@ -127,11 +108,8 @@ private:
     BRLS_BIND(brls::Label, centerStatusLabel, "video/center/status");
     BRLS_BIND(brls::Label, rightStatusLabel, "video/right/status");
     BRLS_BIND(brls::Label, videoSpeedLabel, "video/speed/label");
-    BRLS_BIND(brls::Label, showEpisodeLabel, "show/episode/label");
     BRLS_BIND(brls::Label, speedHintLabel, "video/speed/hint/label");
     BRLS_BIND(brls::Box, speedHintBox, "video/speed/hint/box");
-    BRLS_BIND(brls::Label, hintLabel, "video/osd/hint/label");
-    BRLS_BIND(brls::Box, hintBox, "video/osd/hint/box");
 
     void registerMpvEvent();
     void unRegisterMpvEvent();
@@ -142,7 +120,6 @@ private:
     void hideOSD();
     bool toggleSpeed();
     bool toggleVolume(brls::View* view);
-    void showHint(const std::string& value);
     void setTvMode(bool state);
 
     /// @brief 延迟 200ms 触发进度跳转到 seeking_range
@@ -170,7 +147,6 @@ private:
     // OSD
     bool isOsdShown = false;
     brls::Time osdLastShowTime = 0;
-    brls::Time hintLastShowTime = 0;
     brls::Time profileLastShowTime = 0;
     const brls::Time OSD_SHOW_TIME = 5000000;  //默认5秒
     OSDState osdState = OSDState::HIDDEN;
@@ -190,8 +166,6 @@ private:
     brls::Time scrubLastTick = 0;
 
     MPVEvent::Subscription eventSubscribeID;
-    brls::Rect oldRect = brls::Rect(-1, -1, -1, -1);
-    brls::InputManager* input = nullptr;
 
     NVGcolor bottomBarColor = brls::Application::getTheme().getColor("color/app");
 

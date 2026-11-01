@@ -45,12 +45,6 @@ void pollTVLinkAuthAsync(
     std::function<void(bool pending, const std::string& message)> statusCallback,
     HTTP::Cancel cancel = nullptr);
 
-void loginWithTokenAsync(
-    const Config& config,
-    const std::string& bearerToken,
-    AuthCallback success,
-    ErrorCallback failure);
-
 void logoutAsync(
     const Config& config,
     std::function<void()> complete = {});

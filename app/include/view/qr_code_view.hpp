@@ -22,12 +22,6 @@ public:
         invalidate();
     }
 
-    void setQrSize(float size) {
-        qrSize = size;
-        setDimensions(size, size);
-        invalidate();
-    }
-
     void draw(NVGcontext* vg, float x, float y, float width, float height, brls::Style style, brls::FrameContext* ctx) override {
         // Draw white rounded background card with subtle border
         nvgBeginPath(vg);

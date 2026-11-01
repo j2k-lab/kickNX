@@ -50,7 +50,6 @@ private:
     void updateHero(const kick::Stream& stream);
     void clearHero();
     void showHomeData(kick::HomeData data);
-    void clearRows();
 
     uint64_t beginBrowsingRequest(const std::string& message);
     bool finishBrowsingRequest(uint64_t requestId);

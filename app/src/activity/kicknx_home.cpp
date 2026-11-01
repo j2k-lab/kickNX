@@ -2919,20 +2919,3 @@ void KickNXHome::playChannel(const kick::Stream& stream) {
     RemoteView::playLive(config, stream.uptimeSeconds, stream.title);
 }
 
-void KickNXHome::clearRows() {
-    clearHero();
-    followedRow->clear();
-    offlineFollowedRow->clear();
-    popularRow->clear();
-    popularClipsRow->clear();
-    eventsRow->clear();
-    categoryStreamsRow->clear();
-    categoriesRow->clear();
-    searchRow->clear();
-    followedCursor.clear();
-    popularCursor.clear();
-    popularClipsCursor.clear();
-    categoriesCursor.clear();
-    searchCursor.clear();
-    categoryStreamsCursor.clear();
-}

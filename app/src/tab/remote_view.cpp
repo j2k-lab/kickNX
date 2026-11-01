@@ -9,6 +9,7 @@
 #include "api/kick_helix.hpp"
 #include "view/player_setting.hpp"
 #include "view/kick_chat_composer.hpp"
+#include "view/kick_draft_preview.hpp"
 #include "view/kick_keyboard.hpp"
 #include "api/kick_chat.hpp"
 #include "api/kick.hpp"
@@ -187,11 +188,9 @@ public:
                             "animated emote exceeds KickNX safety limits");
                     }
 
-                    auto pixels =
-                        std::make_shared<std::vector<uint8_t>>(
-                            decoded,
-                            decoded + decodedBytes);
-                    stbi_image_free(decoded);
+                    // Frames go straight from the decoder's buffer to the
+                    // GPU on the UI thread; no copy of up to 16 MB.
+                    std::shared_ptr<stbi_uc> pixels(decoded, stbi_image_free);
 
                     std::vector<int> delays;
                     delays.reserve(static_cast<size_t>(frameCount));
@@ -227,7 +226,7 @@ public:
                                  index < frameCount;
                                  ++index) {
                                 const uint8_t* frame =
-                                    pixels->data() +
+                                    pixels.get() +
                                     pixelsPerFrame *
                                         static_cast<size_t>(index);
                                 const int texture =
@@ -316,6 +315,184 @@ private:
     bool capacityWarningShown = false;
 };
 
+int chatMaxLines(float fontSize, float contentHeightLimit) {
+    const float lineHeight = fontSize * 1.28f;
+    return std::max(
+        1,
+        static_cast<int>(
+            std::floor(
+                std::max(0.0f, contentHeightLimit - 7.0f) /
+                std::max(1.0f, lineHeight))));
+}
+
+/// A chat message split into words that are measured once. Drawing used to
+/// split and measure every visible message on every frame, and each new
+/// message measured all the rows twice; now the words are measured when the
+/// message is first laid out and the row height is kept per panel size.
+class KickChatLine {
+public:
+    enum class PieceKind { Word, LineBreak, Emote };
+    enum class PieceRole { Timestamp, User, Message };
+
+    struct Piece {
+        PieceKind kind = PieceKind::Word;
+        PieceRole role = PieceRole::Message;
+        // The word, or for an emote the text drawn until its image loads.
+        std::string text;
+        float width = 0.0f;
+    };
+
+    explicit KickChatLine(kick::ChatMessage value)
+        : message(std::move(value)),
+          userColor(chatColor(message.color)) {}
+
+    const std::vector<Piece>& layout(float fontSize, bool timestamps) {
+        if (measured && fontSize == layoutFontSize && timestamps == layoutTimestamps)
+            return pieces;
+
+        measured = true;
+        layoutFontSize = fontSize;
+        layoutTimestamps = timestamps;
+        pieces.clear();
+
+        NVGcontext* vg = brls::Application::getNVGContext();
+        if (vg) {
+            nvgSave(vg);
+            nvgFontFaceId(vg, brls::Application::getDefaultFont());
+            nvgFontSize(vg, fontSize);
+            nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+        }
+
+        auto textWidth = [&](const std::string& value) {
+            if (!vg || value.empty()) return 0.0f;
+            float bounds[4]{};
+            return nvgTextBounds(vg, 0, 0, value.c_str(), nullptr, bounds);
+        };
+
+        auto addWord = [&](std::string text, PieceRole role) {
+            if (text.empty()) return;
+            const float width = textWidth(text);
+            pieces.push_back({PieceKind::Word, role, std::move(text), width});
+        };
+
+        if (timestamps && !message.timestamp.empty())
+            addWord("[" + message.timestamp + "] ", PieceRole::Timestamp);
+
+        addWord(message.userName + ": ", PieceRole::User);
+
+        for (const auto& fragment : message.fragments) {
+            if (fragment.type == kick::ChatFragmentType::Emote) {
+                std::string fallback = fragment.text + " ";
+                const float width = textWidth(fallback);
+                pieces.push_back({PieceKind::Emote, PieceRole::Message, std::move(fallback), width});
+                continue;
+            }
+
+            // Words end at a space (kept with the word) or a newline.
+            const std::string& value = fragment.text;
+            std::string token;
+            for (size_t index = 0; index < value.size(); ++index) {
+                token.push_back(value[index]);
+                const bool boundary =
+                    value[index] == ' ' ||
+                    value[index] == '\n' ||
+                    index + 1 == value.size();
+                if (!boundary) continue;
+
+                if (token.back() == '\n') {
+                    token.pop_back();
+                    addWord(std::move(token), PieceRole::Message);
+                    pieces.push_back({PieceKind::LineBreak, PieceRole::Message, {}, 0.0f});
+                } else {
+                    addWord(std::move(token), PieceRole::Message);
+                }
+                token.clear();
+            }
+        }
+
+        if (vg) nvgRestore(vg);
+        return pieces;
+    }
+
+    /// Row height for the given panel size, using the same wrapping as draw
+    /// with emotes counted as images.
+    float height(
+        const kick::ChatPreferences& preferences,
+        float availableWidth,
+        float availableHeight) {
+        const float fontSize = preferences.fontSize;
+        const float contentWidth = std::max(100.0f, availableWidth);
+        const float contentHeightLimit =
+            std::max(fontSize * 1.28f + 7.0f, availableHeight);
+
+        const auto& words = layout(fontSize, preferences.timestamps);
+        if (hasHeight &&
+            heightFontSize == fontSize &&
+            heightTimestamps == preferences.timestamps &&
+            heightWidth == contentWidth &&
+            heightLimit == contentHeightLimit)
+            return cachedHeight;
+
+        const float lineHeight = fontSize * 1.28f;
+        const float emoteSize = std::max(18.0f, fontSize * 1.35f);
+        const int maxLines = chatMaxLines(fontSize, contentHeightLimit);
+
+        float cursor = 0.0f;
+        int lines = 1;
+        auto nextLine = [&]() {
+            cursor = 0.0f;
+            ++lines;
+        };
+
+        for (const auto& piece : words) {
+            // Past the last line the row height cannot grow any more.
+            if (lines >= maxLines) break;
+
+            switch (piece.kind) {
+            case PieceKind::LineBreak:
+                nextLine();
+                break;
+            case PieceKind::Emote:
+                if (cursor > 0.0f && cursor + emoteSize > contentWidth)
+                    nextLine();
+                cursor += emoteSize + 3.0f;
+                break;
+            case PieceKind::Word:
+                if (cursor > 0.0f && cursor + piece.width > contentWidth)
+                    nextLine();
+                cursor += piece.width;
+                break;
+            }
+        }
+
+        hasHeight = true;
+        heightFontSize = fontSize;
+        heightTimestamps = preferences.timestamps;
+        heightWidth = contentWidth;
+        heightLimit = contentHeightLimit;
+        cachedHeight = std::clamp(lines, 1, maxLines) * lineHeight + 7.0f;
+        return cachedHeight;
+    }
+
+    const kick::ChatMessage message;
+    const NVGcolor userColor;
+
+private:
+    std::vector<Piece> pieces;
+    bool measured = false;
+    float layoutFontSize = 0.0f;
+    bool layoutTimestamps = false;
+
+    bool hasHeight = false;
+    float heightFontSize = 0.0f;
+    bool heightTimestamps = false;
+    float heightWidth = 0.0f;
+    float heightLimit = 0.0f;
+    float cachedHeight = 0.0f;
+};
+
+using KickChatLinePtr = std::shared_ptr<KickChatLine>;
+
 class KickChatMessageView : public brls::View {
 private:
     struct EmoteVisual {
@@ -329,13 +506,13 @@ public:
     void setThemed(bool value) { themed = value; }
 
     void configure(
-        const kick::ChatMessage& value,
+        const KickChatLinePtr& value,
         const kick::ChatPreferences& preferences,
         float availableWidth,
         float availableHeight) {
         clearEmotes();
 
-        message = value;
+        line = value;
         fontSize = preferences.fontSize;
         showTimestamp = preferences.timestamps;
         contentWidth = std::max(100.0f, availableWidth);
@@ -343,7 +520,7 @@ public:
             fontSize * 1.28f + 7.0f,
             availableHeight);
 
-        for (const auto& fragment : message.fragments) {
+        for (const auto& fragment : line->message.fragments) {
             if (fragment.type != kick::ChatFragmentType::Emote)
                 continue;
 
@@ -365,8 +542,7 @@ public:
 
         this->setWidth(contentWidth);
         this->setHeight(
-            estimateHeightFor(
-                message,
+            line->height(
                 preferences,
                 contentWidth,
                 contentHeightLimit));
@@ -376,141 +552,9 @@ public:
 
     void clear() {
         clearEmotes();
-        message = {};
+        line.reset();
         this->setHeight(0);
         this->setVisibility(brls::Visibility::GONE);
-    }
-
-    static float estimateHeightFor(
-        const kick::ChatMessage& message,
-        const kick::ChatPreferences& preferences,
-        float availableWidth,
-        float availableHeight) {
-        const float fontSize = preferences.fontSize;
-        const float contentWidth =
-            std::max(100.0f, availableWidth);
-        const float contentHeightLimit =
-            std::max(
-                fontSize * 1.28f + 7.0f,
-                availableHeight);
-        const float lineHeight = fontSize * 1.28f;
-        const float emoteSize =
-            std::max(18.0f, fontSize * 1.35f);
-        const int maxLines =
-            maxLineCountFor(fontSize, contentHeightLimit);
-
-        NVGcontext* vg = brls::Application::getNVGContext();
-        if (!vg)
-            return lineHeight + 7.0f;
-
-        nvgSave(vg);
-        nvgFontFaceId(
-            vg,
-            brls::Application::getDefaultFont());
-        nvgFontSize(vg, fontSize);
-        nvgTextAlign(
-            vg,
-            NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-
-        auto textWidth = [&](const std::string& value) {
-            if (value.empty()) return 0.0f;
-            float bounds[4]{};
-            return nvgTextBounds(
-                vg,
-                0,
-                0,
-                value.c_str(),
-                nullptr,
-                bounds);
-        };
-
-        float cursor = 0.0f;
-        int lineCount = 1;
-
-        auto nextLine = [&]() {
-            cursor = 0.0f;
-            lineCount =
-                std::min(lineCount + 1, maxLines);
-        };
-
-        auto consumeWord = [&](const std::string& value) {
-            if (value.empty() || lineCount >= maxLines + 1)
-                return;
-
-            const float wordWidth = textWidth(value);
-
-            if (cursor > 0.0f &&
-                cursor + wordWidth > contentWidth)
-                nextLine();
-
-            cursor += wordWidth;
-        };
-
-        auto consumeWrappedText =
-            [&](const std::string& value) {
-                std::string token;
-
-                for (size_t index = 0;
-                     index < value.size();
-                     ++index) {
-                    token.push_back(value[index]);
-
-                    const bool boundary =
-                        value[index] == ' ' ||
-                        value[index] == '\n' ||
-                        index + 1 == value.size();
-
-                    if (!boundary) continue;
-
-                    if (!token.empty() &&
-                        token.back() == '\n') {
-                        token.pop_back();
-                        consumeWord(token);
-                        token.clear();
-
-                        if (lineCount < maxLines)
-                            nextLine();
-                    } else {
-                        consumeWord(token);
-                        token.clear();
-                    }
-
-                    if (lineCount >= maxLines)
-                        break;
-                }
-            };
-
-        if (preferences.timestamps &&
-            !message.timestamp.empty()) {
-            consumeWord(
-                "[" + message.timestamp + "] ");
-        }
-
-        consumeWord(message.userName + ": ");
-
-        for (const auto& fragment : message.fragments) {
-            if (lineCount >= maxLines) break;
-
-            if (fragment.type ==
-                kick::ChatFragmentType::Emote) {
-                if (cursor > 0.0f &&
-                    cursor + emoteSize > contentWidth)
-                    nextLine();
-
-                cursor += emoteSize + 3.0f;
-            } else {
-                consumeWrappedText(fragment.text);
-            }
-        }
-
-        nvgRestore(vg);
-
-        return std::clamp(
-                   lineCount,
-                   1,
-                   maxLines) *
-                   lineHeight +
-               7.0f;
     }
 
     void draw(
@@ -521,7 +565,7 @@ public:
         float height,
         brls::Style style,
         brls::FrameContext* ctx) override {
-        if (message.text.empty()) return;
+        if (!line || line->message.text.empty()) return;
 
         // Never allow one message to paint into the next row, even if a
         // malformed/very wide fragment produces an unexpected wrap.
@@ -534,85 +578,57 @@ public:
         const float right = x + width;
         float cursorX = x;
         float cursorY = y + fontSize;
-        int line = 0;
-        const int maxLines = maxLineCount();
+        int lineIndex = 0;
+        const int maxLines = chatMaxLines(fontSize, contentHeightLimit);
 
         nvgFontFaceId(vg, brls::Application::getDefaultFont());
         nvgFontSize(vg, fontSize);
         nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
 
-        auto textWidth = [&](const std::string& value) {
-            if (value.empty()) return 0.0f;
-            float bounds[4]{};
-            return nvgTextBounds(
-                vg, 0, 0, value.c_str(), nullptr, bounds);
-        };
-
         auto nextLine = [&]() {
             cursorX = x;
             cursorY += lineHeight;
-            ++line;
+            ++lineIndex;
         };
 
-        auto drawWord = [&](const std::string& value, NVGcolor color) {
-            if (value.empty() || line >= maxLines) return;
-            const float wordWidth = textWidth(value);
-
-            if (cursorX > x && cursorX + wordWidth > right)
+        auto drawWord = [&](const KickChatLine::Piece& piece, NVGcolor color) {
+            if (cursorX > x && cursorX + piece.width > right)
                 nextLine();
-            if (line >= maxLines) return;
+            if (lineIndex >= maxLines) return;
 
             nvgFillColor(vg, color);
-            nvgText(vg, cursorX, cursorY, value.c_str(), nullptr);
-            cursorX += wordWidth;
+            nvgText(vg, cursorX, cursorY, piece.text.c_str(), nullptr);
+            cursorX += piece.width;
         };
 
-        auto drawWrappedText = [&](const std::string& value, NVGcolor color) {
-            std::string token;
-            for (size_t index = 0; index < value.size(); ++index) {
-                token.push_back(value[index]);
-                const bool boundary =
-                    value[index] == ' ' ||
-                    value[index] == '\n' ||
-                    index + 1 == value.size();
-
-                if (!boundary) continue;
-
-                if (!token.empty() && token.back() == '\n') {
-                    token.pop_back();
-                    drawWord(token, color);
-                    token.clear();
-                    nextLine();
-                } else {
-                    drawWord(token, color);
-                    token.clear();
-                }
-
-                if (line >= maxLines) break;
-            }
-        };
-
-        if (showTimestamp && !message.timestamp.empty()) {
-            drawWord(
-                "[" + message.timestamp + "] ",
-                themed ? kicknx::theme::current().textFaint : nvgRGB(145, 154, 174));
-        }
-
+        const NVGcolor timestampColor =
+            themed ? kicknx::theme::current().textFaint : nvgRGB(145, 154, 174);
         const NVGcolor messageColor =
             themed ? kicknx::theme::current().textPrimary : nvgRGB(245, 246, 250);
 
-        drawWord(
-            message.userName + ": ",
-            chatColor(message.color));
-
         size_t emoteIndex = 0;
-        for (const auto& fragment : message.fragments) {
-            if (line >= maxLines) break;
+        for (const auto& piece : line->layout(fontSize, showTimestamp)) {
+            if (lineIndex >= maxLines) break;
 
-            if (fragment.type == kick::ChatFragmentType::Emote) {
+            switch (piece.kind) {
+            case KickChatLine::PieceKind::LineBreak:
+                nextLine();
+                break;
+
+            case KickChatLine::PieceKind::Word:
+                drawWord(
+                    piece,
+                    piece.role == KickChatLine::PieceRole::Timestamp
+                        ? timestampColor
+                        : piece.role == KickChatLine::PieceRole::User
+                            ? line->userColor
+                            : messageColor);
+                break;
+
+            case KickChatLine::PieceKind::Emote: {
                 if (cursorX > x && cursorX + emoteSize > right)
                     nextLine();
-                if (line >= maxLines) break;
+                if (lineIndex >= maxLines) break;
 
                 const EmoteVisual* visual =
                     emoteIndex < emoteImages.size()
@@ -647,14 +663,10 @@ public:
                     nvgFill(vg);
                     cursorX += emoteSize + 3.0f;
                 } else {
-                    drawWord(
-                        fragment.text + " ",
-                        messageColor);
+                    drawWord(piece, messageColor);
                 }
-            } else {
-                drawWrappedText(
-                    fragment.text,
-                    messageColor);
+                break;
+            }
             }
         }
 
@@ -669,39 +681,12 @@ public:
     }
 
 private:
-    static int maxLineCountFor(
-        float fontSize,
-        float contentHeightLimit) {
-        const float lineHeight = fontSize * 1.28f;
-        return std::max(
-            1,
-            static_cast<int>(
-                std::floor(
-                    std::max(0.0f, contentHeightLimit - 7.0f) /
-                    std::max(1.0f, lineHeight))));
-    }
-
-    int maxLineCount() const {
-        return maxLineCountFor(fontSize, contentHeightLimit);
-    }
-
-    float estimateHeight() const {
-        kick::ChatPreferences preferences;
-        preferences.fontSize = fontSize;
-        preferences.timestamps = showTimestamp;
-        return estimateHeightFor(
-            message,
-            preferences,
-            contentWidth,
-            contentHeightLimit);
-    }
-
     void clearEmotes() {
         // Shared loader views remain alive in the bounded app-lifetime pool.
         emoteImages.clear();
     }
 
-    kick::ChatMessage message;
+    KickChatLinePtr line;
     std::vector<EmoteVisual> emoteImages;
     float fontSize = 16.0f;
     float contentWidth = 300.0f;
@@ -710,163 +695,6 @@ private:
     bool themed = false;
 };
 
-
-class PortraitDraftPreview : public brls::View {
-public:
-    void configure(
-        const std::string& value,
-        const std::vector<kick::UserEmote>& emotes) {
-        draft = value;
-        segments.clear();
-
-        std::unordered_map<std::string, const kick::UserEmote*> byName;
-        byName.reserve(emotes.size());
-        for (const auto& emote : emotes) {
-            if (!emote.name.empty()) byName.emplace(emote.name, &emote);
-        }
-
-        size_t position = 0;
-        while (position < draft.size()) {
-            const bool whitespace = std::isspace(
-                static_cast<unsigned char>(draft[position]));
-            size_t end = position + 1;
-            while (end < draft.size() &&
-                static_cast<bool>(std::isspace(
-                    static_cast<unsigned char>(draft[end]))) == whitespace)
-                ++end;
-
-            Segment segment;
-            segment.text = draft.substr(position, end - position);
-            if (!whitespace) {
-                const auto found = byName.find(segment.text);
-                if (found != byName.end()) {
-                    segment.emote = true;
-                    segment.url = found->second->imageUrl;
-                    segment.image = KickEmoteTexturePool::instance().get(
-                        found->second->imageUrl);
-                }
-            }
-            segments.push_back(std::move(segment));
-            position = end;
-        }
-        this->invalidate();
-    }
-
-    void draw(
-        NVGcontext* vg,
-        float x,
-        float y,
-        float width,
-        float height,
-        brls::Style,
-        brls::FrameContext*) override {
-        nvgSave(vg);
-        nvgIntersectScissor(vg, x, y, width, height);
-
-        constexpr float FONT_SIZE = 20.0f;
-        constexpr float LINE_HEIGHT = 29.0f;
-        constexpr float EMOTE_SIZE = 27.0f;
-        constexpr int MAX_LINES = 2;
-
-        nvgFontFaceId(vg, brls::Application::getDefaultFont());
-        nvgFontSize(vg, FONT_SIZE);
-        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-
-        if (draft.empty()) {
-            nvgFillColor(vg, nvgRGB(150, 158, 176));
-            nvgText(vg, x, y + FONT_SIZE, "Type a message...", nullptr);
-            nvgRestore(vg);
-            return;
-        }
-
-        auto textWidth = [&](const std::string& text) {
-            float bounds[4]{};
-            return nvgTextBounds(
-                vg, 0, 0, text.c_str(), nullptr, bounds);
-        };
-
-        float cursorX = x;
-        float cursorY = y + FONT_SIZE;
-        int line = 0;
-        const float right = x + width;
-        auto nextLine = [&]() {
-            cursorX = x;
-            cursorY += LINE_HEIGHT;
-            ++line;
-        };
-
-        bool needsTextureRefresh = false;
-
-        for (const auto& segment : segments) {
-            if (line >= MAX_LINES) break;
-            const float segmentWidth = segment.emote
-                ? EMOTE_SIZE + 4.0f
-                : textWidth(segment.text);
-            if (cursorX > x && cursorX + segmentWidth > right) nextLine();
-            if (line >= MAX_LINES) break;
-
-            if (segment.emote) {
-                int tex = segment.image ? segment.image->getTexture() : 0;
-                if (tex <= 0 && !segment.url.empty()) {
-                    tex = brls::TextureCache::instance().getCache(segment.url);
-                }
-
-                if (tex > 0) {
-                    const float imageY = cursorY - FONT_SIZE - 5.0f;
-                    const NVGpaint paint = nvgImagePattern(
-                        vg,
-                        cursorX,
-                        imageY,
-                        EMOTE_SIZE,
-                        EMOTE_SIZE,
-                        0,
-                        tex,
-                        1.0f);
-                    nvgBeginPath(vg);
-                    nvgRect(vg, cursorX, imageY, EMOTE_SIZE, EMOTE_SIZE);
-                    nvgFillPaint(vg, paint);
-                    nvgFill(vg);
-                    cursorX += EMOTE_SIZE + 4.0f;
-                } else {
-                    needsTextureRefresh = true;
-                    nvgFillColor(vg, nvgRGB(244, 246, 250));
-                    nvgText(
-                        vg,
-                        cursorX,
-                        cursorY,
-                        segment.text.c_str(),
-                        nullptr);
-                    cursorX += textWidth(segment.text);
-                }
-            } else {
-                nvgFillColor(vg, nvgRGB(244, 246, 250));
-                nvgText(
-                    vg,
-                    cursorX,
-                    cursorY,
-                    segment.text.c_str(),
-                    nullptr);
-                cursorX += textWidth(segment.text);
-            }
-        }
-        nvgRestore(vg);
-
-        if (needsTextureRefresh) {
-            this->invalidate();
-        }
-    }
-
-private:
-    struct Segment {
-        std::string text;
-        std::string url;
-        bool emote = false;
-        brls::Image* image = nullptr;
-    };
-
-    std::string draft;
-    std::vector<Segment> segments;
-};
 
 class PortraitEmoteCell : public RecyclingGridItem {
 public:
@@ -951,8 +779,8 @@ public:
     PortraitChatComposer(std::string channel, SendCallback sendRequested)
         : channel(std::move(channel)),
           sendRequested(std::move(sendRequested)),
-          emotes(kick::loadRecentEmotes()),
-          recentEmotes(kick::loadRecentEmotes()) {
+          recentEmotes(kick::loadRecentEmotes()),
+          emotes(recentEmotes) {
         this->setAxis(brls::Axis::COLUMN);
         this->setWidthPercentage(100.0f);
         this->setHeight(485.0f);
@@ -996,7 +824,12 @@ public:
         counter->setHorizontalAlign(brls::HorizontalAlign::RIGHT);
         draftHeader->addView(counter);
 
-        draftPreview = new PortraitDraftPreview();
+        draftPreview = new KickDraftPreview({
+            20.0f,
+            "Type a message...",
+            nvgRGB(150, 158, 176),
+            nvgRGB(244, 246, 250),
+        });
         draftPreview->setGrow(1.0f);
         draftPreview->setWidthPercentage(100.0f);
         draftBox->addView(draftPreview);
@@ -1005,7 +838,7 @@ public:
             {
                 [this](const std::string& value) { append(value); },
                 [this]() {
-                    eraseLastCodepoint();
+                    kicknx::draft::eraseLast(draft, emotes, recentEmotes);
                     refreshDraft();
                 },
                 [this]() { setEmotePanelVisible(true); },
@@ -1204,73 +1037,14 @@ private:
             });
     }
 
-    void eraseLastCodepoint() {
-        if (draft.empty()) return;
-
-        // Check if draft ends with an emote
-        std::string temp = draft;
-        while (!temp.empty() && std::isspace(static_cast<unsigned char>(temp.back())))
-            temp.pop_back();
-
-        if (!temp.empty()) {
-            size_t lastSpace = temp.find_last_of(" \t\n\r");
-            size_t tokenStart = (lastSpace == std::string::npos) ? 0 : lastSpace + 1;
-            std::string lastToken = temp.substr(tokenStart);
-
-            bool isEmote = false;
-            auto checkEmote = [&](const kick::UserEmote& e) {
-                return !e.name.empty() && e.name == lastToken;
-            };
-            if (std::any_of(emotes.begin(), emotes.end(), checkEmote) ||
-                std::any_of(recentEmotes.begin(), recentEmotes.end(), checkEmote)) {
-                isEmote = true;
-            }
-
-            if (isEmote) {
-                size_t eraseStart = (tokenStart > 0 && std::isspace(static_cast<unsigned char>(draft[tokenStart - 1])))
-                                        ? tokenStart - 1
-                                        : tokenStart;
-                draft.erase(eraseStart);
-                return;
-            }
-        }
-
-        // Normal single-codepoint erase
-        size_t position = draft.size() - 1;
-        while (position > 0 &&
-            (static_cast<unsigned char>(draft[position]) & 0xC0) == 0x80)
-            --position;
-        draft.erase(position);
-    }
-
     void send() {
-        if (draft.empty() || !sendRequested) return;
-        std::unordered_map<std::string, const kick::UserEmote*> byName;
-        for (const auto& emote : emotes) {
-            if (!emote.name.empty() && !emote.id.empty())
-                byName.emplace(emote.name, &emote);
-        }
-        std::string wireMessage;
-        size_t pos = 0;
-        while (pos < draft.size()) {
-            const bool ws = std::isspace(static_cast<unsigned char>(draft[pos]));
-            size_t end = pos + 1;
-            while (end < draft.size() &&
-                   static_cast<bool>(std::isspace(static_cast<unsigned char>(draft[end]))) == ws)
-                ++end;
-            const std::string token = draft.substr(pos, end - pos);
-            if (!ws) {
-                const auto found = byName.find(token);
-                if (found != byName.end()) {
-                    wireMessage += "[emote:" + found->second->id + ":" + found->second->name + "]";
-                } else {
-                    wireMessage += token;
-                }
-            } else {
-                wireMessage += token;
-            }
-            pos = end;
-        }
+        if (!sendRequested) return;
+        // Same rules as the landscape composer: trimmed, and recent emotes
+        // are sent as emotes too.
+        const std::string message = kicknx::draft::trimmed(draft);
+        if (message.empty()) return;
+        const std::string wireMessage =
+            kicknx::draft::encodeEmotes(message, emotes, recentEmotes);
         if (sendRequested(wireMessage)) {
             draft.clear();
             keyboardContainer->resetShift();
@@ -1279,16 +1053,7 @@ private:
     }
 
     void refreshDraft() {
-        std::vector<kick::UserEmote> allKnown = emotes;
-        for (const auto& r : recentEmotes) {
-            if (!r.name.empty() &&
-                std::none_of(allKnown.begin(), allKnown.end(), [&](const kick::UserEmote& e) {
-                    return e.name == r.name;
-                })) {
-                allKnown.push_back(r);
-            }
-        }
-        draftPreview->configure(draft, allKnown);
+        draftPreview->configure(draft, emotes, recentEmotes);
         counter->setText(
             fmt::format("{} / {}", draft.size(), MAX_MESSAGE_BYTES));
         this->invalidate();
@@ -1298,7 +1063,7 @@ private:
     std::string channel;
     SendCallback sendRequested;
     std::string draft;
-    PortraitDraftPreview* draftPreview = nullptr;
+    KickDraftPreview* draftPreview = nullptr;
     brls::Label* counter = nullptr;
     KickKeyboard* keyboardContainer = nullptr;
     brls::Box* emotePanel = nullptr;
@@ -1529,19 +1294,19 @@ public:
         }
     }
 
-    void append(kick::ChatMessage message) {
+    void append(KickChatLinePtr line) {
         if (status->getVisibility() == brls::Visibility::VISIBLE) {
             status->setText("");
             status->setVisibility(brls::Visibility::GONE);
         }
-        messages.push_back(std::move(message));
+        messages.push_back(std::move(line));
         while (messages.size() > MAX_MESSAGES)
             messages.pop_front();
         refresh();
     }
 
     void replaceMessages(
-        const std::deque<kick::ChatMessage>& value) {
+        const std::deque<KickChatLinePtr>& value) {
         if (!value.empty() && status->getVisibility() == brls::Visibility::VISIBLE) {
             status->setText("");
             status->setVisibility(brls::Visibility::GONE);
@@ -1552,7 +1317,7 @@ public:
         refresh();
     }
 
-    const std::deque<kick::ChatMessage>& visibleMessages() const {
+    const std::deque<KickChatLinePtr>& visibleMessages() const {
         return messages;
     }
 
@@ -1570,8 +1335,10 @@ public:
 
 private:
     void refresh() {
-        for (auto* row : rows) row->clear();
-        if (messages.empty()) return;
+        if (messages.empty()) {
+            for (auto* row : rows) row->clear();
+            return;
+        }
 
         const float innerWidth =
             std::max(120.0f, panelWidth - 24.0f);
@@ -1588,42 +1355,43 @@ private:
                 120.0f,
                 panelHeight - reserved);
 
-        std::vector<const kick::ChatMessage*> selected;
+        // Newest first: keep adding messages while they fit.
+        size_t shown = 0;
         float consumed = 0.0f;
 
         for (auto iterator = messages.rbegin();
              iterator != messages.rend() &&
-             selected.size() < rows.size();
+             shown < rows.size();
              ++iterator) {
             const float measuredHeight =
-                KickChatMessageView::estimateHeightFor(
-                *iterator,
-                preferences,
-                innerWidth,
-                availableHeight);
+                (*iterator)->height(
+                    preferences,
+                    innerWidth,
+                    availableHeight);
 
-            if (!selected.empty() &&
+            if (shown > 0 &&
                 consumed + measuredHeight > availableHeight)
                 break;
 
-            selected.push_back(&*iterator);
+            ++shown;
             consumed += measuredHeight;
         }
 
-        std::reverse(selected.begin(), selected.end());
-        std::deque<kick::ChatMessage> visibleMessages;
-        for (size_t index = 0;
-             index < selected.size() && index < rows.size();
-             ++index) {
-            rows[index]->configure(
-                *selected[index],
-                preferences,
-                innerWidth,
-                availableHeight);
-            visibleMessages.push_back(*selected[index]);
-        }
+        // Only the messages on screen are kept.
+        while (messages.size() > shown)
+            messages.pop_front();
 
-        messages = std::move(visibleMessages);
+        for (size_t index = 0; index < rows.size(); ++index) {
+            if (index < messages.size()) {
+                rows[index]->configure(
+                    messages[index],
+                    preferences,
+                    innerWidth,
+                    availableHeight);
+            } else {
+                rows[index]->clear();
+            }
+        }
     }
 
     static constexpr size_t ROW_POOL = 20;
@@ -1635,7 +1403,7 @@ private:
     kick::ChatPreferences preferences;
     std::function<void()> sendRequested;
     std::function<bool()> backRequested;
-    std::deque<kick::ChatMessage> messages;
+    std::deque<KickChatLinePtr> messages;
     brls::Box* headerBox = nullptr;
     brls::Label* titlePrefix = nullptr;
     brls::Label* chattersCountLabel = nullptr;
@@ -1650,20 +1418,21 @@ private:
 struct ChatUiState {
     std::atomic_bool alive{true};
     KickChatPanel* activePanel = nullptr;
-    std::deque<kick::ChatMessage> messages;
+    std::deque<KickChatLinePtr> messages;
     std::string status;
     int chatterCount = 0;
 
     void append(kick::ChatMessage message) {
         status.clear();
+        auto line = std::make_shared<KickChatLine>(std::move(message));
         if (activePanel) {
             activePanel->setStatus("");
-            activePanel->append(std::move(message));
+            activePanel->append(std::move(line));
             messages = activePanel->visibleMessages();
             return;
         }
 
-        messages.push_back(std::move(message));
+        messages.push_back(std::move(line));
         while (messages.size() > MAX_MESSAGES)
             messages.pop_front();
     }
@@ -1776,92 +1545,67 @@ void scheduleHybridHardwareRestore(
         "before restoring hardware decoding",
         HYBRID_RESTORE_STABLE_SECONDS);
 
-    ThreadPool::instance().submit(
-        [state, generation](HTTP&) {
-            for (int elapsed = 0;
-                 elapsed < HYBRID_RESTORE_STABLE_SECONDS &&
-                 state->alive.load();
-                 ++elapsed) {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
+    brls::delay(HYBRID_RESTORE_STABLE_SECONDS * 1000, [state, generation]() {
+        if (!state->alive.load() ||
+            generation != state->restoreGeneration.load() ||
+            state->recovering.load() ||
+            kick::loadDecoderMode() !=
+                kick::DecoderMode::Hybrid ||
+            !state->hybridSoftware.load() ||
+            !state->hybridRestoreEligible.load())
+            return;
+
+        state->decoderSwitching.store(true);
+        state->reconfigArmed.store(false);
+        state->hybridRestoreEligible.store(false);
+
+        auto& mpv = MPVCore::instance();
+        mpv.command("set", "vd-lavc-dr", "no");
+        mpv.command(
+            "set",
+            "hwdec",
+            MPVCore::PLAYER_HWDEC_METHOD.c_str());
+        mpv.command("set", "pause", "no");
+
+        brls::Logger::warning(
+            "kickNX Hybrid: requested hardware decoder restoration");
+
+        brls::delay(HYBRID_REARM_SECONDS * 1000, [state, generation]() {
+            if (!state->alive.load() ||
+                generation !=
+                    state->restoreGeneration.load() ||
+                kick::loadDecoderMode() !=
+                    kick::DecoderMode::Hybrid)
+                return;
+
+            auto& mpv = MPVCore::instance();
+            const std::string active =
+                mpv.getString("hwdec-current");
+
+            state->decoderSwitching.store(false);
+            state->lastLoadedAt =
+                std::chrono::steady_clock::now();
+
+            if (active.empty() || active == "no") {
+                state->hybridSoftware.store(true);
+                state->hardwareDecode.store(false);
+                state->reconfigArmed.store(true);
+                mpv.command("set", "hwdec", "no");
+                brls::Logger::warning(
+                    "kickNX Hybrid: hardware decoder did not "
+                    "reactivate; software remains active");
+                return;
             }
 
-            if (!state->alive.load()) return;
-
-            brls::sync([state, generation]() {
-                if (!state->alive.load() ||
-                    generation != state->restoreGeneration.load() ||
-                    state->recovering.load() ||
-                    kick::loadDecoderMode() !=
-                        kick::DecoderMode::Hybrid ||
-                    !state->hybridSoftware.load() ||
-                    !state->hybridRestoreEligible.load())
-                    return;
-
-                state->decoderSwitching.store(true);
-                state->reconfigArmed.store(false);
-                state->hybridRestoreEligible.store(false);
-
-                auto& mpv = MPVCore::instance();
-                mpv.command("set", "vd-lavc-dr", "no");
-                mpv.command(
-                    "set",
-                    "hwdec",
-                    MPVCore::PLAYER_HWDEC_METHOD.c_str());
-                mpv.command("set", "pause", "no");
-
-                brls::Logger::warning(
-                    "kickNX Hybrid: requested hardware decoder restoration");
-
-                ThreadPool::instance().submit(
-                    [state, generation](HTTP&) {
-                        for (int elapsed = 0;
-                             elapsed < HYBRID_REARM_SECONDS &&
-                             state->alive.load();
-                             ++elapsed) {
-                            std::this_thread::sleep_for(
-                                std::chrono::seconds(1));
-                        }
-
-                        if (!state->alive.load()) return;
-
-                        brls::sync([state, generation]() {
-                            if (!state->alive.load() ||
-                                generation !=
-                                    state->restoreGeneration.load() ||
-                                kick::loadDecoderMode() !=
-                                    kick::DecoderMode::Hybrid)
-                                return;
-
-                            auto& mpv = MPVCore::instance();
-                            const std::string active =
-                                mpv.getString("hwdec-current");
-
-                            state->decoderSwitching.store(false);
-                            state->lastLoadedAt =
-                                std::chrono::steady_clock::now();
-
-                            if (active.empty() || active == "no") {
-                                state->hybridSoftware.store(true);
-                                state->hardwareDecode.store(false);
-                                state->reconfigArmed.store(true);
-                                mpv.command("set", "hwdec", "no");
-                                brls::Logger::warning(
-                                    "kickNX Hybrid: hardware decoder did not "
-                                    "reactivate; software remains active");
-                                return;
-                            }
-
-                            state->hybridSoftware.store(false);
-                            state->hardwareDecode.store(true);
-                            state->reconfigArmed.store(true);
+            state->hybridSoftware.store(false);
+            state->hardwareDecode.store(true);
+            state->reconfigArmed.store(true);
 #if defined(KICKNX_PLAYBACK_PERF_DEBUG)
-                            mpv.logHardwareDecoderState(
-                                "hybrid-hardware-restored");
+            mpv.logHardwareDecoderState(
+                "hybrid-hardware-restored");
 #endif
-                        });
-                    });
-            });
         });
+    });
 }
 
 bool isAudioOnlyQuality(const std::string& value) {
@@ -1883,74 +1627,64 @@ void scheduleKickHardwareActivationCheck(
         state->hybridSoftware.load())
         return;
 
-    ThreadPool::instance().submit(
-        [state, decoderMode](HTTP&) {
-            for (int elapsed = 0;
-                 elapsed < 8 && state->alive.load();
-                 ++elapsed) {
-                std::this_thread::sleep_for(
-                    std::chrono::seconds(1));
+    // The UI timer waits instead of a sleeping worker, which would hold one
+    // of the four shared threads that thumbnails and Kick requests need.
+    brls::delay(8000, [state, decoderMode]() {
+        if (!state->alive.load() ||
+            state->hybridSoftware.load() ||
+            kick::loadDecoderMode() != decoderMode)
+            return;
+
+        auto& mpv = MPVCore::instance();
+        const std::string codec = mpv.getString("video-codec");
+        const int64_t width = mpv.getInt("video-params/w");
+        const int64_t height = mpv.getInt("video-params/h");
+        const std::string active =
+            mpv.getString("hwdec-current");
+
+        if (isAudioOnlyQuality(kick::loadPreferredQuality())) {
+            brls::Logger::info(
+                "kickNX: skipping hardware activation warning for "
+                "explicit audio-only playback");
+            return;
+        }
+
+        if (codec.empty() || width <= 0 || height <= 0) {
+            brls::Logger::info(
+                "kickNX: hardware activation check postponed; "
+                "no video stream is active yet "
+                "(codec='{}' size={}x{})",
+                codec,
+                static_cast<long long>(width),
+                static_cast<long long>(height));
+            return;
+        }
+
+        if (active.empty() || active == "no") {
+            brls::Logger::warning(
+                "kickNX: Kick hardware decoder did not activate; "
+                "hwdec-current='{}'",
+                active.empty() ? "<empty>" : active);
+
+            if (decoderMode == kick::DecoderMode::Hybrid) {
+                state->hybridSoftware.store(true);
+                state->hardwareDecode.store(false);
+                mpv.command("set", "hwdec", "no");
+                brls::Logger::warning(
+                    "kickNX Hybrid: hardware did not activate; "
+                    "continuing in software");
+            } else {
+                brls::Logger::warning(
+                    "kickNX: experimental hardware decoding did not activate");
             }
+            return;
+        }
 
-            if (!state->alive.load()) return;
-
-            brls::sync([state, decoderMode]() {
-                if (!state->alive.load() ||
-                    state->hybridSoftware.load() ||
-                    kick::loadDecoderMode() != decoderMode)
-                    return;
-
-                auto& mpv = MPVCore::instance();
-                const std::string codec = mpv.getString("video-codec");
-                const int64_t width = mpv.getInt("video-params/w");
-                const int64_t height = mpv.getInt("video-params/h");
-                const std::string active =
-                    mpv.getString("hwdec-current");
-
-                if (isAudioOnlyQuality(kick::loadPreferredQuality())) {
-                    brls::Logger::info(
-                        "kickNX: skipping hardware activation warning for "
-                        "explicit audio-only playback");
-                    return;
-                }
-
-                if (codec.empty() || width <= 0 || height <= 0) {
-                    brls::Logger::info(
-                        "kickNX: hardware activation check postponed; "
-                        "no video stream is active yet "
-                        "(codec='{}' size={}x{})",
-                        codec,
-                        static_cast<long long>(width),
-                        static_cast<long long>(height));
-                    return;
-                }
-
-                if (active.empty() || active == "no") {
-                    brls::Logger::warning(
-                        "kickNX: Kick hardware decoder did not activate; "
-                        "hwdec-current='{}'",
-                        active.empty() ? "<empty>" : active);
-
-                    if (decoderMode == kick::DecoderMode::Hybrid) {
-                        state->hybridSoftware.store(true);
-                        state->hardwareDecode.store(false);
-                        mpv.command("set", "hwdec", "no");
-                        brls::Logger::warning(
-                            "kickNX Hybrid: hardware did not activate; "
-                            "continuing in software");
-                    } else {
-                        brls::Logger::warning(
-                            "kickNX: experimental hardware decoding did not activate");
-                    }
-                    return;
-                }
-
-                state->hardwareDecode.store(true);
-                brls::Logger::info(
-                    "kickNX: Kick hardware decoder active: {}",
-                    active);
-            });
-        });
+        state->hardwareDecode.store(true);
+        brls::Logger::info(
+            "kickNX: Kick hardware decoder active: {}",
+            active);
+    });
 }
 
 constexpr int KICK_OFFLINE_CONFIRMATIONS = 2;
@@ -2058,25 +1792,14 @@ void scheduleKickPlaybackRetry(
     }
 
     const int delaySeconds = std::min(nextAttempt, 4);
-    ThreadPool::instance().submit(
-        [state, nextAttempt, delaySeconds](HTTP&) {
-            for (int elapsed = 0;
-                 elapsed < delaySeconds && state->alive.load();
-                 ++elapsed) {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-            }
+    brls::delay(delaySeconds * 1000, [state, nextAttempt]() {
+        if (!state->alive.load() ||
+            !state->recovering.load())
+            return;
 
-            if (!state->alive.load()) return;
-
-            brls::sync([state, nextAttempt]() {
-                if (!state->alive.load() ||
-                    !state->recovering.load())
-                    return;
-
-                state->retryScheduled.store(false);
-                performKickPlaybackRecovery(state, nextAttempt);
-            });
-        });
+        state->retryScheduled.store(false);
+        performKickPlaybackRecovery(state, nextAttempt);
+    });
 }
 
 void useKickSoftwareDecoder(
@@ -2163,37 +1886,29 @@ void continueHardwareRecoveryAfterStop(
 void scheduleHardwareStopWatchdog(
     const std::shared_ptr<KickPlaybackRecoveryState>& state,
     unsigned int generation) {
-    ThreadPool::instance().submit(
-        [state, generation](HTTP&) {
-            for (int elapsed = 0; elapsed < 5 && state->alive.load(); ++elapsed)
-                std::this_thread::sleep_for(std::chrono::seconds(1));
+    brls::delay(5000, [state, generation]() {
+        if (!state->alive.load() ||
+            !state->recovering.load() ||
+            !state->waitingForHardwareStop.load() ||
+            generation != state->hardwareStopGeneration.load())
+            return;
 
-            if (!state->alive.load()) return;
+        if (MPVCore::instance().isStopped()) {
+            brls::Logger::warning(
+                "kickNX: hardware stop confirmation event was delayed; "
+                "continuing after MPV reported the file stopped");
+            continueHardwareRecoveryAfterStop(state);
+            return;
+        }
 
-            brls::sync([state, generation]() {
-                if (!state->alive.load() ||
-                    !state->recovering.load() ||
-                    !state->waitingForHardwareStop.load() ||
-                    generation != state->hardwareStopGeneration.load())
-                    return;
-
-                if (MPVCore::instance().isStopped()) {
-                    brls::Logger::warning(
-                        "kickNX: hardware stop confirmation event was delayed; "
-                        "continuing after MPV reported the file stopped");
-                    continueHardwareRecoveryAfterStop(state);
-                    return;
-                }
-
-                state->waitingForHardwareStop.store(false);
-                finishKickRecoveryFailure(
-                    state,
-                    "the hardware decoder did not stop cleanly");
-                brls::Logger::error(
-                    "kickNX: aborted hardware recovery because MPV did not "
-                    "confirm a clean stop within 5 seconds");
-            });
-        });
+        state->waitingForHardwareStop.store(false);
+        finishKickRecoveryFailure(
+            state,
+            "the hardware decoder did not stop cleanly");
+        brls::Logger::error(
+            "kickNX: aborted hardware recovery because MPV did not "
+            "confirm a clean stop within 5 seconds");
+    });
 }
 
 void performKickPlaybackRecovery(
@@ -2469,7 +2184,7 @@ std::atomic_uint64_t activePlaybackSession{0};
 class RemotePlayer : public brls::Box {
 public:
     RemotePlayer(
-        const remote::DirEntry& item,
+        const std::string& title,
         std::string kickChannel = "",
         std::string loadingNote = "",
         std::vector<kick::SubtitleTrack> kickSubtitles = {},
@@ -2482,11 +2197,10 @@ public:
 #if defined(KICKNX_PLAYBACK_DEBUG)
         kicknx::debug::log(
             "TW_PLAYER",
-            "construct session=%llu channel=%s item_type=%d item_name=%s",
+            "construct session=%llu channel=%s title=%s",
             static_cast<unsigned long long>(playbackSessionId),
             this->kickChannel.empty() ? "<non-kick>" : this->kickChannel.c_str(),
-            static_cast<int>(item.type),
-            item.name.c_str());
+            title.c_str());
 #endif
         MPVCore::LIVE_STREAM_RECOVERY = !this->kickChannel.empty();
         resetPlayerVideoLayout();
@@ -2495,7 +2209,7 @@ public:
         view->setDimensions(width, height);
         view->setGrow(1.0f);
         view->setId("video");
-        view->setTitie(item.name);
+        view->setTitie(title);
         view->hideVideoQuality();
         if (!loadingNote.empty()) {
             view->setLoadingNote(loadingNote);
@@ -2681,12 +2395,6 @@ public:
                 channelProfileCancel);
         }
 
-        if (item.type == remote::EntryType::PLAYLIST) {
-            view->hideVideoProgressSlider();
-        } else if (item.name.size() > 0) {
-            titles.push_back(item.name);
-        }
-
         auto& mpv = MPVCore::instance();
         eventSubscribeID = mpv.getEvent()->subscribe([this](MpvEventEnum event) {
             if (playerShuttingDown ||
@@ -2786,7 +2494,6 @@ public:
                     scheduleHybridHardwareRestore(playbackRecovery);
                 }
 
-                if (titles.empty()) this->loadList();
                 mpv.command("set", "pause", "no");
                 view->getProfile()->init("Local");
                 // Every Kick caption language is its own live HLS feed, and an
@@ -2816,10 +2523,6 @@ public:
                         sub.isDefault ? 1 : 0);
 #endif
                     break;
-                }
-                const char* flag = MPVCore::SUBS_FALLBACK ? "select" : "auto";
-                for (auto& it : this->subtitles) {
-                    mpv.command("sub-add", it.second.c_str(), flag, it.first.c_str());
                 }
                 break;
             }
@@ -2872,10 +2575,6 @@ public:
             ? MPVCore::PLAYER_HWDEC_METHOD.c_str()
             : "no";
         mpv.command("set", "hwdec", configuredHwdec);
-    }
-
-    void deactivatePlaybackForNavigation() {
-        deactivatePlayback();
     }
 
     // Called once Kick confirms the stream ended. VideoView::close pops
@@ -3032,49 +2731,6 @@ public:
             brls::Application::getTheme().addColor("brls/clear", nvgRGB(45, 45, 45));
     }
 
-    void setList(const DirList& list, size_t index, const std::string& extra) {
-        // æ’­æ”¾åˆ—è¡¨
-        DirList urls;
-        for (size_t i = 1; i < list.size(); i++) {
-            auto& it = list.at(i);
-            if (it.type == remote::EntryType::VIDEO) {
-                if (i == index) index = urls.size();
-                titles.push_back(it.name);
-                urls.push_back(it);
-            }
-        }
-        if (titles.size() > 1) view->setList(titles, index);
-
-        playSubscribeID = view->getPlayEvent()->subscribe([this, list, urls, extra](int index) {
-            if (index < 0 || index >= (int)urls.size()) {
-                return VideoView::close(true);
-            }
-            MPVCore::instance().reset();
-            auto& item = urls.at(index);
-
-            std::string name = item.name;
-            auto pos = name.find_last_of(".");
-            if (pos != std::string::npos) {
-                name = name.substr(0, pos);
-            }
-
-            this->subtitles.clear();
-            for (auto& s : list) {
-                if (s.type == remote::EntryType::SUBTITLE) {
-                    if (!s.name.rfind(name, 0)) {
-                        this->subtitles.insert(std::make_pair(s.name.substr(pos), s.url()));
-                    }
-                }
-            }
-            this->url = item.url();
-            MPVCore::instance().setUrl(this->url, extra);
-            view->setTitie(name);
-            return true;
-        });
-
-        view->getPlayEvent()->fire(index);
-    }
-
     uint64_t getPlaybackSessionId() const { return playbackSessionId; }
 
     void setPlaybackCancelToken(std::shared_ptr<std::atomic_bool> cancel) {
@@ -3103,34 +2759,12 @@ public:
         MPVCore::instance().setUrl(path, extra);
     }
 
-    void loadList() {
-        auto& mpv = MPVCore::instance();
-        int64_t count = mpv.getInt("playlist-count");
-        for (int64_t n = 0; n < count; n++) {
-            auto key = fmt::format("playlist/{}/title", n);
-            titles.push_back(mpv.getString(key));
-        }
-        if (titles.size() > 1) view->setList(titles, 0);
-        view->setTitie(titles.front());
-
-        playSubscribeID = view->getPlayEvent()->subscribe([this, &mpv](int index) {
-            if (index < 0 || index >= (int)titles.size()) {
-                return VideoView::close();
-            }
-            MPVCore::instance().reset();
-            view->setTitie(titles.at(index));
-            mpv.command("playlist-play-index", std::to_string(index).c_str());
-            return true;
-        });
-    }
-
-
     void openChannelPage() {
         if (kickChannel.empty() || navigatingToChannel) return;
         navigatingToChannel = true;
 
         const std::string channel = kickChannel;
-        deactivatePlaybackForNavigation();
+        deactivatePlayback();
 
         if (!brls::Application::popActivity(
                 brls::TransitionAnimation::NONE)) {
@@ -3493,7 +3127,6 @@ public:
             !chatDockedPanel)
             return;
 
-        currentChatMode = preferences.mode;
         currentChatPreferences = preferences;
 
         chatOverlayPanel->apply(preferences);
@@ -3573,10 +3206,7 @@ public:
 
 private:
     VideoView* view = new VideoView();
-    std::string url;
     std::string kickChannel;
-    std::vector<std::string> titles;
-    std::unordered_map<std::string, std::string> subtitles;
     std::vector<kick::SubtitleTrack> kickSubtitles;
     MPVEvent::Subscription eventSubscribeID;
     brls::Event<int>::Subscription playSubscribeID;
@@ -3594,7 +3224,6 @@ private:
     std::shared_ptr<ChatUiState> chatUi;
     std::shared_ptr<KickPlaybackRecoveryState> playbackRecovery;
     std::unique_ptr<kick::ChatClient> chatClient;
-    kick::ChatMode currentChatMode = kick::ChatMode::Off;
     kick::ChatPreferences currentChatPreferences;
     brls::ActionIdentifier chatSendAction = ACTION_NONE;
     brls::ActionIdentifier chatModeAction = ACTION_NONE;
@@ -3615,33 +3244,6 @@ private:
     std::shared_ptr<std::atomic_bool> asyncCancelToken;
 };
 
-void RemoteView::play(
-    const std::string& path,
-    const std::string& name,
-    const std::string& extra,
-    const std::string& kickChannel,
-    const std::string& loadingNote,
-    const std::vector<kick::SubtitleTrack>& subtitles,
-    int64_t uptimeSeconds) {
-    // Every playback launch starts from a clean global MPV presentation. This
-    // prevents a live chat margin or recovery session leaking into VODs/clips.
-    MPVCore::LIVE_STREAM_RECOVERY = false;
-    MPVCore::instance().stop();
-    MPVCore::instance().command("set", "pause", "no");
-    resetPlayerVideoLayout();
-
-    RemotePlayer* view = new RemotePlayer(
-        {remote::EntryType::VIDEO, name, path},
-        kickChannel,
-        loadingNote,
-        subtitles,
-        uptimeSeconds);
-    brls::Application::pushActivity(new brls::Activity(view), brls::TransitionAnimation::NONE);
-    if (!path.empty()) {
-        view->setUrl(path, extra);
-    }
-}
-
 void RemoteView::playLive(
     const kick::Config& config,
     int64_t uptimeSeconds,
@@ -3658,7 +3260,7 @@ void RemoteView::playLive(
     const std::string loadingNote = "";
 
     RemotePlayer* player = new RemotePlayer(
-        {remote::EntryType::VIDEO, fullTitle, ""},
+        fullTitle,
         channel,
         loadingNote,
         {},
@@ -3701,7 +3303,7 @@ void RemoteView::playVod(
     const std::string loadingNote = "";
 
     RemotePlayer* player = new RemotePlayer(
-        {remote::EntryType::VIDEO, fullTitle, ""},
+        fullTitle,
         "",
         loadingNote,
         {},
@@ -3747,7 +3349,7 @@ void RemoteView::playClip(
     const std::string loadingNote = "";
 
     RemotePlayer* player = new RemotePlayer(
-        {remote::EntryType::VIDEO, fullTitle, ""},
+        fullTitle,
         "",
         loadingNote,
         {},

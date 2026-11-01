@@ -127,8 +127,6 @@ void GalleryView::next() {
     ((GalleryItem*)this->getChildren()[this->index])->animate(GalleryAnimation::ENTER_RIGHT);
 }
 
-void GalleryView::setIndicatorPosition(float height) { this->indicatorPosition = height; }
-
 void GalleryView::draw(
     NVGcontext* vg, float x, float y, float width, float height, brls::Style style, brls::FrameContext* ctx) {
     // Enable scissoring

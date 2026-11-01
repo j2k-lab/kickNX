@@ -41,8 +41,6 @@ VideoView::VideoView() {
     // scrubbed by holding A. TV mode only changes what B does.
     this->setTvMode(true);
 
-    this->input = brls::Application::getPlatform()->getInputManager();
-
     this->registerAction(
         "hints/back"_i18n, brls::BUTTON_B,
         [this](brls::View* view) {
@@ -290,19 +288,6 @@ VideoView::VideoView() {
     });
     this->btnClose->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnClose));
 
-    /// 播放控制
-    this->btnBackward->registerClickAction([this](...) {
-        this->playIndexEvent.fire(--this->playIndex);
-        return true;
-    });
-    this->btnBackward->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnBackward));
-
-    this->btnForward->registerClickAction([this](...) {
-        this->playIndexEvent.fire(++this->playIndex);
-        return true;
-    });
-    this->btnForward->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnForward));
-
     this->registerActions(
         "main/player/toggle"_i18n, brls::BUTTON_A, KeyBind::getVideoPause(), [this](brls::View* view) {
             MPVCore::instance().togglePlay();
@@ -384,41 +369,6 @@ void VideoView::hideChannelButton() {
         "img/video-card-bg.png");
     btnChannel->setVisibility(
         brls::Visibility::GONE);
-}
-
-
-void VideoView::setList(const std::vector<std::string>& values, int index) {
-    // 选集
-    this->btnEpisode->registerClickAction([this, values](...) {
-        brls::Dropdown* dropdown = new brls::Dropdown(
-            "main/player/episode"_i18n, values,
-            [this](int selected) {
-                this->showLoading();
-                this->playIndexEvent.fire(selected);
-            },
-            this->playIndex);
-        brls::Application::pushActivity(new brls::Activity(dropdown));
-        return true;
-    });
-    this->btnEpisode->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnEpisode));
-    this->btnEpisode->setVisibility(brls::Visibility::VISIBLE);
-    this->showEpisodeLabel->setVisibility(brls::Visibility::VISIBLE);
-
-    auto event = [this, values](int index) {
-        this->playIndex = index;
-
-        auto v1 = index > 0 ? brls::Visibility::VISIBLE : brls::Visibility::GONE;
-        auto v2 = index + 1 < (int)values.size() ? brls::Visibility::VISIBLE : brls::Visibility::GONE;
-
-        this->btnBackward->setVisibility(v1);
-        for (brls::View* view : this->btnBackward->getChildren()) view->setVisibility(v1);
-
-        this->btnForward->setVisibility(v2);
-        for (brls::View* view : this->btnForward->getChildren()) view->setVisibility(v2);
-    };
-
-    this->playIndexEvent.subscribe(event);
-    event(index);
 }
 
 void VideoView::requestSeeking(int seek, int delay) {
@@ -576,11 +526,6 @@ void VideoView::draw(NVGcontext* vg, float x, float y, float w, float h, brls::S
         if (isChildFocused()) brls::Application::giveFocus(this);
         osdTopBox->setVisibility(brls::Visibility::INVISIBLE);
         osdBottomBox->setVisibility(brls::Visibility::INVISIBLE);
-    }
-
-    if (current > this->hintLastShowTime) {
-        this->hintBox->setVisibility(brls::Visibility::GONE);
-        this->hintLastShowTime = 0;
     }
 
     // hot key
@@ -889,9 +834,6 @@ void VideoView::registerMpvEvent() {
             this->toggleIcon->setImageFromSVGRes("icon/ico-play.svg");
             this->playIndexEvent.fire(++this->playIndex);
             break;
-        case MpvEventEnum::CACHE_SPEED_CHANGE:
-            // Download speed display removed per user preference; spinner only.
-            break;
         case MpvEventEnum::VIDEO_MUTE:
             this->volumeIcon->setImageFromSVGRes("icon/ico-volume-off.svg");
             break;
@@ -984,14 +926,6 @@ void VideoView::showOSD(bool autoHide) {
 void VideoView::hideOSD() {
     this->osdLastShowTime = 0;
     this->osdState = OSDState::HIDDEN;
-}
-
-void VideoView::showHint(const std::string& value) {
-    brls::Logger::debug("Video hint: {}", value);
-    this->hintLabel->setText(value);
-    this->hintBox->setVisibility(brls::Visibility::VISIBLE);
-    this->hintLastShowTime = brls::getCPUTimeUsec() + VideoView::OSD_SHOW_TIME;
-    this->showOSD();
 }
 
 void VideoView::setTvMode(bool state) {
@@ -1112,29 +1046,9 @@ void VideoView::disableDimming(bool disable) {
     brls::Application::setAutomaticDeactivation(!disable);
 }
 
-void VideoView::setClipPoint(const std::vector<float>& clips) {
-    if (clips.empty()) {
-        this->osdSlider->clearClipPoint();
-        return;
-    }
-    if (MPVCore::CLIP_POINT) {
-        this->osdSlider->setClipPoint(clips);
-    }
-}
-
-void VideoView::playNext(int offset) { this->playIndexEvent.fire(this->playIndex + offset); }
-
-void VideoView::hideVideoProgressSlider() { this->osdSlider->setVisibility(brls::Visibility::GONE); }
-
 void VideoView::hideVideoQuality() {
     this->btnVideoQuality->setVisibility(brls::Visibility::GONE);
     for (brls::View* view : this->btnVideoQuality->getChildren()) view->setVisibility(brls::Visibility::GONE);
-}
-
-void VideoView::registerVideoQuality(brls::ActionListener action) {
-    this->btnVideoQuality->registerClickAction(action);
-    this->btnVideoQuality->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnVideoQuality));
-    this->registerActions("main/player/quality"_i18n, brls::BUTTON_RSB, KeyBind::getVideoQuality(), action, true);
 }
 
 void VideoView::registerActions(const std::string& hintText, const brls::ControllerButton button,

@@ -19,10 +19,6 @@ public:
 
     void setImageFromSVGFile(const std::string& value);
 
-    void setImageFromSVGString(const std::string& value);
-
-    void rotate(float value);
-
     void updateBitmap();
 
     static View* create();
@@ -31,5 +27,4 @@ private:
     std::unique_ptr<lunasvg::Document> document = nullptr;
     brls::VoidEvent::Subscription subscription;
     std::string filePath;
-    float angle = 0;
 };

@@ -159,27 +159,6 @@ std::string misc::formatSize(uint64_t s) {
     return fmt::format("{:.2f}GB", (s >> 20) / 1024.0f);
 }
 
-std::string misc::formatTime(const std::string& str) {
-    std::tm t = {};
-    char tz[20];
-    std::istringstream ss(str);
-    ss >> std::get_time(&t, "%Y-%m-%dT%H:%M:%S");
-    std::time_t tt = std::time(nullptr);
-    std::time_t gt = std::mktime(std::gmtime(&tt));
-
-    int64_t diff = int64_t(std::difftime(gt, std::mktime(&t)));
-    if (diff < 60) {
-        return "main/dashboard/within_minute"_i18n;
-    }
-    if (diff < 30 * 60) {
-        return fmt::format(fmt::runtime("main/dashboard/minute_ago"_i18n), diff / 60);
-    }
-
-    std::time_t lt = tt - diff;
-    std::strftime(tz, sizeof(tz), "%Y-%m-%d %H:%M:%S", std::localtime(&lt));
-    return tz;
-}
-
 std::string misc::randHex(const int len) {
     std::stringstream ss;
     std::random_device rd;
@@ -240,49 +219,3 @@ bool misc::sendIPC(const std::string& sock, const std::string& payload) {
     return false;
 #endif
 }
-
-namespace base64 {
-
-const char kEncodeLookup[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const char kPadCharacter = '=';
-
-using byte = std::uint8_t;
-
-std::string encode(const std::string& input) {
-    std::string encoded;
-    encoded.reserve(((input.size() / 3) + (input.size() % 3 > 0)) * 4);
-
-    std::uint32_t temp{};
-    auto it = input.begin();
-
-    for (std::size_t i = 0; i < input.size() / 3; ++i) {
-        temp = (*it++) << 16;
-        temp += (*it++) << 8;
-        temp += (*it++);
-        encoded.append(1, kEncodeLookup[(temp & 0x00FC0000) >> 18]);
-        encoded.append(1, kEncodeLookup[(temp & 0x0003F000) >> 12]);
-        encoded.append(1, kEncodeLookup[(temp & 0x00000FC0) >> 6]);
-        encoded.append(1, kEncodeLookup[(temp & 0x0000003F)]);
-    }
-
-    switch (input.size() % 3) {
-    case 1:
-        temp = (*it++) << 16;
-        encoded.append(1, kEncodeLookup[(temp & 0x00FC0000) >> 18]);
-        encoded.append(1, kEncodeLookup[(temp & 0x0003F000) >> 12]);
-        encoded.append(2, kPadCharacter);
-        break;
-    case 2:
-        temp = (*it++) << 16;
-        temp += (*it++) << 8;
-        encoded.append(1, kEncodeLookup[(temp & 0x00FC0000) >> 18]);
-        encoded.append(1, kEncodeLookup[(temp & 0x0003F000) >> 12]);
-        encoded.append(1, kEncodeLookup[(temp & 0x00000FC0) >> 6]);
-        encoded.append(1, kPadCharacter);
-        break;
-    }
-
-    return encoded;
-}
-
-}  // namespace base64
