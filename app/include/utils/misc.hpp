@@ -33,4 +33,9 @@ bool sendIPC(const std::string& sock, const std::string& payload);
 
 void initCrashDump();
 
+/// Replaces text in scripts the Switch fonts cannot draw (Arabic, Hebrew,
+/// Thai...) with a note such as "(Arabic text not shown)". Text with nothing
+/// readable left becomes "Arabic text not available".
+std::string replaceUnsupportedText(const std::string& text);
+
 }  // namespace misc

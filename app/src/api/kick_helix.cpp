@@ -3,6 +3,7 @@
 #include "api/http.hpp"
 #include "api/kick.hpp"
 #include "api/kick_playlist.hpp"
+#include "utils/misc.hpp"
 #include "utils/thread.hpp"
 
 #include <borealis.hpp>
@@ -234,14 +235,14 @@ UserProfile parseKickChannelProfile(const json& root, const std::string& fallbac
     if (item.contains("user") && item["user"].is_object()) {
         const auto& user = item["user"];
         profile.displayName = jsonString(user, "username", profile.login);
-        profile.description = jsonString(user, "bio");
+        profile.description = misc::replaceUnsupportedText(jsonString(user, "bio"));
         profile.profileImageUrl = jsonImageUrl(user.value("profile_pic", json()));
         if (profile.profileImageUrl.empty()) {
             profile.profileImageUrl = jsonImageUrl(user.value("profilepic", json()));
         }
     } else {
         profile.displayName = jsonString(item, "username", jsonString(item, "user_username", profile.login));
-        profile.description = jsonString(item, "bio");
+        profile.description = misc::replaceUnsupportedText(jsonString(item, "bio"));
         profile.profileImageUrl = jsonImageUrl(item.value("profile_picture", json()));
         if (profile.profileImageUrl.empty()) {
             profile.profileImageUrl = jsonImageUrl(item.value("profile_pic", json()));
@@ -394,7 +395,7 @@ Category parseKickCategory(const json& item) {
 Stream parseKickStream(const json& item) {
     Stream stream;
     stream.id = jsonString(item, "id", jsonString(item, "slug"));
-    stream.title = jsonString(item, "session_title", jsonString(item, "title"));
+    stream.title = misc::replaceUnsupportedText(jsonString(item, "session_title", jsonString(item, "title")));
     stream.language = jsonString(item, "language");
     stream.viewerCount = jsonInt(item, "viewers", jsonInt(item, "viewer_count", 0));
     stream.followersCount = jsonInt(item, "followersCount",
@@ -411,7 +412,7 @@ Stream parseKickStream(const json& item) {
             const auto& ls = item["livestream"];
             stream.isLive = jsonBool(ls, "is_live", true);
             const std::string sessionTitle = jsonString(ls, "session_title");
-            if (!sessionTitle.empty()) stream.title = sessionTitle;
+            if (!sessionTitle.empty()) stream.title = misc::replaceUnsupportedText(sessionTitle);
             stream.viewerCount = jsonInt(ls, "viewers", jsonInt(ls, "viewer_count", stream.viewerCount));
             if (stream.createdAt.empty()) {
                 stream.createdAt = jsonString(ls, "created_at", jsonString(ls, "start_time"));
@@ -435,7 +436,7 @@ Stream parseKickStream(const json& item) {
                 const auto& ls = ch["livestream"];
                 stream.isLive = jsonBool(ls, "is_live", true);
                 const std::string sessionTitle = jsonString(ls, "session_title");
-                if (!sessionTitle.empty()) stream.title = sessionTitle;
+                if (!sessionTitle.empty()) stream.title = misc::replaceUnsupportedText(sessionTitle);
                 stream.viewerCount = jsonInt(ls, "viewers", jsonInt(ls, "viewer_count", stream.viewerCount));
                 if (stream.createdAt.empty()) {
                     stream.createdAt = jsonString(ls, "created_at", jsonString(ls, "start_time"));
@@ -464,7 +465,7 @@ Stream parseKickStream(const json& item) {
     }
 
     if (stream.title.empty()) {
-        stream.title = jsonString(item, "description", stream.isLive ? "Live stream" : "Offline");
+        stream.title = misc::replaceUnsupportedText(jsonString(item, "description", stream.isLive ? "Live stream" : "Offline"));
         if (stream.title.empty()) stream.title = stream.isLive ? "Live stream" : "Offline";
     }
 
@@ -821,7 +822,7 @@ std::vector<ChannelVideo> getChannelVideos(
         // can play it immediately, or fallback to the video UUID.
         video.id = !sourceUrl.empty() ? sourceUrl : uuid;
         video.url = sourceUrl;
-        video.title = jsonString(item, "session_title", jsonString(item, "title", "Past Broadcast"));
+        video.title = misc::replaceUnsupportedText(jsonString(item, "session_title", jsonString(item, "title", "Past Broadcast")));
         video.createdAt = jsonString(item, "created_at", jsonString(item, "start_time"));
         video.publishedAt = video.createdAt;
         if (item.contains("thumbnail")) {
@@ -868,7 +869,7 @@ std::vector<ChannelClip> parseClipList(
         const std::string rawId = jsonString(item, "id");
         clip.id = !clipUrl.empty() ? clipUrl : rawId;
         clip.url = clipUrl;
-        clip.title = jsonString(item, "title", "Clip");
+        clip.title = misc::replaceUnsupportedText(jsonString(item, "title", "Clip"));
         clip.createdAt = jsonString(item, "created_at");
         clip.thumbnailUrl = jsonString(item, "thumbnail_url");
         if (item.contains("creator") && item["creator"].is_object()) {
@@ -964,8 +965,8 @@ EventPage getEvents(
         if (event.id.empty() || event.slug.empty()) continue;
         if (jsonBool(item, "is_draft", false)) continue;
 
-        event.title = jsonString(item, "title", jsonString(item, "name", event.slug));
-        event.description = jsonString(item, "description");
+        event.title = misc::replaceUnsupportedText(jsonString(item, "title", jsonString(item, "name", event.slug)));
+        event.description = misc::replaceUnsupportedText(jsonString(item, "description"));
         event.phase = jsonString(item, "phase");
         event.startTime = jsonString(item, "start_time");
         event.liveStreamCount = jsonInt(item, "num_livestreams", 0);
@@ -1022,7 +1023,7 @@ StreamPage getEventStreams(
         stream.userId = jsonString(channel, "id");
         stream.userName = jsonString(user, "username", stream.userLogin);
         stream.id = jsonString(livestream, "id");
-        stream.title = jsonString(livestream, "title");
+        stream.title = misc::replaceUnsupportedText(jsonString(livestream, "title"));
         stream.language = jsonString(livestream, "language");
         stream.viewerCount = jsonInt(livestream, "view_count", 0);
         stream.thumbnailUrl = jsonString(jsonChild(livestream, "thumbnail"), "src");

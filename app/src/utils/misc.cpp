@@ -2,6 +2,7 @@
 #include <borealis/core/logger.hpp>
 #include <borealis/core/i18n.hpp>
 #include <fmt/chrono.h>
+#include <cctype>
 #include <random>
 #include <sstream>
 #include <iomanip>
@@ -218,4 +219,132 @@ bool misc::sendIPC(const std::string& sock, const std::string& payload) {
 #else
     return false;
 #endif
+}
+
+namespace {
+
+// Scripts the Switch system fonts have no glyphs for. Each is drawn as a box
+// with an X, so it is replaced by a short note instead. An empty name gives
+// the generic note.
+struct UnsupportedScript {
+    uint32_t first;
+    uint32_t last;
+    const char* name;
+};
+
+constexpr UnsupportedScript UNSUPPORTED_SCRIPTS[] = {
+    {0x0530, 0x058F, ""},        // Armenian
+    {0x0590, 0x05FF, "Hebrew"},
+    {0x0600, 0x06FF, "Arabic"},
+    {0x0700, 0x074F, ""},        // Syriac
+    {0x0750, 0x077F, "Arabic"},
+    {0x0780, 0x07BF, ""},        // Thaana
+    {0x08A0, 0x08FF, "Arabic"},
+    {0x0900, 0x097F, "Hindi"},   // Devanagari
+    {0x0980, 0x0DFF, ""},        // Bengali to Sinhala
+    {0x0E00, 0x0E7F, "Thai"},
+    {0x0E80, 0x0EFF, ""},        // Lao
+    {0x1000, 0x109F, ""},        // Myanmar
+    {0x10A0, 0x10FF, ""},        // Georgian
+    {0x1200, 0x139F, ""},        // Ethiopic
+    {0x1780, 0x17FF, ""},        // Khmer
+    {0xFB1D, 0xFB4F, "Hebrew"},
+    {0xFB50, 0xFDFF, "Arabic"},
+    {0xFE70, 0xFEFF, "Arabic"},
+};
+
+const UnsupportedScript* unsupportedScript(uint32_t codepoint) {
+    for (const auto& script : UNSUPPORTED_SCRIPTS) {
+        if (codepoint >= script.first && codepoint <= script.last) return &script;
+    }
+    return nullptr;
+}
+
+// Spaces, ASCII punctuation and digits, general punctuation and the
+// direction marks: they stay inside a run of another script.
+bool isNeutral(uint32_t codepoint) {
+    if (codepoint < 0x80) return !std::isalpha(static_cast<int>(codepoint));
+    return codepoint == 0x00A0 || (codepoint >= 0x2000 && codepoint <= 0x206F);
+}
+
+// Decodes the UTF-8 sequence at `pos`, moving `pos` past it. Malformed bytes
+// are returned one at a time as themselves.
+uint32_t nextCodepoint(const std::string& text, size_t& pos) {
+    const auto byte = [&](size_t i) { return static_cast<unsigned char>(text[i]); };
+    const unsigned char lead = byte(pos);
+    const size_t length = lead < 0x80 ? 1 : (lead >> 5) == 0x6 ? 2 : (lead >> 4) == 0xE ? 3 : (lead >> 3) == 0x1E ? 4 : 1;
+    if (length == 1 || pos + length > text.size()) {
+        ++pos;
+        return lead;
+    }
+    uint32_t codepoint = lead & (0x7F >> length);
+    for (size_t i = 1; i < length; ++i) codepoint = (codepoint << 6) | (byte(pos + i) & 0x3F);
+    pos += length;
+    return codepoint;
+}
+
+}  // namespace
+
+std::string misc::replaceUnsupportedText(const std::string& text) {
+    std::string result;
+    bool replaced = false;
+    bool readable = false;     // anything left that the fonts can draw
+    const char* wholeName = nullptr;
+    bool oneScript = true;
+
+    const UnsupportedScript* run = nullptr;  // script of the open run
+    size_t pending = 0;                      // neutral bytes held after the run
+
+    const auto closeRun = [&]() {
+        if (!run) return;
+        const std::string name = run->name;
+        result += name.empty() ? "(text not shown)" : "(" + name + " text not shown)";
+        replaced = true;
+        if (!wholeName) wholeName = run->name;
+        else if (std::string(wholeName) != run->name) oneScript = false;
+        run = nullptr;
+    };
+
+    size_t pos = 0;
+    while (pos < text.size()) {
+        const size_t start = pos;
+        const uint32_t codepoint = nextCodepoint(text, pos);
+        const auto* script = unsupportedScript(codepoint);
+
+        if (script) {
+            // Neutral text between two runs of the same script joins them.
+            if (run && std::string(run->name) == script->name) {
+                pending = 0;
+            } else {
+                if (run) {
+                    closeRun();
+                    result.append(text, start - pending, pending);
+                }
+                pending = 0;
+                run = script;
+            }
+            continue;
+        }
+        if (run && isNeutral(codepoint)) {
+            pending += pos - start;
+            continue;
+        }
+        if (run) {
+            closeRun();
+            result.append(text, start - pending, pending);
+            pending = 0;
+        }
+        if (!isNeutral(codepoint)) readable = true;
+        result.append(text, start, pos - start);
+    }
+    if (run) {
+        closeRun();
+        result.append(text, text.size() - pending, pending);
+    }
+
+    if (!replaced) return text;
+    if (readable) return result;
+    // Nothing readable is left: one line instead of a note per paragraph.
+    if (oneScript && wholeName && *wholeName) return std::string(wholeName) + " text not available";
+    return "Text not available in this language";
 }
