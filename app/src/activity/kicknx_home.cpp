@@ -10,6 +10,7 @@
 #include "utils/image.hpp"
 #include "utils/config.hpp"
 #include "utils/thread.hpp"
+#include "utils/updater.hpp"
 #include "api/http.hpp"
 #include "view/h_recycling.hpp"
 #include "view/mpv_core.hpp"
@@ -2199,15 +2200,51 @@ void showUpdateResult(const std::string& message) {
     dialog->open();
 }
 
+std::atomic_bool updateBusy{false};
+
+/// Downloads the new NRO, then quits so main() can swap it in and relaunch.
+void installUpdate(const std::string& url, long long size) {
+    if (updateBusy.exchange(true)) return;
+    brls::Application::notify("Downloading update…");
+
+    ThreadPool::instance().submit([url, size](HTTP&) {
+        try {
+            updater::download(url, size, [](int percent) {
+                if (percent == 25 || percent == 50 || percent == 75) {
+                    brls::sync([percent]() {
+                        brls::Application::notify(
+                            "Downloading update… " + std::to_string(percent) + "%");
+                    });
+                }
+            });
+            brls::sync([]() {
+                brls::Application::notify("Update installed. Restarting kickNX…");
+                brls::Application::quit();
+            });
+        } catch (const std::exception& ex) {
+            brls::Logger::error("update download failed: {}", ex.what());
+            brls::sync([]() {
+                updateBusy.store(false);
+                showUpdateResult("The update couldn't be downloaded. Check your "
+                                 "internet connection and try again, or download it "
+                                 "from github.com/j2k-lab/kickNX/releases");
+            });
+        }
+    });
+}
+
 /// Asks GitHub for the newest release and tells the viewer whether it is
-/// newer than this build. Only runs when the viewer presses the button.
+/// newer than this build. On the Switch it offers to install it right away.
+/// Only runs when the viewer presses the button.
 void checkForUpdates() {
-    static std::atomic_bool checking{false};
-    if (checking.exchange(true)) return;
+    if (updateBusy.exchange(true)) return;
     brls::Application::notify("Checking for updates…");
 
     ThreadPool::instance().submit([](HTTP&) {
         std::string message;
+        std::string latestText;
+        std::string nroUrl;
+        long long nroSize = 0;
         try {
             const auto release = nlohmann::json::parse(
                 HTTP::get(KICKNX_LATEST_RELEASE_URL, HTTP::Timeout{}));
@@ -2219,7 +2256,16 @@ void checkForUpdates() {
                 message = "Couldn't read the latest version from GitHub. "
                           "Check github.com/j2k-lab/kickNX/releases.";
             } else if (latest > current) {
-                message = "kickNX " + joinVersion(latest) + " is available. "
+                latestText = joinVersion(latest);
+                for (const auto& asset : release.value("assets", nlohmann::json::array())) {
+                    const std::string name = asset.value("name", "");
+                    if (name.size() > 4 && name.compare(name.size() - 4, 4, ".nro") == 0) {
+                        nroUrl = asset.value("browser_download_url", "");
+                        nroSize = asset.value("size", 0LL);
+                        break;
+                    }
+                }
+                message = "kickNX " + latestText + " is available. "
                           "You have " + AppVersion::getVersion() + ".\n\n"
                           "Update from the Homebrew App Store, or download it from "
                           "github.com/j2k-lab/kickNX/releases";
@@ -2233,9 +2279,21 @@ void checkForUpdates() {
                       "Check your internet connection and try again.";
         }
 
-        brls::sync([message]() {
-            checking.store(false);
-            showUpdateResult(message);
+        brls::sync([message, latestText, nroUrl, nroSize]() {
+            updateBusy.store(false);
+            if (nroUrl.empty() || nroSize <= 0 || !updater::supported()) {
+                showUpdateResult(message);
+                return;
+            }
+            auto* dialog = new brls::Dialog(
+                "kickNX " + latestText + " is available. You have " +
+                AppVersion::getVersion() + ".\n\n"
+                "Update now? kickNX will restart when it's done.");
+            dialog->addButton("Later", []() {});
+            dialog->addButton("Update", [nroUrl, nroSize]() {
+                installUpdate(nroUrl, nroSize);
+            });
+            dialog->open();
         });
     });
 }

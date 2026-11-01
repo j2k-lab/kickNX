@@ -16,6 +16,7 @@
 #include "view/button_close.hpp"
 #include "view/kick_loading_view.hpp"
 #include "view/mpv_core.hpp"
+#include "utils/updater.hpp"
 
 #include "activity/hint_activity.hpp"
 #include "activity/kicknx_home.hpp"
@@ -47,6 +48,7 @@ int main(int argc, char* argv[]) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 #endif
+    if (argc > 0) updater::setNroPath(argv[0]);
     std::vector<std::string> items;
     for (int i = 1; i < argc; i++) {
         if (std::strcmp(argv[i], "-d") == 0) {
@@ -139,6 +141,7 @@ int main(int argc, char* argv[]) {
     kicknx::portrait::OrientationController::instance().shutdown();
     ThreadPool::instance().stop();
     cleanWatchLaterCache(conf.configDir() + "/watch-later");
+    updater::applyPending();
 
     conf.checkRestart(argv);
 #if defined(KICKNX_PLAYBACK_DEBUG)
