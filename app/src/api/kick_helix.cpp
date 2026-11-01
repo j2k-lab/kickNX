@@ -338,6 +338,7 @@ Category parseKickCategory(const json& item) {
     Category category;
     category.id = jsonString(item, "slug", jsonString(item, "id"));
     category.name = jsonString(item, "name");
+    category.viewerCount = jsonInt(item, "viewers", jsonInt(item, "viewer_count", -1));
     if (item.contains("banner")) {
         category.boxArtUrl = jsonImageUrl(item["banner"]);
     }
@@ -724,6 +725,7 @@ void populateChannelInfoAndLiveStream(
                     if (!isValidImageUrl(dup->boxArtUrl) && isValidImageUrl(cat.boxArtUrl)) {
                         dup->boxArtUrl = cat.boxArtUrl;
                     }
+                    if (dup->viewerCount < 0) dup->viewerCount = cat.viewerCount;
                     if (!cat.id.empty() && (dup->id.empty() || std::all_of(dup->id.begin(), dup->id.end(), ::isdigit))) {
                         dup->id = cat.id;
                     }
@@ -762,6 +764,7 @@ void populateChannelInfoAndLiveStream(
                 if (!isValidImageUrl(dup->boxArtUrl) && isValidImageUrl(cat.boxArtUrl)) {
                     dup->boxArtUrl = cat.boxArtUrl;
                 }
+                if (dup->viewerCount < 0) dup->viewerCount = cat.viewerCount;
                 if (!cat.id.empty() && (dup->id.empty() || std::all_of(dup->id.begin(), dup->id.end(), ::isdigit))) {
                     dup->id = cat.id;
                 }
@@ -940,7 +943,7 @@ const json* jsonList(const json& root, const char* key) {
 }
 
 // Events from kick.com/events (web.kick.com/api/v1/events/browse). Live events
-// come first, busiest first; upcoming and finished events follow.
+// come first, most viewers first; upcoming and finished events follow.
 EventPage getEvents(
     const Config& config,
     OAuthSession& session,
@@ -984,6 +987,7 @@ EventPage getEvents(
     std::stable_sort(page.items.begin(), page.items.end(), [](const LiveEvent& a, const LiveEvent& b) {
         const auto rank = [](const LiveEvent& e) { return e.isLive() ? 0 : (e.phase == "pre" ? 1 : 2); };
         if (rank(a) != rank(b)) return rank(a) < rank(b);
+        if (a.viewCount != b.viewCount) return a.viewCount > b.viewCount;
         return a.liveStreamCount > b.liveStreamCount;
     });
     return page;

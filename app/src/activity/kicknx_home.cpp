@@ -1,5 +1,6 @@
 #include "activity/kicknx_home.hpp"
 #include "utils/theme.hpp"
+#include "view/kick_detail_line.hpp"
 #include "view/theme_header.hpp"
 #include "activity/kick_channel.hpp"
 #include "api/kick.hpp"
@@ -271,14 +272,17 @@ std::string eventKey(const kick::LiveEvent& item) {
     return item.id;
 }
 
-std::string eventSubtitle(const kick::LiveEvent& item) {
-    std::string detail = item.categoryName;
+// Viewers across the event's streams (Kick's view_count) and how many are
+// live; upcoming and finished events report neither.
+std::string eventStats(const kick::LiveEvent& item) {
+    std::string stats;
+    if (item.isLive() && item.viewCount > 0) stats = viewersText(item.viewCount);
     if (item.liveStreamCount > 0) {
-        if (!detail.empty()) detail += " \u00b7 ";
-        detail += std::to_string(item.liveStreamCount) +
+        if (!stats.empty()) stats += " \u00b7 ";
+        stats += std::to_string(item.liveStreamCount) +
             (item.liveStreamCount == 1 ? " live stream" : " live streams");
     }
-    return detail.empty() ? std::string("Kick event") : detail;
+    return stats;
 }
 
 std::string clipKey(const kick::ChannelClip& item) {
@@ -336,14 +340,19 @@ public:
         title->setTextColor(kicknx::theme::current().textPrimary);
         this->addView(title);
 
-        subtitle = new brls::Label();
-        subtitle->setFontSize(15);
-        subtitle->setSingleLine(true);
+        subtitle = new KickDetailLine(15);
         subtitle->setMarginTop(3);
         subtitle->setMarginLeft(10);
         subtitle->setMarginRight(10);
-        subtitle->setTextColor(kicknx::theme::current().textMuted);
         this->addView(subtitle);
+
+        // Third line, used only by event cards (viewers and live streams).
+        stats = new KickDetailLine(15);
+        stats->setMarginTop(3);
+        stats->setMarginLeft(10);
+        stats->setMarginRight(10);
+        stats->setVisibility(brls::Visibility::GONE);
+        this->addView(stats);
 
         this->getFocusEvent()->subscribe([this](brls::View*) {
             if (onFocused) onFocused();
@@ -365,9 +374,15 @@ public:
         Image::cancel(picture);
         picture->setImageFromRes("img/video-card-bg.png");
         title->setText("");
-        subtitle->setText("");
+        subtitle->clear();
+        setStats("");
         onFocused = nullptr;
         upTarget = nullptr;
+    }
+
+    void setStats(const std::string& text) {
+        stats->setParts("", text);
+        stats->setVisibility(text.empty() ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
     }
 
     void cacheForReuse() override {
@@ -378,7 +393,8 @@ public:
 
     brls::Image* picture = nullptr;
     brls::Label* title = nullptr;
-    brls::Label* subtitle = nullptr;
+    KickDetailLine* subtitle = nullptr;
+    KickDetailLine* stats = nullptr;
     std::function<void()> onFocused;
     std::function<brls::View*()> upTarget;
 };
@@ -408,6 +424,16 @@ public:
         title->setTextColor(kicknx::theme::current().textPrimary);
         this->addView(title);
 
+        viewers = new brls::Label();
+        viewers->setFontSize(15);
+        viewers->setSingleLine(true);
+        viewers->setMarginTop(3);
+        viewers->setMarginLeft(8);
+        viewers->setMarginRight(8);
+        viewers->setTextColor(kicknx::theme::current().accent);
+        viewers->setVisibility(brls::Visibility::GONE);
+        this->addView(viewers);
+
         this->getFocusEvent()->subscribe([this](brls::View*) {
             if (onFocused) onFocused();
         });
@@ -424,11 +450,21 @@ public:
 
     ~CategoryCell() override { Image::cancel(picture); }
 
+    void setViewerCount(int count) {
+        if (count < 0) {
+            viewers->setVisibility(brls::Visibility::GONE);
+            return;
+        }
+        viewers->setText(viewersText(count));
+        viewers->setVisibility(brls::Visibility::VISIBLE);
+    }
+
     void prepareForReuse() override {
         Image::cancel(picture);
         picture->setScalingType(brls::ImageScalingType::FILL);
         picture->setImageFromRes("img/category-card-bg.png");
         title->setText("");
+        setViewerCount(-1);
         onFocused = nullptr;
         upTarget = nullptr;
     }
@@ -441,6 +477,7 @@ public:
 
     brls::Image* picture = nullptr;
     brls::Label* title = nullptr;
+    brls::Label* viewers = nullptr;
     std::function<void()> onFocused;
     std::function<brls::View*()> upTarget;
 };
@@ -467,20 +504,15 @@ public:
         const auto& item = items.at(index);
         cell->upTarget = upTarget;
         cell->title->setText(item.userName.empty() ? item.userLogin : item.userName);
-        std::string detail = item.gameName;
+        std::string game = item.gameName;
+        if (!game.empty()) game += " ·";
         if (item.isLive) {
-            if (!detail.empty()) detail += " · ";
-            detail += viewersText(item.viewerCount);
+            cell->subtitle->setParts(game, viewersText(item.viewerCount));
         } else {
-            if (item.followersCount > 0) {
-                if (!detail.empty()) detail += " · ";
-                detail += followersText(item.followersCount);
-            } else {
-                if (!detail.empty()) detail += " · ";
-                detail += "Offline";
-            }
+            cell->subtitle->setParts(
+                game + (game.empty() ? "" : " ") +
+                (item.followersCount > 0 ? followersText(item.followersCount) : "Offline"));
         }
-        cell->subtitle->setText(detail);
         if (!item.thumbnailUrl.empty()) {
             Image::with(cell->picture, kick::streamThumbnail(item.thumbnailUrl));
         }
@@ -551,11 +583,12 @@ public:
         cell->upTarget = upTarget;
         cell->title->setText(item.title);
 
-        std::string detail = item.channelName.empty() ? item.creatorName : item.channelName;
-        if (!detail.empty()) detail += " · ";
-        detail += viewsText(item.viewCount);
-        if (item.duration > 0.0f) detail += " · " + clipDurationText(item.duration);
-        cell->subtitle->setText(detail);
+        std::string channel = item.channelName.empty() ? item.creatorName : item.channelName;
+        if (!channel.empty()) channel += " ·";
+        cell->subtitle->setParts(
+            channel,
+            viewsText(item.viewCount),
+            item.duration > 0.0f ? "· " + clipDurationText(item.duration) : "");
         if (!item.thumbnailUrl.empty()) Image::with(cell->picture, item.thumbnailUrl);
 
         const kick::ChannelClip focusedItem = item;
@@ -623,7 +656,8 @@ public:
         const auto& item = items.at(index);
         cell->upTarget = upTarget;
         cell->title->setText(item.title);
-        cell->subtitle->setText(eventSubtitle(item));
+        cell->subtitle->setParts(item.categoryName.empty() ? "Kick event" : item.categoryName);
+        cell->setStats(eventStats(item));
         if (!item.thumbnailUrl.empty()) Image::with(cell->picture, item.thumbnailUrl);
 
         const kick::LiveEvent focusedItem = item;
@@ -676,6 +710,7 @@ public:
         const auto& item = items.at(index);
         cell->upTarget = upTarget;
         cell->title->setText(item.name);
+        cell->setViewerCount(item.viewerCount);
         if (!item.boxArtUrl.empty()) {
             cell->picture->setScalingType(brls::ImageScalingType::FIT);
             Image::with(cell->picture, kick::categoryThumbnail(item.boxArtUrl));
@@ -746,7 +781,8 @@ public:
 
         recycler = new HRecyclerFrame();
         const bool cardRow = kind != Kind::Categories;
-        recycler->setHeight(cardRow ? 225 : 285);
+        // Event cards have a third line (viewers and live streams).
+        recycler->setHeight(kind == Kind::Events ? 255 : (cardRow ? 225 : 285));
         recycler->estimatedRowWidth = cardRow ? 315 : 175;
         recycler->estimatedRowSpace = 18;
         recycler->setPadding(0, 4, 0, 4);

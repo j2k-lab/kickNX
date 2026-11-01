@@ -1,5 +1,6 @@
 #include "activity/kick_channel.hpp"
 #include "utils/theme.hpp"
+#include "view/kick_detail_line.hpp"
 #include "view/theme_header.hpp"
 #include "activity/kicknx_home.hpp"
 
@@ -159,7 +160,10 @@ struct MediaCard {
     MediaKind kind = MediaKind::Details;
     std::string id;
     std::string title;
+    // Caption: muted text around a part in the accent green (the views).
     std::string subtitle;
+    std::string highlight;
+    std::string subtitleEnd;
     std::string thumbnail;
     std::string details;
 };
@@ -192,14 +196,10 @@ public:
             kicknx::theme::current().textPrimary);
         this->addView(title);
 
-        subtitle = new brls::Label();
-        subtitle->setFontSize(13);
-        subtitle->setSingleLine(true);
+        subtitle = new KickDetailLine(13);
         subtitle->setMarginTop(3);
         subtitle->setMarginLeft(9);
         subtitle->setMarginRight(9);
-        subtitle->setTextColor(
-            kicknx::theme::current().textMuted);
         this->addView(subtitle);
     }
 
@@ -212,7 +212,7 @@ public:
         image->setImageFromRes(
             "img/video-card-bg.png");
         title->setText("");
-        subtitle->setText("");
+        subtitle->clear();
     }
 
     void cacheForReuse() override {
@@ -240,7 +240,7 @@ public:
 
     brls::Image* image = nullptr;
     brls::Label* title = nullptr;
-    brls::Label* subtitle = nullptr;
+    KickDetailLine* subtitle = nullptr;
 };
 
 class MediaDataSource :
@@ -272,8 +272,10 @@ public:
                     "ChannelMedia"));
         const auto& item = items.at(index);
         cell->title->setText(item.title);
-        cell->subtitle->setText(
-            item.subtitle);
+        cell->subtitle->setParts(
+            item.subtitle,
+            item.highlight,
+            item.subtitleEnd);
         if (!item.thumbnail.empty())
             Image::with(
                 cell->image,
@@ -410,6 +412,12 @@ public:
         title->setMarginRight(8);
         title->setTextColor(kicknx::theme::current().textPrimary);
         this->addView(title);
+
+        viewers = new KickDetailLine(15);
+        viewers->setMarginTop(3);
+        viewers->setMarginLeft(8);
+        viewers->setMarginRight(8);
+        this->addView(viewers);
     }
 
     ~ChannelCategoryCell() override {
@@ -421,6 +429,7 @@ public:
         picture->setScalingType(brls::ImageScalingType::FILL);
         picture->setImageFromRes("img/category-card-bg.png");
         title->setText("");
+        viewers->clear();
     }
 
     void cacheForReuse() override {
@@ -448,6 +457,7 @@ public:
 
     brls::Image* picture = nullptr;
     brls::Label* title = nullptr;
+    KickDetailLine* viewers = nullptr;
 };
 
 class ChannelCategoryDataSource : public RecyclingGridDataSource {
@@ -477,6 +487,10 @@ public:
                     "ChannelCategory"));
         const auto& item = items.at(index);
         cell->title->setText(item.name);
+        if (item.viewerCount >= 0)
+            cell->viewers->setParts("", compactNumber(item.viewerCount) + " viewers");
+        else
+            cell->viewers->clear();
         if (!item.boxArtUrl.empty() &&
             (item.boxArtUrl.rfind("http://", 0) == 0 || item.boxArtUrl.rfind("https://", 0) == 0 || item.boxArtUrl.rfind("//", 0) == 0)) {
             cell->picture->setScalingType(brls::ImageScalingType::FIT);
@@ -1091,8 +1105,8 @@ void KickChannelPage::showData(
         card.id = video.id;
         card.title = video.title;
         card.subtitle =
-            video.duration +
-            "  ·  " +
+            video.duration.empty() ? "" : video.duration + " ·";
+        card.highlight =
             compactNumber(video.viewCount) +
             " views";
         card.thumbnail =
@@ -1136,10 +1150,11 @@ void KickChannelPage::showData(
         card.kind = MediaKind::Clip;
         card.id = clip.id;
         card.title = clip.title;
-        card.subtitle =
+        card.highlight =
             compactNumber(clip.viewCount) +
-            " views  ·  " +
-            clip.creatorName;
+            " views";
+        card.subtitleEnd =
+            clip.creatorName.empty() ? "" : "· " + clip.creatorName;
         card.thumbnail =
             clip.thumbnailUrl;
         card.details =

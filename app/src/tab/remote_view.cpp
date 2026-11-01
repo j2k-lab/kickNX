@@ -3013,7 +3013,14 @@ public:
 
         applyChatPreferences(currentChatPreferences);
 
-        if (!portraitLayout && !playerShuttingDown)
+        // Only while the player is the top screen. The constructor runs this
+        // before the player is pushed, and taking focus then made borealis
+        // save the player itself as the focus to return to, so closing it left
+        // focus on a deleted view and the next stick input crashed. Once the
+        // player is shown, willAppear gives it focus.
+        const auto stack = brls::Application::getActivitiesStack();
+        const bool onTop = !stack.empty() && getParentActivity() == stack.back();
+        if (!portraitLayout && !playerShuttingDown && onTop)
             brls::Application::giveFocus(view);
     }
 

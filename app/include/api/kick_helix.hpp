@@ -89,6 +89,8 @@ struct Category {
     std::string id;
     std::string name;
     std::string boxArtUrl;
+    /// Live viewers across the category, or -1 when Kick did not send it.
+    int viewerCount = -1;
 };
 
 struct ChannelPageData {
