@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "kickNXをアプレットモードで起動しました。アルバムから起動しないでください。",
+    "hint_launch": "Rを押したままゲームを起動してHomebrew Menuを開き、kickNXを選択してください。",
+    "hint_hbmenu_icon": "または、HOMEメニューのhbmenuアイコンから起動してください。",
+    "hint_recommended": "任意（推奨）",
     "hint2": "SphairaでkickNXのフォワーダーをインストールし、HOMEメニューから開いてください。",
     "hint_nsp": " \uE0E0 をクリックしてNSPフォーワーダーをインストールする",
     "hint_confirm": "NSPフォワーダのインストールはBANされる可能性があります\n再度ご確認ください",

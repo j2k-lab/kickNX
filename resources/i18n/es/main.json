@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "Abriste kickNX en modo applet. No lo inicies desde el Álbum.",
+    "hint_launch": "Mantén R al iniciar cualquier juego para abrir el Homebrew Menu y elige kickNX.",
+    "hint_hbmenu_icon": "O ábrelo desde un icono de hbmenu en tu menú HOME.",
+    "hint_recommended": "Opcional, pero recomendado",
     "hint2": "Instala un forwarder de kickNX con Sphaira y ábrelo desde el menú HOME.",
     "hint_nsp": "Pulsa  para instalar el NSP forwarder",
     "hint_confirm": "Instalar el NSP forwarder puede resultar en un baneo\nPor favor confirma de nuevo",

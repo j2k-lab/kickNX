@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "Spustili jste kickNX v režimu appletu. Nespouštějte ho z Alba.",
+    "hint_launch": "Podržte R při spuštění hry, otevře se Homebrew Menu. Vyberte kickNX.",
+    "hint_hbmenu_icon": "Nebo spusťte kickNX z ikony hbmenu na domovské obrazovce.",
+    "hint_recommended": "Volitelné, ale doporučené",
     "hint2": "Nainstalujte forwarder kickNX přes Sphairu a otevírejte ho z HOME menu.",
     "hint_nsp": "Kliknutím na \uE0E0 odešlete Switchfin NSP na domovskou obrazovku",
     "hint_confirm": "Pokud odešlete NSP na domovskou obrazovku může to vést k banu\nProsím potvrďte znovu",

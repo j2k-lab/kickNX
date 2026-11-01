@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "Du hast kickNX im Applet-Modus gestartet. Starte es nicht über das Album.",
+    "hint_launch": "Halte R beim Spielstart, um das Homebrew-Menü zu öffnen, und wähle kickNX.",
+    "hint_hbmenu_icon": "Oder starte es über ein hbmenu-Symbol auf deinem Homescreen.",
+    "hint_recommended": "Optional, aber empfohlen",
     "hint2": "Installiere mit Sphaira einen kickNX-Forwarder und starte es vom HOME-Menü.",
     "hint_nsp": "Drücke \uE0E0 um den NSP forwarder zu installieren",
     "hint_confirm": "NSP forwarder zu installieren kann zu einem Ban von Nintendo führen\nBitte erneut bestätigen",

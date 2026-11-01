@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "kickNX를 애플릿 모드로 실행했습니다. 앨범에서 실행하지 마세요.",
+    "hint_launch": "R을 누른 채로 게임을 실행해 Homebrew Menu를 열고 kickNX를 선택하세요.",
+    "hint_hbmenu_icon": "또는 HOME 메뉴의 hbmenu 아이콘에서 실행하세요.",
+    "hint_recommended": "선택 사항(권장)",
     "hint2": "Sphaira로 kickNX 포워더를 설치한 뒤 HOME 메뉴에서 실행하세요.",
     "hint_nsp": "NSP 포워더를 설치하기 위해 를 선택하세요",
     "hint_confirm": "홈 화면 아이콘 설치는 기기가 밴 될 수 있습니다. 다시 확인하세요",

@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "你以小程序模式打开了 kickNX。请不要从相册启动。",
+    "hint_launch": "按住 R 键启动任意游戏以打开 Homebrew Menu，然后选择 kickNX。",
+    "hint_hbmenu_icon": "也可以从 HOME 菜单上的 hbmenu 图标启动。",
+    "hint_recommended": "可选，但推荐",
     "hint2": "使用 Sphaira 安装 kickNX 转发器，然后从 HOME 菜单打开。",
     "hint_nsp": "点击  安装桌面图标",
     "hint_confirm": "安装桌面图标可能导致ban机\n请再次确认",

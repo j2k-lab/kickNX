@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "Bạn đã mở kickNX ở chế độ applet. Đừng mở nó từ Album.",
+    "hint_launch": "Giữ R khi mở một trò chơi bất kỳ để vào Homebrew Menu, rồi chọn kickNX.",
+    "hint_hbmenu_icon": "Hoặc mở nó từ biểu tượng hbmenu trên menu HOME.",
+    "hint_recommended": "Không bắt buộc nhưng nên dùng",
     "hint2": "Cài forwarder kickNX bằng Sphaira rồi mở nó từ menu HOME.",
     "hint_nsp": "Bấm \uE0E0 để cài đặt ra màn hình chính",
     "hint_confirm": "Cài đặt NSP forwarder có thể bị ban\nVui lòng xác nhận",

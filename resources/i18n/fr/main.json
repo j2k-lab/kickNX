@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "Vous avez ouvert kickNX en mode applet. Ne le lancez pas depuis l'Album.",
+    "hint_launch": "Maintenez R en lançant un jeu, puis choisissez kickNX dans le Homebrew Menu.",
+    "hint_hbmenu_icon": "Ou lancez-le depuis une icône hbmenu sur votre menu HOME.",
+    "hint_recommended": "Facultatif mais recommandé",
     "hint2": "Installez un forwarder kickNX avec Sphaira et ouvrez-le depuis le menu HOME.",
     "hint_nsp": "Cliquez sur  pour installer l'icône du bureau",
     "hint_confirm": "L'installation de l'icône du bureau peut entraîner un bannissement de la console. Veuillez confirmer à nouveau",

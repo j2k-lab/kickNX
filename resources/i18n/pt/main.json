@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "Você abriu o kickNX no modo applet. Não o abra pelo Álbum.",
+    "hint_launch": "Segure R ao abrir qualquer jogo para abrir o Homebrew Menu e selecione o kickNX.",
+    "hint_hbmenu_icon": "Ou abra-o por um ícone do hbmenu no seu menu HOME.",
+    "hint_recommended": "Opcional, mas recomendado",
     "hint2": "Instale um encaminhador do kickNX com o Sphaira e abra-o pelo menu HOME.",
     "hint_nsp": "Clique em  para instalar o encaminhador NSP",
     "hint_confirm": "A instalação do encaminhador NSP pode resultar no banimento do sistema. Confirme novamente.",

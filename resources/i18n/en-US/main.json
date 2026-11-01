@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "You opened kickNX in applet mode. Don't launch it from the Album.",
+    "hint_launch": "Hold R while launching any game to open the Homebrew Menu, then select kickNX.",
+    "hint_hbmenu_icon": "Or launch it from an hbmenu icon on your HOME Menu.",
+    "hint_recommended": "Optional but recommended",
     "hint2": "Install a kickNX forwarder with Sphaira and open it from the HOME Menu.",
     "hint_nsp": "Click  to install NSP forwarder",
     "hint_confirm": "Installing NSP forwarder may result in a ban\nPlease confirm again",

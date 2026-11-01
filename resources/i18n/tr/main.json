@@ -29,6 +29,9 @@
   },
   "hints": {
     "hint1": "kickNX'i applet modunda açtınız. Albüm'den başlatmayın.",
+    "hint_launch": "R'ye basılı tutarak bir oyun açın, Homebrew Menu'de kickNX'i seçin.",
+    "hint_hbmenu_icon": "Ya da HOME menünüzdeki bir hbmenu simgesinden başlatın.",
+    "hint_recommended": "İsteğe bağlı ama önerilir",
     "hint2": "Sphaira ile bir kickNX yönlendiricisi kurun ve HOME menüsünden açın.",
     "hint_nsp": "NSP yönlendiricisini yüklemek için  tuşuna basın",
     "hint_confirm": "NSP yönlendiricisini kurmak konsolunuzun çevrim içi özelliklerden yasaklanmasına neden olabilir\n\nLütfen tekrar onaylayın",
