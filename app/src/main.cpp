@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
         } else if (std::strcmp(argv[i], "-t") == 0) {
             MPVCore::DEBUG = true;
         } else if (std::strcmp(argv[i], "-o") == 0) {
-            const char* path = (i + 1 < argc) ? argv[++i] : "switchfin.log";
+            const char* path = (i + 1 < argc) ? argv[++i] : "kicknx.log";
             brls::Logger::setLogOutput(std::fopen(path, "w+"));
         } else if (std::strcmp(argv[i], "-version") == 0) {
             brls::Logger::info("{} {}", AppVersion::getDeviceName(), AppVersion::getCommit());
@@ -133,9 +133,7 @@ int main(int argc, char* argv[]) {
     } else {
         brls::Application::pushActivity(new brls::Activity(new KickNXHome()));
     }
-    // KickNX: analytics disabled.
-    // KickNX: Switchfin update checks disabled.
-// Run the app
+    // Run the app
     while (brls::Application::mainLoop());
 
     kicknx::portrait::OrientationController::instance().shutdown();
