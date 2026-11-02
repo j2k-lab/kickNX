@@ -15,6 +15,23 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.5.1]
+
+### Added
+- **Install updates from the app**: when "Check for updates" on the About page finds a newer release, kickNX offers to install it. It downloads the new version, checks that it arrived complete, replaces itself and restarts. The dialog also lists the release's main changes. A download that was never applied is deleted the next time kickNX starts.
+- **Applet-mode help**: opening kickNX from the Album now shows three short slides: a warning not to launch it from the Album, how to open it through the Homebrew Menu (hold R while starting a game, or use an hbmenu icon on the HOME Menu), and an optional suggestion to install a kickNX forwarder with Sphaira.
+- **Unsupported text notes**: stream titles, descriptions and chat messages written in scripts the Switch fonts can't draw show a short note instead of empty boxes.
+- **Live viewers on category cards** on Home and streamer pages, and live event cards show total viewers and live streams. Events are sorted by viewers.
+
+### Changed
+- **Faster Home**: all Home sections share one connection to kick.com.
+- **Faster chat**: chat lines keep their layout instead of measuring it again, and chat stops its requests and connection promptly when it closes.
+- **Green viewer counts**: viewers on stream cards and views on clip and VOD cards use the accent green.
+- **Smaller app**: leftover Switchfin code, settings, resources and non-Switch packaging were removed.
+
+### Fixed
+- **Crash after scrubbing**: closing the live player after a scrub could leave focus on the closed player, and the next stick input on Home crashed kickNX.
+
 ## [0.5.0]
 
 ### Added

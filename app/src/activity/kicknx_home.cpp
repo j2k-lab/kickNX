@@ -2493,7 +2493,16 @@ void KickNXHome::showAbout() {
 
     addSection("Changelog");
     addBody(
-        "0.5.0 (Current)\n"
+        "0.5.1 (Current)\n"
+        "• Check for updates installs the new version and restarts kickNX.\n"
+        "• Update dialog lists what's new in the release.\n"
+        "• Applet-mode help: how to open kickNX from the Homebrew Menu, plus an "
+        "optional Sphaira forwarder.\n"
+        "• A note replaces titles and chat messages the Switch fonts can't draw.\n"
+        "• Live viewers on category cards; live events sorted by viewers.\n"
+        "• Faster Home and chat, and a smaller app.\n"
+        "• Fixed a crash on Home after scrubbing in the live player.\n\n"
+        "0.5.0\n"
         "• Colour themes: OLED (default), Dark Grey and Kick, chosen from a pop-up on Home.\n"
         "• Kick theme: muted green pages, grey cards and a dark K pattern on headers and sign-in.\n"
         "• Live events row and event pages with live streams and popular clips.\n"

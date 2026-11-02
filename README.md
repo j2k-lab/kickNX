@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Release 0.5.0" src="https://img.shields.io/badge/release-0.5.0-green?logo=github&style=flat-square" height="20"></a>
+  <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Release 0.5.1" src="https://img.shields.io/badge/release-0.5.1-green?logo=github&style=flat-square" height="20"></a>
   <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/j2k-lab/kickNX/total?color=green&style=flat-square" height="20"></a>
   <img alt="Nintendo Switch" src="https://img.shields.io/badge/platform-Nintendo%20Switch-E60012?logo=nintendoswitch&logoColor=white&style=flat-square" height="20">
   <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=c%2B%2B&logoColor=white&style=flat-square" height="20">
@@ -25,9 +25,12 @@ Switch homebrew. It combines native playback, Kick browsing and interactive
 chat in an interface designed around Joy-Con, Pro Controller and touchscreen
 use in handheld, tabletop and television play.
 
-Version 0.5.0 adds colour themes (OLED, Dark Grey and Kick) chosen from a
+Version 0.5.1 installs updates from the About page and restarts on its own,
+shows how to launch kickNX properly when it is opened in applet mode, and
+speeds up Home, chat and playback.
+Version 0.5.0 added colour themes (OLED, Dark Grey and Kick) chosen from a
 pop-up on Home, a Live events row and event pages with live streams and
-popular clips, and an in-app keyboard for landscape chat. It also removes the
+popular clips, and an in-app keyboard for landscape chat. It also removed the
 non-Kick features to make kickNX Kick-only.
 It also includes channel follow and unfollow directly from streamer
 profiles, custom 3D kickNX buffering indicator with lime text shimmer,
@@ -199,6 +202,7 @@ Major milestones:
 - `0.3.2` - Kick signature playback bar with live uptime, channel category navigation, and bottom sheet emote composer
 - `0.4.0` - Channel follow/unfollow on streamer profiles, clickable user avatar, and Kick bright green UI theme, plus chat, playback and settings fixes
 - `0.5.0` - Colour themes with a Home pop-up picker, Kick-only cleanup, offline stream handling and playback fixes
+- `0.5.1` - In-app updates with automatic restart, applet-mode launch help, and faster Home, chat and playback
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
