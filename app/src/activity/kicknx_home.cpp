@@ -24,6 +24,7 @@
 #include <functional>
 #include <fmt/format.h>
 #include <memory>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -2194,6 +2195,51 @@ std::string joinVersion(const std::vector<int>& parts) {
     return out;
 }
 
+/// A short "What's new" list from a release's Markdown notes: the bold title
+/// of each bullet ("- **Colour Themes:** ..."), or the start of the bullet
+/// when it has none. Empty when the notes have no bullets.
+std::string releaseHighlights(const std::string& notes) {
+    constexpr size_t maxItems = 5;
+    constexpr size_t maxLength = 48;
+    std::istringstream in(notes);
+    std::string line;
+    std::vector<std::string> items;
+    size_t total = 0;
+    while (std::getline(in, line)) {
+        const size_t start = line.find_first_not_of(" \t");
+        if (start == std::string::npos || line.size() < start + 2) continue;
+        if ((line[start] != '-' && line[start] != '*') || line[start + 1] != ' ') continue;
+        ++total;
+        if (items.size() >= maxItems) continue;
+
+        std::string text = line.substr(start + 2);
+        if (text.rfind("**", 0) == 0) {
+            const size_t end = text.find("**", 2);
+            if (end != std::string::npos) text = text.substr(2, end - 2);
+        }
+        text.erase(std::remove_if(text.begin(), text.end(),
+                       [](char c) { return c == '*' || c == '`' || c == '\r'; }),
+            text.end());
+        while (!text.empty() && (text.back() == ':' || text.back() == ' ')) text.pop_back();
+        if (text.size() > maxLength) {
+            text.resize(maxLength);
+            // Don't cut a UTF-8 character in half.
+            while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0) == 0x80)
+                text.pop_back();
+            if (!text.empty()) text.pop_back();
+            text += "…";
+        }
+        if (!text.empty()) items.push_back(text);
+    }
+    if (items.empty()) return "";
+
+    std::string out = "\n\nWhat's new:";
+    for (const auto& item : items) out += "\n• " + item;
+    if (total > items.size())
+        out += "\n…and " + std::to_string(total - items.size()) + " more";
+    return out;
+}
+
 void showUpdateResult(const std::string& message) {
     auto* dialog = new brls::Dialog(message);
     dialog->addButton("OK", []() {});
@@ -2243,6 +2289,7 @@ void checkForUpdates() {
     ThreadPool::instance().submit([](HTTP&) {
         std::string message;
         std::string latestText;
+        std::string highlights;
         std::string nroUrl;
         long long nroSize = 0;
         try {
@@ -2257,6 +2304,8 @@ void checkForUpdates() {
                           "Check github.com/j2k-lab/kickNX/releases.";
             } else if (latest > current) {
                 latestText = joinVersion(latest);
+                if (release.contains("body") && release["body"].is_string())
+                    highlights = releaseHighlights(release["body"].get<std::string>());
                 for (const auto& asset : release.value("assets", nlohmann::json::array())) {
                     const std::string name = asset.value("name", "");
                     if (name.size() > 4 && name.compare(name.size() - 4, 4, ".nro") == 0) {
@@ -2279,15 +2328,15 @@ void checkForUpdates() {
                       "Check your internet connection and try again.";
         }
 
-        brls::sync([message, latestText, nroUrl, nroSize]() {
+        brls::sync([message, latestText, highlights, nroUrl, nroSize]() {
             updateBusy.store(false);
             if (nroUrl.empty() || nroSize <= 0 || !updater::supported()) {
-                showUpdateResult(message);
+                showUpdateResult(message + highlights);
                 return;
             }
             auto* dialog = new brls::Dialog(
                 "kickNX " + latestText + " is available. You have " +
-                AppVersion::getVersion() + ".\n\n"
+                AppVersion::getVersion() + "." + highlights + "\n\n"
                 "Update now? kickNX will restart when it's done.");
             dialog->addButton("Later", []() {});
             dialog->addButton("Update", [nroUrl, nroSize]() {
