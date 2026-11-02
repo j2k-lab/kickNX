@@ -1,6 +1,7 @@
 #include "api/kick_auth.hpp"
 
 #include "api/http.hpp"
+#include "utils/config.hpp"
 #include "utils/thread.hpp"
 
 #include <borealis.hpp>
@@ -143,7 +144,8 @@ RawResponse postFormRaw(const std::string& url, const HTTP::Form& form) {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 15000L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 15000L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "kickNX/0.5.0 (Nintendo Switch)");
+    const std::string userAgent = "kickNX/" + AppVersion::getVersion() + " (Nintendo Switch)";
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeBody);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
@@ -449,7 +451,7 @@ void pollTVLinkAuthAsync(
                     url,
                     payload,
                     headers,
-                    "Mozilla/5.0 (Nintendo Switch; kickNX/0.5.0)");
+                    "Mozilla/5.0 (Nintendo Switch; kickNX/" + AppVersion::getVersion() + ")");
 
                 if (cancel && cancel->load()) return;
 
