@@ -154,7 +154,7 @@ private:
     std::string currentUrl;
 };
 
-enum class MediaKind { Details, Vod, Clip };
+enum class MediaKind { Details, Vod, Clip, Live };
 
 struct MediaCard {
     MediaKind kind = MediaKind::Details;
@@ -1103,6 +1103,17 @@ void KickChannelPage::showData(
         MediaCard card;
         card.kind = MediaKind::Vod;
         card.id = video.id;
+        // The broadcast that is still going opens the live stream. Once it
+        // ends, Kick lists it as a normal VOD.
+        if (video.isLive && loaded.live) {
+            card.kind = MediaKind::Live;
+            card.title = video.title;
+            card.highlight = "LIVE now";
+            card.thumbnail = kick::mediaThumbnail(video.thumbnailUrl, 320, 180);
+            card.details = video.title + "\n\nPress A to watch the live stream.";
+            videos.push_back(std::move(card));
+            continue;
+        }
         card.title = video.title;
         card.subtitle =
             video.duration.empty() ? "" : video.duration + " ·";
@@ -1134,7 +1145,9 @@ void KickChannelPage::showData(
                 ? "No recent broadcasts were returned."
                 : "Recent broadcasts are unavailable.",
             [this](const MediaCard& card) {
-                if (card.kind == MediaKind::Vod)
+                if (card.kind == MediaKind::Live)
+                    playLive();
+                else if (card.kind == MediaKind::Vod)
                     playVod(card.id, card.title, card.details);
                 else
                     showMediaDetails(card.title, card.details);
