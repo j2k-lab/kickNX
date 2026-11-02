@@ -10,7 +10,8 @@ namespace updater {
 /// True when this build can replace its own NRO (Switch only).
 bool supported();
 
-/// Remembers the running NRO's path (argv[0] from the homebrew loader).
+/// Remembers the running NRO's path (argv[0] from the homebrew loader) and
+/// deletes any "<nro>.new" / "<nro>.old" left by an earlier update.
 void setNroPath(const char* path);
 
 /// Downloads url to "<nro>.new" and checks it is a complete NRO of the

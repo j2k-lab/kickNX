@@ -93,6 +93,11 @@ void setNroPath(const char* path) {
     // The loader passes "sdmc:/..." paths; anything else is not a file we
     // can replace.
     if (path && std::strncmp(path, "sdmc:/", 6) == 0) nroPath = path;
+    if (nroPath.empty()) return;
+    // A download that was never applied (kickNX closed from the HOME Menu or
+    // crashed before exiting) would otherwise leave ~35 MB on the SD card.
+    std::remove(newPath().c_str());
+    std::remove(oldPath().c_str());
 }
 
 void download(const std::string& url, long long expectedSize,
