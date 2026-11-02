@@ -493,6 +493,18 @@ void checkChannelLiveAsync(const std::string& channel, LiveCheckCallback done) {
         });
 }
 
+namespace {
+LiveVodReloadHandler liveVodReloadHandler;
+}  // namespace
+
+void setLiveVodReloadHandler(LiveVodReloadHandler handler) {
+    liveVodReloadHandler = std::move(handler);
+}
+
+bool reloadLiveVodInPlayer() {
+    return liveVodReloadHandler && liveVodReloadHandler();
+}
+
 std::string mpvExtra() {
     // HTTP headers, TLS and the network timeout are configured globally in
     // MPVCore::init() because values with spaces break the per-file option

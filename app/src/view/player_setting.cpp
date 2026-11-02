@@ -232,6 +232,9 @@ PlayerSetting::PlayerSetting(std::string kickChannel) {
                 brls::delay(650, [config, generation]() {
                     if (generation != kickQualitySwitchGeneration.load())
                         return;
+                    // Rewound into the live VOD: the player reopens it at
+                    // the same moment in the new quality.
+                    if (kick::reloadLiveVodInPlayer()) return;
 
                     ThreadPool::instance().submit(
                         [config, generation](HTTP&) mutable {
@@ -353,6 +356,9 @@ PlayerSetting::PlayerSetting(std::string kickChannel) {
                 if (kickChannel.empty()) {
                     return;
                 }
+                // Rewound into the live VOD: the player reopens it at the
+                // same moment with the new decoder.
+                if (kick::reloadLiveVodInPlayer()) return;
 
                 auto config = kick::loadConfig();
                 config.channel = kickChannel;

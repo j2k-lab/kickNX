@@ -86,6 +86,8 @@ public:
     void setLiveRecordingAvailable(bool available);
     void setWatchingRecording(bool watching);
     bool isWatchingRecording() const { return this->watchingRecording; }
+    /// How far behind live playback is now, in seconds.
+    int64_t liveBehind() const { return this->currentLiveBehind(); }
     /// mpv opens a file at its start and seeks to the requested point once
     /// it runs. Keeps the (paused) picture covered until playback has
     /// reached `position`, then resumes.

@@ -2344,6 +2344,7 @@ public:
             watchKickStreamOffline(playbackRecovery);
 
             view->setLiveSeekHandler([this](int64_t behind) { onLiveSeek(behind); });
+            kick::setLiveVodReloadHandler([this]() { return reopenLiveVod(); });
 
             std::weak_ptr<KickPlaybackRecoveryState> weakRecovery =
                 playbackRecovery;
@@ -2599,6 +2600,7 @@ public:
         }
         view->setPlaybackRecoveryHandler({});
         view->setLiveSeekHandler({});
+        kick::setLiveVodReloadHandler({});
         pendingUrl.clear();
 
         if (chatUi) chatUi->alive.store(false);
@@ -2876,6 +2878,22 @@ public:
                 goLive();
             });
         });
+    }
+
+    // A quality or decoder change while the live VOD plays. Looking it up
+    // again picks the rendition for the new quality, and reopening loads it
+    // with the decoder now set. Returns false on the live stream, which
+    // player settings reload themselves.
+    bool reopenLiveVod() {
+        if (!playbackRecovery || playerShuttingDown ||
+            !playbackRecovery->watchingRecording.load() || recordingLookupRunning)
+            return false;
+        const int64_t behind = view->liveBehind();
+        // Keeps the bar on this moment while the live VOD is fetched again.
+        view->holdUntilPosition(static_cast<double>(view->getCurrentStreamUptime() - behind));
+        liveRecordingUrl.clear();
+        lookUpLiveRecording(behind);
+        return true;
     }
 
     void onLiveSeek(int64_t behind) {
