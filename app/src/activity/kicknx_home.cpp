@@ -2476,6 +2476,7 @@ void KickNXHome::showAbout() {
         "• Featured live streams, subcategories and live search by channel or game with viewer counts\n"
         "• Detailed channel pages with past broadcasts (VODs), clips and categories\n"
         "• Live AWS IVS HLS, VOD and clip playback with quality selection\n"
+        "• Rewind live streams back to their start through the live VOD\n"
         "• Selectable Software, Hardware and Hybrid playback modes\n"
         "• Automatic portrait mode using attached Joy-Con motion sensors, with either rotation supported\n"
         "• Smartphone-style portrait player combining video, live Pusher chat, a persistent message draft, inline touch keyboard and emote sheet\n"
@@ -2494,6 +2495,11 @@ void KickNXHome::showAbout() {
     addSection("Changelog");
     addBody(
         "0.5.1 (Current)\n"
+        "• Rewind a live stream to its start: long rewinds switch to the live VOD, "
+        "with chat staying live.\n"
+        "• Recent broadcasts show a still-live broadcast as a LIVE card.\n"
+        "• A label over the bar shows where you are scrubbing to.\n"
+        "• Live streams keep about 30 seconds for rewinding.\n"
         "• Check for updates installs the new version and restarts kickNX.\n"
         "• Update dialog lists what's new in the release.\n"
         "• Applet-mode help: how to open kickNX from the Homebrew Menu, plus an "

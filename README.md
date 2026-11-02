@@ -25,9 +25,11 @@ Switch homebrew. It combines native playback, Kick browsing and interactive
 chat in an interface designed around Joy-Con, Pro Controller and touchscreen
 use in handheld, tabletop and television play.
 
-Version 0.5.1 installs updates from the About page and restarts on its own,
-shows how to launch kickNX properly when it is opened in applet mode, and
-speeds up Home, chat and playback.
+Version 0.5.1 lets you rewind a live stream all the way back to its start,
+the way kick.com does, by switching to the live VOD. It also installs updates
+from the About page and restarts on its own, shows how to launch kickNX
+properly when it is opened in applet mode, and speeds up Home, chat and
+playback.
 Version 0.5.0 added colour themes (OLED, Dark Grey and Kick) chosen from a
 pop-up on Home, a Live events row and event pages with live streams and
 popular clips, and an in-app keyboard for landscape chat. It also removed the
@@ -82,12 +84,18 @@ chat, and Joy-Con portrait mode.
 - Live/offline status, banner, profile artwork and description
 - Direct channel follow and unfollow with real-time status detection and sync
 - Current stream and category information
-- Recent broadcasts and clips
+- Recent broadcasts and clips; a broadcast that is still live shows as a
+  "LIVE now" card that opens the live stream
 - Direct live, VOD and clip playback
 
 ### Playback
 
 - Native Kick live-stream, VOD and clip playback
+- Rewind a live stream back to its start: short rewinds stay in the live
+  buffer (about 30 seconds), longer ones switch to the live VOD with chat
+  staying live, and scrubbing to the end of the bar goes back to live
+- While scrubbing, a small label over the progress bar shows how far behind
+  live (or, in a VOD, which time) you are going
 - Custom 3D kickNX buffering indicator with animated lime-green letter shimmer and neon progress track
 - Source and transcoded quality selection (1080p60 default)
 - Embedded-player live resolution that avoids the generic commercial-break slate
@@ -149,7 +157,9 @@ settings automatically through the in-app settings menu.
 
 ## Updating
 
-Replace the existing NRO in `/switch/KickNX/` with the newer release. OAuth,
+On the About page, **Check for updates** downloads a newer release, installs
+it and restarts kickNX. kickNX is also in the Homebrew App Store. To update
+by hand, replace the existing NRO in `/switch/KickNX/` with the newer release. OAuth,
 chat, decoder, orientation and interface preferences remain under
 `/config/KickNX/` and are not stored inside the executable.
 
@@ -170,6 +180,9 @@ reducing the discontinuities that previously stressed hardware decoding.
 - Some standard Unicode emoji characters may render as missing-glyph boxes.
 - Subtitle tracks in Player Settings remain inactive until Kick updates their Amazon IVS backend to serve live transcode tracks (Kick's web player currently relies on client-side browser speech recognition).
 - Kick may change its undocumented playback-token behavior without notice.
+- Rewinding further than the live buffer needs a live VOD. Channels that don't
+  save their broadcasts can only rewind about 30 seconds. The first long
+  rewind briefly stops the stream while kickNX fetches the live VOD.
 - Automatic portrait detection requires at least one compatible attached
   Joy-Con; manual orientation remains available from player settings.
 
@@ -202,7 +215,7 @@ Major milestones:
 - `0.3.2` - Kick signature playback bar with live uptime, channel category navigation, and bottom sheet emote composer
 - `0.4.0` - Channel follow/unfollow on streamer profiles, clickable user avatar, and Kick bright green UI theme, plus chat, playback and settings fixes
 - `0.5.0` - Colour themes with a Home pop-up picker, Kick-only cleanup, offline stream handling and playback fixes
-- `0.5.1` - In-app updates with automatic restart, applet-mode launch help, and faster Home, chat and playback
+- `0.5.1` - Rewind live streams to their start through the live VOD, in-app updates with automatic restart, applet-mode launch help, and faster Home, chat and playback
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
