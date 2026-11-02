@@ -1513,6 +1513,11 @@ struct KickPlaybackRecoveryState {
     std::function<void()> exitPlayer;
     std::string channel;
     std::function<void(std::vector<kick::SubtitleTrack>)> onSubtitlesResolved;
+    // While the viewer rewinds into Kick's recording of the broadcast, live
+    // recovery stands down: the recording's end and errors go to the player.
+    std::atomic_bool watchingRecording{false};
+    std::atomic_bool streamEnded{false};
+    std::function<bool(MpvEventEnum)> onRecordingEvent;
 };
 
 constexpr int KICK_RECOVERY_MAX_ATTEMPTS = 5;
@@ -1706,6 +1711,13 @@ void handleKickStreamOffline(
     state->recovering.store(false);
 
     const std::string name = state->channel.empty() ? "The streamer" : state->channel;
+    // The recording stays watchable after the stream ends.
+    if (state->watchingRecording.load()) {
+        state->streamEnded.store(true);
+        brls::Logger::info("kickNX: {} went offline; the recording keeps playing", name);
+        brls::Application::notify(name + " went offline. The live VOD keeps playing.");
+        return;
+    }
     brls::Logger::info("kickNX: {} went offline; leaving the player", name);
     brls::Application::notify(name + " went offline. Returning to the previous screen…");
 
@@ -1989,6 +2001,8 @@ bool requestKickPlaybackRecovery(
         state && state->decoderSwitching.load() ? 1 : 0);
 #endif
     if (!state || !state->alive.load()) return true;
+    if (state->watchingRecording.load())
+        return state->onRecordingEvent ? state->onRecordingEvent(event) : true;
     if (state->offlineHandled.load()) return true;
 
     if (state->decoderSwitching.load()) {
@@ -2084,7 +2098,8 @@ void handleKickVideoReconfig(
         state ? state->reconfigCount.load() : -1);
 #endif
     if (!state || !state->alive.load() ||
-        state->decoderSwitching.load())
+        state->decoderSwitching.load() ||
+        state->watchingRecording.load())
         return;
 
     const kick::DecoderMode mode = kick::loadDecoderMode();
@@ -2323,7 +2338,12 @@ public:
                 this->kickSubtitles = std::move(subs);
             };
             playbackRecovery->exitPlayer = [this]() { leaveEndedStream(); };
+            playbackRecovery->onRecordingEvent = [this](MpvEventEnum event) {
+                return handleRecordingEvent(event);
+            };
             watchKickStreamOffline(playbackRecovery);
+
+            view->setLiveSeekHandler([this](int64_t behind) { onLiveSeek(behind); });
 
             std::weak_ptr<KickPlaybackRecoveryState> weakRecovery =
                 playbackRecovery;
@@ -2421,6 +2441,15 @@ public:
             switch (event) {
             case MpvEventEnum::MPV_LOADED: {
                 streamLoaded = true;
+                // The recording is an ordinary VOD: none of the live
+                // recovery bookkeeping or caption tracks below apply to it.
+                if (playbackRecovery && playbackRecovery->watchingRecording.load()) {
+                    applyKickVideoLayout(currentChatPreferences);
+                    // A held recording resumes once it reaches the spot.
+                    if (!view->isHoldingPosition()) mpv.command("set", "pause", "no");
+                    view->getProfile()->init("Local");
+                    break;
+                }
                 if (!this->kickChannel.empty()) {
                     applyKickVideoLayout(currentChatPreferences);
                     if (playbackRecovery) {
@@ -2527,6 +2556,10 @@ public:
                 break;
             }
             case MpvEventEnum::MPV_STOP:
+                if (!pendingUrl.empty()) {
+                    loadPendingUrl();
+                    break;
+                }
                 if (playbackRecovery &&
                     playbackRecovery->waitingForHardwareStop.load())
                     continueHardwareRecoveryAfterStop(playbackRecovery);
@@ -2562,8 +2595,11 @@ public:
             playbackRecovery->reconfigArmed.store(false);
             playbackRecovery->decoderSwitching.store(false);
             playbackRecovery->restoreGeneration.fetch_add(1);
+            playbackRecovery->watchingRecording.store(false);
         }
         view->setPlaybackRecoveryHandler({});
+        view->setLiveSeekHandler({});
+        pendingUrl.clear();
 
         if (chatUi) chatUi->alive.store(false);
         stopChat();
@@ -2780,6 +2816,212 @@ public:
                     new KickChannelPage(channel)),
                 brls::TransitionAnimation::NONE);
         });
+    }
+
+    // Live rewind past the cache plays Kick's recording of the broadcast,
+    // which starts when the stream started. Channels that don't save
+    // broadcasts (or lock them) keep the cache-only rewind.
+    // Asked only when a rewind needs it, with the live stream stopped: while
+    // it plays, the Switch has no TLS connection to spare and a new request
+    // fails with an SSL connect error.
+    void lookUpLiveRecording(int64_t behind) {
+        if (recordingLookupRunning) return;
+        recordingLookupRunning = true;
+        auto& state = *playbackRecovery;
+        // Live recovery must not treat the stop as a dropped stream.
+        state.watchingRecording.store(true);
+        state.recovering.store(false);
+        state.retryScheduled.store(false);
+        view->setLoadingNote("Fetching live VOD…");
+        view->showLoading();
+        MPVCore::instance().stop();
+
+        std::weak_ptr<std::atomic_bool> weakAlive = playerAlive;
+        // Give the stopped stream a moment to close its connection.
+        brls::delay(700, [this, weakAlive, behind]() {
+            auto alive = weakAlive.lock();
+            if (!alive || !alive->load() || playerShuttingDown) return;
+            kick::findLiveRecordingAsync(kick::loadConfig(), kickChannel,
+                [this, weakAlive, behind](
+                    bool known, std::string url, double recordedSeconds, std::string error) {
+                auto alive = weakAlive.lock();
+                if (!alive || !alive->load() || playerShuttingDown) return;
+                recordingLookupRunning = false;
+                if (known && !url.empty()) {
+                    brls::Logger::info("kickNX: {} live recording is available", kickChannel);
+                    liveRecordingUrl = std::move(url);
+                    view->setLiveRecordingAvailable(true);
+                    // The uptime the stream was opened with can be minutes
+                    // stale; the recording's length is accurate.
+                    if (recordedSeconds > 0) {
+                        view->setStreamUptime(static_cast<int64_t>(recordedSeconds) +
+                                              VideoView::LIVE_RECORDING_DELAY);
+                    }
+                    openRecording(std::max<int64_t>(0, view->getCurrentStreamUptime() - behind));
+                    return;
+                }
+                if (known) {
+                    brls::Logger::info("kickNX: {} live recording is not available", kickChannel);
+                    view->setLiveRecordingAvailable(false);
+                    brls::Application::notify(
+                        "This channel has no live VOD, so only the last few seconds can be rewound.");
+                } else {
+                    brls::Logger::warning("kickNX: live recording lookup failed: {}", error);
+                    brls::Application::notify("Couldn't fetch the live VOD. Try again in a moment.");
+                }
+                if (playbackRecovery->streamEnded.load()) {
+                    leaveEndedStream();
+                    return;
+                }
+                goLive();
+            });
+        });
+    }
+
+    void onLiveSeek(int64_t behind) {
+        if (!playbackRecovery || playerShuttingDown) return;
+        const int64_t uptime = view->getCurrentStreamUptime();
+
+        if (!playbackRecovery->watchingRecording.load()) {
+            if (uptime <= 0) return;
+            if (liveRecordingUrl.empty()) {
+                lookUpLiveRecording(behind);
+                return;
+            }
+            openRecording(std::max<int64_t>(0, uptime - behind));
+            return;
+        }
+        if (recordingLookupRunning) return;
+
+        // Past the end of the loaded recording. It runs about a minute
+        // behind live, so anything that close goes back to live instead.
+        if (behind < view->liveRecordingGap()) {
+            goLive();
+            return;
+        }
+        openRecording(std::max<int64_t>(0, uptime - behind));
+    }
+
+    void openRecording(int64_t position) {
+        // Never past what the recording holds: mpv would sit at its end.
+        const int64_t newest = view->getCurrentStreamUptime() - view->liveRecordingGap();
+        if (newest > 0) position = std::min(position, newest);
+        auto& state = *playbackRecovery;
+        state.watchingRecording.store(true);
+        state.recovering.store(false);
+        state.retryScheduled.store(false);
+        state.reconfigArmed.store(false);
+        // Opened paused and covered until it has seeked there, so the start
+        // of the broadcast never flashes up first. Set before switching the
+        // view over, which would otherwise show the bar at position 0.
+        view->holdUntilPosition(static_cast<double>(position));
+        view->setWatchingRecording(true);
+        view->setLoadingNote("Loading live VOD…");
+        view->showLoading();
+        brls::Logger::info("kickNX: playing the {} recording from {} s", kickChannel, position);
+        loadAfterStop(liveRecordingUrl,
+            fmt::format(position > 5 ? "start={},pause=yes" : "start={}", position));
+    }
+
+    void goLive() {
+        auto& state = *playbackRecovery;
+        if (state.streamEnded.load()) {
+            brls::Application::notify(kickChannel + " has ended the stream.");
+            return;
+        }
+        recordingReloadedAt = -1;
+        view->setWatchingRecording(false);
+        view->setLoadingNote("Going back to live…");
+        view->showLoading();
+        // From here on, live recovery handles any trouble with the stream.
+        state.watchingRecording.store(false);
+        brls::Logger::info("kickNX: going back to the {} live stream", kickChannel);
+        if (!state.lastUrl.empty()) {
+            loadAfterStop(state.lastUrl, kick::mpvExtra());
+            return;
+        }
+        auto config = kick::loadConfig();
+        config.channel = kickChannel;
+        std::weak_ptr<std::atomic_bool> weakAlive = playerAlive;
+        kick::resolveLiveAsync(
+            config,
+            [this, weakAlive](kick::Resolution result) {
+                auto alive = weakAlive.lock();
+                if (!alive || !alive->load() || playerShuttingDown) return;
+                this->kickSubtitles = result.subtitles;
+                loadAfterStop(result.selected.url, kick::mpvExtra());
+            },
+            [this, weakAlive](const std::string& error) {
+                auto alive = weakAlive.lock();
+                if (!alive || !alive->load() || playerShuttingDown) return;
+                requestKickPlaybackRecovery(playbackRecovery, MpvEventEnum::MPV_FILE_ERROR);
+            });
+    }
+
+    bool handleRecordingEvent(MpvEventEnum event) {
+        // Events from the file being replaced.
+        if (!pendingUrl.empty() || recordingLookupRunning || playerShuttingDown) return true;
+        auto& mpv = MPVCore::instance();
+
+        if (event == MpvEventEnum::END_OF_FILE) {
+            if (playbackRecovery->streamEnded.load()) {
+                leaveEndedStream();
+                return true;
+            }
+            // The copy that was loaded has been watched to its end. Load a
+            // newer one from there, or go live once caught up.
+            const int64_t reached = std::max<int64_t>(
+                static_cast<int64_t>(mpv.playback_time), mpv.duration);
+            const int64_t behind = view->getCurrentStreamUptime() - reached;
+            if (behind < view->liveRecordingGap() || reached <= recordingReloadedAt + 5) {
+                goLive();
+            } else {
+                recordingReloadedAt = reached;
+                openRecording(reached);
+            }
+            return true;
+        }
+
+        if (event == MpvEventEnum::MPV_FILE_ERROR) {
+            brls::Logger::warning("kickNX: the {} recording could not be played", kickChannel);
+            liveRecordingUrl.clear();
+            view->setLiveRecordingAvailable(false);
+            if (playbackRecovery->streamEnded.load()) {
+                leaveEndedStream();
+                return true;
+            }
+            brls::Application::notify("The live VOD couldn't be played. Going back to live.");
+            goLive();
+        }
+        return true;
+    }
+
+    // Loading a new file while the hardware decoder may still hold a frame of
+    // the old one can crash, so stop first and load once MPV confirms it.
+    void loadAfterStop(const std::string& url, const std::string& extra) {
+        pendingUrl = url;
+        pendingExtra = extra;
+        auto& mpv = MPVCore::instance();
+        if (mpv.isStopped()) {
+            loadPendingUrl();
+            return;
+        }
+        mpv.stop();
+        std::weak_ptr<std::atomic_bool> weakAlive = playerAlive;
+        brls::delay(3000, [this, weakAlive]() {
+            auto alive = weakAlive.lock();
+            if (alive && alive->load() && !playerShuttingDown && !pendingUrl.empty()) loadPendingUrl();
+        });
+    }
+
+    void loadPendingUrl() {
+        if (pendingUrl.empty() || playerShuttingDown) return;
+        const std::string url = std::move(pendingUrl);
+        const std::string extra = std::move(pendingExtra);
+        pendingUrl.clear();
+        pendingExtra.clear();
+        MPVCore::instance().command("set", "pause", "no");
+        MPVCore::instance().setUrl(url, extra);
     }
 
     void restorePlaybackFocus() {
@@ -3249,6 +3491,12 @@ private:
         std::make_shared<std::atomic_bool>(true);
     bool navigatingToChannel = false;
     std::shared_ptr<std::atomic_bool> asyncCancelToken;
+    // Live rewind into the recording
+    std::string liveRecordingUrl;
+    bool recordingLookupRunning = false;
+    int64_t recordingReloadedAt = -1;
+    std::string pendingUrl;
+    std::string pendingExtra;
 };
 
 void RemoteView::playLive(

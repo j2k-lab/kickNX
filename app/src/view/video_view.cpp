@@ -16,6 +16,15 @@ const double SCRUB_SHOULDER_STEP = 10.0;
 
 using namespace brls::literals;
 
+/// Seconds behind live at `progress` along a live bar of `length` seconds.
+/// The last 2% of the bar snaps to live, but never more than the recording
+/// trails live by, so a long broadcast's last minutes stay reachable.
+static int64_t liveBehindAt(float progress, double length) {
+    const double behind = (1.0 - progress) * length;
+    if (behind <= std::min<double>(0.02 * length, VideoView::LIVE_RECORDING_DELAY)) return 0;
+    return static_cast<int64_t>(behind);
+}
+
 static int getSeekRange(int current) {
     current = abs(current);
     if (current < 60) return 5;
@@ -146,20 +155,8 @@ VideoView::VideoView() {
         brls::Logger::verbose("Set progress: {}", progress);
         this->showOSD(true);
         if (this->isLiveMode) {
-            if (progress >= 0.98f) {
-                this->liveRewindSeconds = 0;
-                MPVCore::instance().seek(0, "absolute-percent");
-            } else {
-                double dvrWindow = std::max<double>(120.0, MPVCore::instance().duration);
-                int64_t targetRewind = static_cast<int64_t>((1.0f - progress) * dvrWindow);
-                if (targetRewind < 0) targetRewind = 0;
-                int64_t seekDiff = this->liveRewindSeconds - targetRewind;
-                this->liveRewindSeconds = targetRewind;
-                if (seekDiff != 0) {
-                    MPVCore::instance().seek(seekDiff, "relative");
-                }
-            }
-            this->updateLiveProgressUI();
+            this->scrubTip.clear();
+            this->seekLive(liveBehindAt(progress, this->liveBarLength()));
             return;
         }
         MPVCore::instance().seek(progress * 100, "absolute-percent");
@@ -185,11 +182,10 @@ VideoView::VideoView() {
     osdSlider->getProgressEvent().subscribe([this](float progress) {
         this->showOSD(false);
         if (this->isLiveMode) {
-            double dvrWindow = std::max<double>(120.0, MPVCore::instance().duration);
-            int64_t targetRewind = static_cast<int64_t>((1.0f - progress) * dvrWindow);
-            if (targetRewind < 0) targetRewind = 0;
-            this->liveRewindSeconds = targetRewind;
-            this->updateLiveProgressUI();
+            const int64_t behind = liveBehindAt(progress, this->liveBarLength());
+            this->showLiveBehind(behind);
+            this->scrubTip = behind == 0 ? "LIVE" : "-" + misc::sec2Time(behind);
+            this->scrubTipProgress = progress;
         }
     });
 
@@ -226,11 +222,9 @@ VideoView::VideoView() {
             this->speedHintBox->setVisibility(brls::Visibility::GONE);
             break;
         case OsdGestureType::HORIZONTAL_PAN_START:
-            infoIcon->setImageFromSVGRes("icon/ico-seeking.svg");
-            osdInfoBox->setVisibility(brls::Visibility::VISIBLE);
             break;
         case OsdGestureType::HORIZONTAL_PAN_UPDATE:
-            this->requestSeeking(fmin(120.0f, mpv.duration) * status.deltaX);
+            this->requestSeeking(fmin(120.0f, this->barLength()) * status.deltaX);
             break;
         case OsdGestureType::HORIZONTAL_PAN_CANCEL:
             // 立即取消
@@ -238,7 +232,7 @@ VideoView::VideoView() {
             break;
         case OsdGestureType::HORIZONTAL_PAN_END:
             // 立即跳转
-            this->requestSeeking(fmin(120.0f, mpv.duration) * status.deltaX, VIDEO_SEEK_NODELAY);
+            this->requestSeeking(fmin(120.0f, this->barLength()) * status.deltaX, VIDEO_SEEK_NODELAY);
             break;
         case OsdGestureType::LEFT_VERTICAL_PAN_START:
             if (brls::Application::getPlatform()->canSetBacklightBrightness()) {
@@ -374,34 +368,33 @@ void VideoView::hideChannelButton() {
 void VideoView::requestSeeking(int seek, int delay) {
     auto& mpv = MPVCore::instance();
     if (this->isLiveMode) {
-        double dvrWindow = std::max<double>(120.0, mpv.duration);
-        int64_t targetRewind = this->liveRewindSeconds - seek;
-        if (targetRewind < 0) targetRewind = 0;
-        if (targetRewind > static_cast<int64_t>(dvrWindow)) targetRewind = static_cast<int64_t>(dvrWindow);
-        this->liveRewindSeconds = targetRewind;
+        // `seek` is the total of the L/R presses so far, counted from where
+        // playback is now; nothing moves until the presses stop.
+        const int64_t target = std::clamp<int64_t>(
+            this->currentLiveBehind() - seek, 0, static_cast<int64_t>(this->liveBarLength()));
 
+        // The same "-time" over the bar as scrubbing, at the spot L/R step to.
         showOSD(false);
-        if (osdInfoBox->getVisibility() != brls::Visibility::VISIBLE) {
-            osdInfoBox->setVisibility(brls::Visibility::VISIBLE);
-            infoIcon->setImageFromSVGRes("icon/ico-seeking.svg");
-        }
-        infoLabel->setText(this->liveRewindSeconds == 0 ? "LIVE" : fmt::format("{:+d} s", seek));
-        this->updateLiveProgressUI();
+        this->showLiveBehind(target);
+        this->scrubTip = target == 0 ? "LIVE" : "-" + misc::sec2Time(target);
+        this->scrubTipProgress = this->osdSlider->getProgress();
 
         brls::cancelDelay(this->seekingIter);
         if (delay <= VIDEO_SEEK_NODELAY) {
-            osdInfoBox->setVisibility(brls::Visibility::GONE);
+            this->scrubTip.clear();
             this->seekingRange = 0;
+            this->showOSD(true);
             if (seek == 0) return;
-            MPVCore::instance().seek(seek, "relative");
+            this->seekLive(target);
         } else if (delay > 0) {
             ASYNC_RETAIN
-            this->seekingIter = brls::delay(delay, [ASYNC_TOKEN, seek]() {
+            this->seekingIter = brls::delay(delay, [ASYNC_TOKEN, seek, target]() {
                 ASYNC_RELEASE
-                osdInfoBox->setVisibility(brls::Visibility::GONE);
+                this->scrubTip.clear();
                 this->seekingRange = 0;
+                this->showOSD(true);
                 if (seek == 0) return;
-                MPVCore::instance().seek(seek, "relative");
+                this->seekLive(target);
             });
         }
         return;
@@ -421,19 +414,18 @@ void VideoView::requestSeeking(int seek, int delay) {
         seek = mpv.duration;
     }
 
+    // The target time over the bar, as for live streams.
     showOSD(false);
-    if (osdInfoBox->getVisibility() != brls::Visibility::VISIBLE) {
-        osdInfoBox->setVisibility(brls::Visibility::VISIBLE);
-        infoIcon->setImageFromSVGRes("icon/ico-seeking.svg");
-    }
-    infoLabel->setText(fmt::format("{:+d} s", seek));
     osdSlider->setProgress(progress);
     leftStatusLabel->setText(misc::sec2Time(mpv.duration * progress));
+    this->scrubTip = misc::sec2Time(static_cast<int64_t>(mpv.duration * progress));
+    this->scrubTipProgress = static_cast<float>(progress);
 
     // 延迟触发跳转进度
     brls::cancelDelay(this->seekingIter);
     if (delay <= VIDEO_SEEK_NODELAY) {
-        osdInfoBox->setVisibility(brls::Visibility::GONE);
+        this->scrubTip.clear();
+        this->showOSD(true);
         this->seekingRange = 0;
         if (seek == 0) return;
         MPVCore::instance().seek(seek, "relative");
@@ -441,7 +433,8 @@ void VideoView::requestSeeking(int seek, int delay) {
         ASYNC_RETAIN
         this->seekingIter = brls::delay(delay, [ASYNC_TOKEN, seek]() {
             ASYNC_RELEASE
-            osdInfoBox->setVisibility(brls::Visibility::GONE);
+            this->scrubTip.clear();
+            this->showOSD(true);
             this->seekingRange = 0;
             if (seek == 0) return;
             MPVCore::instance().seek(seek, "relative");
@@ -485,11 +478,27 @@ void VideoView::draw(NVGcontext* vg, float x, float y, float w, float h, brls::S
 
     // draw video
     mpv.draw(this->getFrame(), this->getAlpha());
+    if (this->holdPosition >= 0) {
+        const bool reached = std::fabs(mpv.playback_time - this->holdPosition) < 20;
+        if (reached || brls::getCPUTimeUsec() - this->holdStarted > 12000000) {
+            this->holdPosition = -1;
+            mpv.command("set", "pause", "no");
+        } else {
+            // Cover the frames from before the seek, and keep the spinner
+            // up while the file sits paused.
+            if (this->osdCenterBox->getVisibility() != brls::Visibility::VISIBLE)
+                this->osdCenterBox->setVisibility(brls::Visibility::VISIBLE);
+            nvgBeginPath(vg);
+            nvgRect(vg, x, y, w, h);
+            nvgFillColor(vg, nvgRGB(0, 0, 0));
+            nvgFill(vg);
+        }
+    }
 
     if (MPVCore::BOTTOM_BAR) {
         NVGcontext* vg = brls::Application::getNVGContext();
         bottomBarColor.a = alpha;
-        float progress = this->isLiveMode ? (this->liveRewindSeconds <= 0 ? 1.0f : this->osdSlider->getProgress()) : (mpv.playback_time / mpv.duration);
+        float progress = this->isLiveMode ? (this->currentLiveBehind() <= 0 ? 1.0f : this->osdSlider->getProgress()) : (mpv.playback_time / mpv.duration);
         progress = progress > 1.0f ? 1.0f : progress;
         nvgFillColor(vg, this->isLiveMode ? a(nvgRGB(83, 252, 24)) : bottomBarColor);
         nvgBeginPath(vg);
@@ -519,6 +528,7 @@ void VideoView::draw(NVGcontext* vg, float x, float y, float w, float h, brls::S
         }
         osdBottomBox->frame(ctx);
         osdTopBox->frame(ctx);
+        if (!this->scrubTip.empty()) this->drawScrubTip(vg);
 
     } else if (this->isOsdShown) {
         this->isOsdShown = false;
@@ -641,14 +651,36 @@ bool VideoView::isProgressBarFocused() {
     return focus && (focus == osdSlider || focus->getParent() == osdSlider);
 }
 
-/// Length of the bar in seconds: the VOD, or the live rewind window.
-static double scrubLength(bool liveMode) {
-    auto& mpv = MPVCore::instance();
-    return liveMode ? std::max<double>(120.0, mpv.duration) : mpv.duration;
+double VideoView::barLength() const {
+    return this->isLiveMode ? this->liveBarLength() : MPVCore::instance().duration;
+}
+
+double VideoView::liveBarLength() const {
+    // With a recording the whole broadcast can be rewound; without one,
+    // only the live cache.
+    // Without one (Kick said so), only what is cached right now.
+    if (this->liveRecordingChecked && !this->liveRecordingAvailable) {
+        const double cacheBack = std::min(MPVCore::instance().getCacheBackSeconds(), 180.0);
+        return std::max<double>(10.0, this->liveRewindSeconds + cacheBack);
+    }
+    // No fixed window: the whole broadcast once its start is known, and
+    // until then what the cache holds.
+    const int64_t uptime = this->getCurrentStreamUptime();
+    if (uptime > 0) return std::max<double>(10.0, uptime);
+    const double cacheBack = std::min(MPVCore::instance().getCacheBackSeconds(), 180.0);
+    return std::max<double>(10.0, this->liveRewindSeconds + cacheBack);
+}
+
+int64_t VideoView::currentLiveBehind() const {
+    if (!this->watchingRecording) return this->liveRewindSeconds;
+    // While the recording opens, mpv reports 0 until it has seeked; show the
+    // spot it is going to instead.
+    const double position = this->holdPosition >= 0 ? this->holdPosition : MPVCore::instance().playback_time;
+    return std::max<int64_t>(0, this->getCurrentStreamUptime() - static_cast<int64_t>(position));
 }
 
 void VideoView::beginScrub() {
-    if (scrubLength(this->isLiveMode) <= 0) return;
+    if (this->barLength() <= 0) return;
     // An L/R seek still waiting to fire would land in the middle of the
     // scrub; finish it now so the scrub starts from where it was going.
     if (this->seekingRange != 0) this->requestSeeking(this->seekingRange, VIDEO_SEEK_NODELAY);
@@ -665,7 +697,7 @@ void VideoView::scrubProcessing() {
     auto& state = brls::Application::getControllerState();
     auto stack = brls::Application::getActivitiesStack();
     const bool playerOnTop = !stack.empty() && stack.back() == getParentActivity();
-    const double length = scrubLength(this->isLiveMode);
+    const double length = this->barLength();
 
     if (!playerOnTop || !isProgressBarFocused() || length <= 0) {
         this->endScrub(false);
@@ -715,7 +747,7 @@ void VideoView::scrubProcessing() {
 }
 
 void VideoView::moveScrub(double deltaSeconds) {
-    const double length = scrubLength(this->isLiveMode);
+    const double length = this->barLength();
     if (deltaSeconds == 0 || length <= 0) return;
 
     this->scrubProgress = std::clamp(
@@ -723,28 +755,25 @@ void VideoView::moveScrub(double deltaSeconds) {
     this->scrubMoved = true;
     osdSlider->setProgress(this->scrubProgress);
 
-    std::string label;
+    // Like kick.com, small text over the bar: how far behind live, or the
+    // time in a VOD.
+    this->scrubTipProgress = this->scrubProgress;
     if (this->isLiveMode) {
-        const auto behind = static_cast<int64_t>((1.0f - this->scrubProgress) * length);
-        label = this->scrubProgress >= 0.98f ? "LIVE" : "-" + misc::sec2Time(behind);
+        const int64_t behind = liveBehindAt(this->scrubProgress, length);
+        this->scrubTip = behind == 0 ? "LIVE" : "-" + misc::sec2Time(behind);
     } else {
-        label = misc::sec2Time(static_cast<int64_t>(this->scrubProgress * length));
-        leftStatusLabel->setText(label);
+        this->scrubTip = misc::sec2Time(static_cast<int64_t>(this->scrubProgress * length));
+        leftStatusLabel->setText(this->scrubTip);
     }
-    if (osdInfoBox->getVisibility() != brls::Visibility::VISIBLE) {
-        infoIcon->setImageFromSVGRes("icon/ico-seeking.svg");
-        osdInfoBox->setVisibility(brls::Visibility::VISIBLE);
-    }
-    infoLabel->setText(label);
 }
 
 void VideoView::endScrub(bool released) {
     const bool moved = this->scrubMoved;
+    this->scrubTip.clear();
     this->scrubbing = false;
     this->scrubMoved = false;
     this->scrubDirection = 0;
 
-    if (moved) osdInfoBox->setVisibility(brls::Visibility::GONE);
     if (!released) {
         // Focus left the bar (or the player closed): drop the preview.
         this->showOSD(true);
@@ -797,6 +826,11 @@ void VideoView::registerMpvEvent() {
         case MpvEventEnum::UPDATE_DURATION:
             if (this->seekingRange == 0 && !this->scrubbing) {
                 if (this->isLiveMode) {
+                    // A freshly loaded recording ends where Kick had got to,
+                    // a little before live: a truer clock than the uptime the
+                    // stream was opened with, which can be minutes stale.
+                    if (this->watchingRecording && mpv.duration > 0)
+                        this->setStreamUptime(mpv.duration + LIVE_RECORDING_DELAY);
                     this->updateLiveProgressUI();
                 } else {
                     this->rightStatusLabel->setText(misc::sec2Time(mpv.duration));
@@ -1060,6 +1094,7 @@ void VideoView::registerActions(const std::string& hintText, const brls::Control
 void VideoView::setLiveMode(bool live, int64_t uptimeSeconds) {
     this->isLiveMode = live;
     this->liveRewindSeconds = 0;
+    this->watchingRecording = false;
     if (live) {
         this->setStreamUptime(uptimeSeconds);
         this->osdSlider->setProgress(1.0f);
@@ -1095,27 +1130,139 @@ int64_t VideoView::getCurrentStreamUptime() const {
 void VideoView::updateLiveProgressUI() {
     if (!this->isLiveMode) return;
 
-    const int64_t uptime = this->getCurrentStreamUptime();
-    const std::string uptimeStr = uptime > 0 ? misc::sec2Time(uptime) : "LIVE";
-
-    if (this->liveRewindSeconds <= 0) {
+    const int64_t behind = this->currentLiveBehind();
+    if (behind <= 0 && !this->watchingRecording) {
+        const int64_t uptime = this->getCurrentStreamUptime();
         this->osdSlider->setProgress(1.0f);
         this->leftStatusLabel->setVisibility(brls::Visibility::GONE);
         if (this->centerStatusLabel) this->centerStatusLabel->setVisibility(brls::Visibility::GONE);
         this->rightStatusLabel->setVisibility(brls::Visibility::VISIBLE);
-        this->rightStatusLabel->setText(uptimeStr);
+        this->rightStatusLabel->setText(uptime > 0 ? misc::sec2Time(uptime) : "LIVE");
     } else {
-        auto& mpv = MPVCore::instance();
-        double dvrWindow = std::max<double>(120.0, mpv.duration);
-        float progress = 1.0f - static_cast<float>(static_cast<double>(this->liveRewindSeconds) / dvrWindow);
-        if (progress < 0.0f) progress = 0.0f;
-        if (progress > 1.0f) progress = 1.0f;
-        this->osdSlider->setProgress(progress);
-
-        this->leftStatusLabel->setVisibility(brls::Visibility::VISIBLE);
-        this->leftStatusLabel->setText(fmt::format("-{}", misc::sec2Time(this->liveRewindSeconds)));
-        if (this->centerStatusLabel) this->centerStatusLabel->setVisibility(brls::Visibility::VISIBLE);
-        this->rightStatusLabel->setVisibility(brls::Visibility::VISIBLE);
-        this->rightStatusLabel->setText(uptimeStr);
+        this->showLiveBehind(behind);
     }
+}
+
+void VideoView::showLiveBehind(int64_t behind) {
+    const int64_t uptime = this->getCurrentStreamUptime();
+    const float progress = std::clamp(
+        1.0f - static_cast<float>(static_cast<double>(behind) / this->liveBarLength()), 0.0f, 1.0f);
+    this->osdSlider->setProgress(progress);
+
+    // One time, like kick.com: where playback is in the broadcast, which
+    // counts up while playing (the uptime at live). How far behind live is
+    // shown over the bar while scrubbing. Without a known start only that
+    // distance can be told.
+    std::string time;
+    if (uptime > 0) time = misc::sec2Time(std::max<int64_t>(0, uptime - std::max<int64_t>(0, behind)));
+    else time = behind <= 0 ? "LIVE" : "-" + misc::sec2Time(behind);
+    this->leftStatusLabel->setVisibility(brls::Visibility::GONE);
+    if (this->centerStatusLabel) this->centerStatusLabel->setVisibility(brls::Visibility::GONE);
+    this->rightStatusLabel->setVisibility(brls::Visibility::VISIBLE);
+    this->rightStatusLabel->setText(time);
+}
+
+void VideoView::seekLive(int64_t behind) {
+    auto& mpv = MPVCore::instance();
+    behind = std::clamp<int64_t>(behind, 0, static_cast<int64_t>(this->liveBarLength()));
+
+    if (this->watchingRecording) {
+        // The recording stops where it was when it was opened, a little
+        // before live; anything past that is reloaded (or goes live) by the
+        // player.
+        const int64_t target = this->getCurrentStreamUptime() - behind;
+        if (behind >= this->liveRecordingGap() && mpv.duration > 0 && target < mpv.duration - 5) {
+            mpv.seek(std::max<int64_t>(0, target), "absolute");
+        } else if (this->liveSeekHandler) {
+            this->liveSeekHandler(behind);
+        }
+        this->showLiveBehind(behind);
+        return;
+    }
+
+    // How far back the live cache reaches, keeping a little margin. It holds
+    // well under a minute; never trust a larger figure.
+    const double cacheBack = std::min(mpv.getCacheBackSeconds(), 180.0);
+    const int64_t reach = this->liveRewindSeconds + static_cast<int64_t>(cacheBack) - 2;
+    if (behind > reach) {
+        // Also while Kick hasn't answered yet: the player looks it up then.
+        const bool mayHaveRecording = this->liveRecordingAvailable || !this->liveRecordingChecked;
+        // Between the cache and the recording's end there is nothing to
+        // play. Opening the recording there sat loading until it gave up, so
+        // land on whichever edge is closer.
+        const int64_t gap = this->liveRecordingGap();
+        if (mayHaveRecording && this->liveSeekHandler && behind < gap)
+            behind = (gap - behind <= behind - reach) ? gap : std::max<int64_t>(0, reach);
+        if (mayHaveRecording && this->liveSeekHandler && behind >= gap) {
+            // Keeps the bar on the chosen spot while the player looks up and
+            // opens the recording, instead of snapping back to live.
+            this->liveRewindSeconds = behind;
+            this->showLiveBehind(behind);
+            this->liveSeekHandler(behind);
+            return;
+        }
+        if (cacheBack > 0) {
+            behind = std::max<int64_t>(0, reach);
+            const brls::Time now = brls::getCPUTimeUsec();
+            if (this->liveRecordingChecked && !this->liveRecordingAvailable &&
+                now - this->lastRewindLimitNote > 20000000) {
+                this->lastRewindLimitNote = now;
+                brls::Application::notify(
+                    "This channel has no live VOD, so only the last few seconds can be rewound.");
+            }
+        }
+    }
+
+    const int64_t diff = this->liveRewindSeconds - behind;
+    this->liveRewindSeconds = behind;
+    if (diff != 0) mpv.seek(diff, "relative");
+    this->updateLiveProgressUI();
+}
+
+void VideoView::holdUntilPosition(double position) {
+    this->holdPosition = position > 5 ? position : -1;
+    this->holdStarted = brls::getCPUTimeUsec();
+}
+
+void VideoView::drawScrubTip(NVGcontext* vg) {
+    const brls::Rect bar = this->osdSlider->getFrame();
+    if (bar.getWidth() <= 0) return;
+    const float fontSize = 18;
+    nvgFontFaceId(vg, brls::Application::getDefaultFont());
+    nvgFontSize(vg, fontSize);
+    float bounds[4];
+    nvgTextBounds(vg, 0, 0, this->scrubTip.c_str(), nullptr, bounds);
+    const float textWidth = bounds[2] - bounds[0];
+    const float padding = 6;
+    const float boxWidth = textWidth + padding * 2;
+    const float boxHeight = fontSize + padding;
+    const brls::Rect view = this->getFrame();
+    float x = bar.getMinX() + this->scrubTipProgress * bar.getWidth() - boxWidth / 2;
+    x = std::clamp(x, view.getMinX() + 4, view.getMaxX() - boxWidth - 4);
+    const float y = bar.getMinY() - boxHeight - 4;
+
+    nvgBeginPath(vg);
+    nvgRoundedRect(vg, x, y, boxWidth, boxHeight, 4);
+    nvgFillColor(vg, nvgRGBA(0, 0, 0, 170));
+    nvgFill(vg);
+    nvgFillColor(vg, nvgRGB(255, 255, 255));
+    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    nvgText(vg, x + padding, y + boxHeight / 2, this->scrubTip.c_str(), nullptr);
+}
+
+void VideoView::setLiveSeekHandler(LiveSeekHandler handler) {
+    this->liveSeekHandler = std::move(handler);
+}
+
+void VideoView::setLiveRecordingAvailable(bool available) {
+    this->liveRecordingAvailable = available;
+    this->liveRecordingChecked = true;
+    if (this->isLiveMode) this->updateLiveProgressUI();
+}
+
+void VideoView::setWatchingRecording(bool watching) {
+    this->watchingRecording = watching;
+    if (!watching) this->holdPosition = -1;
+    this->liveRewindSeconds = 0;
+    if (this->isLiveMode) this->updateLiveProgressUI();
 }

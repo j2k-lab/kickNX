@@ -70,6 +70,28 @@ public:
     int64_t getCurrentStreamUptime() const;
     void updateLiveProgressUI();
 
+    /// Live rewind beyond the cache plays Kick's recording of the broadcast.
+    /// With a recording the bar covers the whole stream; a seek the live cache
+    /// can't reach (or any seek while the recording plays) goes to the handler
+    /// with how far behind live to play, 0 meaning back to live.
+    using LiveSeekHandler = std::function<void(int64_t behindSeconds)>;
+    /// Kick's recording trails live by about this much (measured ~16 s; it
+    /// grows in 10 s segments). Also the most the end of the bar snaps to
+    /// live.
+    static constexpr int64_t LIVE_RECORDING_DELAY = 20;
+    /// The recording is only opened this far behind live or more, which
+    /// stays inside what it holds even just before its next segment lands.
+    int64_t liveRecordingGap() const { return LIVE_RECORDING_DELAY + 12; }
+    void setLiveSeekHandler(LiveSeekHandler handler);
+    void setLiveRecordingAvailable(bool available);
+    void setWatchingRecording(bool watching);
+    bool isWatchingRecording() const { return this->watchingRecording; }
+    /// mpv opens a file at its start and seeks to the requested point once
+    /// it runs. Keeps the (paused) picture covered until playback has
+    /// reached `position`, then resumes.
+    void holdUntilPosition(double position);
+    bool isHoldingPosition() const { return this->holdPosition >= 0; }
+
     using CloseHandler = std::function<void()>;
     static void setGlobalCloseHandler(CloseHandler handler);
     static bool close(bool quit = false);
@@ -134,6 +156,16 @@ private:
     void scrubProcessing();
     void moveScrub(double deltaSeconds);
     void endScrub(bool released);
+    /// Length of the bar in seconds: the VOD, or the live rewind range.
+    double barLength() const;
+    double liveBarLength() const;
+    /// How far behind live playback is now, in seconds.
+    int64_t currentLiveBehind() const;
+    /// Plays the live stream `behind` seconds behind live.
+    void seekLive(int64_t behind);
+    void showLiveBehind(int64_t behind);
+    /// Small "-time" over the bar at the scrub position (live only).
+    void drawScrubTip(NVGcontext* vg);
     /// @brief notify videoview closed
     static void disableDimming(bool disable);
 
@@ -178,4 +210,13 @@ private:
     std::chrono::steady_clock::time_point streamUptimeBaselineTime;
     int64_t liveRewindSeconds = 0;
     brls::Time lastLiveProgressTick = 0;
+    bool liveRecordingAvailable = false;
+    bool liveRecordingChecked = false;  // Kick answered whether there is one
+    bool watchingRecording = false;
+    double holdPosition = -1;
+    std::string scrubTip;  // shown over the bar while scrubbing live
+    float scrubTipProgress = 0;
+    brls::Time holdStarted = 0;
+    LiveSeekHandler liveSeekHandler;
+    brls::Time lastRewindLimitNote = 0;
 };

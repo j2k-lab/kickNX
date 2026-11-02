@@ -61,6 +61,10 @@ public:
 
     std::unordered_map<std::string, mpv_node> getNodeMap(const std::string &key);
 
+    /// Seconds before the current position that are still in the demuxer
+    /// cache, i.e. how far back a seek can go without reloading.
+    double getCacheBackSeconds();
+
     void togglePlay();
 
     void stop();

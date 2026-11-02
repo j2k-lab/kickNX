@@ -831,6 +831,7 @@ std::vector<ChannelVideo> getChannelVideos(
         video.duration = formatDurationMs(jsonInt(item, "duration", 0));
         video.language = jsonString(item, "language");
         video.viewCount = jsonInt(item, "views", jsonInt(item, "view_count", 0));
+        video.isLive = jsonBool(item, "is_live", false);
 
         if (!video.id.empty()) {
             result.push_back(std::move(video));
@@ -1674,6 +1675,105 @@ void loadChannelProfileAsync(
             } catch (...) {
                 brls::sync(std::bind(failure, std::string("Unknown Kick channel error")));
             }
+        });
+}
+
+namespace {
+// Picks one rendition of a recording and reads how long it is so far.
+// Playing a single rendition instead of the master playlist matters on long
+// broadcasts: mpv's HLS reader downloads and parses every rendition's full
+// segment list when it opens a master, thousands of entries each.
+// `playUrl` is the rendition for the viewer's quality (the best for Auto);
+// the length comes from Kick's total tag, otherwise the segment durations
+// added up, and is 0 when unknown.
+double readRecording(
+    const Config& config,
+    OAuthSession& session,
+    const std::string& masterUrl,
+    std::string& playUrl) {
+    try {
+        auto normalize = [](const std::string& text) {
+            std::string out;
+            for (unsigned char c : text)
+                if (std::isalnum(c)) out.push_back(static_cast<char>(std::tolower(c)));
+            return out;
+        };
+        const std::string wanted = normalize(loadPreferredQuality());
+        const bool automatic = wanted.empty() || wanted == "auto" || wanted == "source";
+
+        const std::string master = kickGet(config, session, masterUrl, nullptr);
+        std::istringstream lines(master);
+        std::string line;
+        std::string first;
+        std::string chosen;
+        while (std::getline(lines, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.empty() || line[0] == '#') continue;
+            if (first.empty()) first = line;
+            if (automatic) break;
+            // Renditions sit in folders named after their quality,
+            // e.g. "720p30/playlist.m3u8".
+            const std::string name = normalize(line.substr(0, line.find('/')));
+            if (name == wanted || (chosen.empty() && name.rfind(wanted, 0) == 0)) {
+                chosen = line;
+                if (name == wanted) break;
+            }
+        }
+        std::string variant = chosen.empty() ? first : chosen;
+        if (variant.empty()) return 0;
+        if (variant.rfind("http", 0) != 0)
+            variant = masterUrl.substr(0, masterUrl.rfind('/') + 1) + variant;
+        playUrl = variant;
+
+        const std::string playlist = kickGet(config, session, variant, nullptr);
+        const std::string totalTag = "#EXT-X-TWITCH-TOTAL-SECS:";
+        double total = 0;
+        std::istringstream media(playlist);
+        while (std::getline(media, line)) {
+            if (line.rfind(totalTag, 0) == 0) return std::stod(line.substr(totalTag.size()));
+            if (line.rfind("#EXTINF:", 0) == 0) total += std::stod(line.substr(8));
+        }
+        return total;
+    } catch (const std::exception& exception) {
+        brls::Logger::warning("kickNX: couldn't read the recording: {}", exception.what());
+        return 0;
+    }
+}
+}  // namespace
+
+void findLiveRecordingAsync(
+    const Config& config,
+    const std::string& login,
+    LiveRecordingCallback done) {
+    ThreadPool::instance().submit(
+        [config, login, done = std::move(done)](HTTP&) mutable {
+            bool known = false;
+            std::string url;
+            double recordedSeconds = 0;
+            std::string error;
+            try {
+                // The same request streamer pages make, with the browser
+                // headers and sign-in Kick expects from the Switch.
+                OAuthSession session = ensureOAuth(config);
+                const auto videos = getChannelVideos(config, session, login, nullptr);
+                known = true;
+                for (const auto& video : videos) {
+                    if (!video.isLive) continue;
+                    url = video.url;
+                    break;
+                }
+                if (!url.empty()) {
+                    std::string rendition;
+                    recordedSeconds = readRecording(config, session, url, rendition);
+                    if (!rendition.empty()) url = rendition;
+                }
+            } catch (const std::exception& exception) {
+                error = exception.what();
+            } catch (...) {
+                error = "Unknown Kick error";
+            }
+            brls::sync(std::bind(
+                std::move(done), known, std::move(url), recordedSeconds, std::move(error)));
         });
 }
 

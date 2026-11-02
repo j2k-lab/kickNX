@@ -974,6 +974,33 @@ void MPVCore::setInt(const std::string &key, int64_t value) {
     mpv_set_property_async(mpv, 0, key.c_str(), MPV_FORMAT_INT64, &value);
 }
 
+double MPVCore::getCacheBackSeconds() {
+    const double position = this->getDouble("time-pos");
+    double earliest = position;
+    mpv_node node;
+    if (mpv_get_property(mpv, "demuxer-cache-state", MPV_FORMAT_NODE, &node) < 0) return 0;
+    if (node.format == MPV_FORMAT_NODE_MAP) {
+        const mpv_node_list *state = node.u.list;
+        for (int i = 0; i < state->num; i++) {
+            if (std::strcmp(state->keys[i], "seekable-ranges") != 0 ||
+                state->values[i].format != MPV_FORMAT_NODE_ARRAY)
+                continue;
+            const mpv_node_list *ranges = state->values[i].u.list;
+            for (int r = 0; r < ranges->num; r++) {
+                if (ranges->values[r].format != MPV_FORMAT_NODE_MAP) continue;
+                const mpv_node_list *range = ranges->values[r].u.list;
+                for (int k = 0; k < range->num; k++) {
+                    if (std::strcmp(range->keys[k], "start") == 0 &&
+                        range->values[k].format == MPV_FORMAT_DOUBLE)
+                        earliest = std::min(earliest, range->values[k].u.double_);
+                }
+            }
+        }
+    }
+    mpv_free_node_contents(&node);
+    return std::max(0.0, position - earliest);
+}
+
 std::unordered_map<std::string, mpv_node> MPVCore::getNodeMap(const std::string &key) {
     mpv_node node;
     std::unordered_map<std::string, mpv_node> nodeMap;

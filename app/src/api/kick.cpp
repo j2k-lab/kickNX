@@ -498,7 +498,10 @@ std::string mpvExtra() {
     // MPVCore::init() because values with spaces break the per-file option
     // parser. The cache options contain none, and match twiNX's Twitch
     // playback: force the demuxer cache on and read ahead a fixed 8 seconds.
-    return "cache=yes,cache-secs=8";
+    // The back buffer keeps ~30 s of watched 1080p60 so a live rewind covers
+    // the ~15-20 s Kick's recording trails live by (the default 5 MiB held
+    // only ~7 s). It costs no extra download and fills only as you watch.
+    return "cache=yes,cache-secs=8,demuxer-max-back-bytes=32MiB";
 }
 
 namespace {
