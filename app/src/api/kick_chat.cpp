@@ -3,6 +3,7 @@
 #include "api/http.hpp"
 #include "api/kick_auth.hpp"
 #include "api/kick_playlist.hpp"
+#include "utils/misc.hpp"
 #include "utils/thread.hpp"
 
 #include <borealis.hpp>
@@ -123,7 +124,7 @@ void sleepBriefly() {
 
 class RawWebSocket {
 public:
-    explicit RawWebSocket(const std::string& url) {
+    RawWebSocket(const std::string& url, std::atomic_bool& stopRequested) {
         const ParsedUrl parsed = parseWebSocketUrl(url);
         host = parsed.host;
         path = parsed.path;
@@ -131,78 +132,14 @@ public:
         easy = curl_easy_init();
         if (!easy) throw std::runtime_error("Could not initialize chat transport");
 
-        curl_easy_setopt(easy, CURLOPT_URL, parsed.curlUrl.c_str());
-        curl_easy_setopt(easy, CURLOPT_CONNECT_ONLY, 1L);
-        curl_easy_setopt(easy, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
-        curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 0L);
-        curl_easy_setopt(easy, CURLOPT_TCP_KEEPALIVE, 1L);
-        curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT_MS, 15000L);
-
-        const CURLcode connected = curl_easy_perform(easy);
-        if (connected != CURLE_OK)
-            throw std::runtime_error(
-                std::string("Chat connection failed: ") +
-                curl_easy_strerror(connected));
-
-        std::array<uint8_t, 16> nonce{};
-        std::random_device random;
-        for (auto& byte : nonce)
-            byte = static_cast<uint8_t>(random() & 0xFF);
-
-        const std::string key = base64Encode(nonce.data(), nonce.size());
-        const std::string request =
-            "GET " + path + " HTTP/1.1\r\n"
-            "Host: " + host + "\r\n"
-            "Origin: https://kick.com\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Key: " + key + "\r\n"
-            "Sec-WebSocket-Version: 13\r\n"
-            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36\r\n\r\n";
-
-        sendRaw(
-            reinterpret_cast<const uint8_t*>(request.data()),
-            request.size());
-
-        std::string response;
-        std::array<uint8_t, 2048> buffer{};
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::seconds(10);
-
-        while (response.find("\r\n\r\n") == std::string::npos) {
-            if (std::chrono::steady_clock::now() > deadline)
-                throw std::runtime_error("Timed out during chat WebSocket handshake");
-
-            size_t received = 0;
-            const CURLcode code =
-                curl_easy_recv(easy, buffer.data(), buffer.size(), &received);
-            if (code == CURLE_AGAIN) {
-                sleepBriefly();
-                continue;
-            }
-            if (code != CURLE_OK)
-                throw std::runtime_error(
-                    std::string("Chat handshake failed: ") +
-                    curl_easy_strerror(code));
-
-            response.append(
-                reinterpret_cast<const char*>(buffer.data()),
-                received);
-        }
-
-        if (response.find(" 101 ") == std::string::npos)
-            throw std::runtime_error(
-                "Kick rejected the chat WebSocket handshake");
-
-        const auto end = response.find("\r\n\r\n");
-        if (end != std::string::npos && end + 4 < response.size()) {
-            const auto* first =
-                reinterpret_cast<const uint8_t*>(response.data() + end + 4);
-            receiveBuffer.insert(
-                receiveBuffer.end(),
-                first,
-                first + response.size() - end - 4);
+        // A constructor that throws never reaches the destructor, so free the
+        // handle (and its TLS connection) here when connecting fails.
+        try {
+            connectAndHandshake(parsed, stopRequested);
+        } catch (...) {
+            curl_easy_cleanup(easy);
+            easy = nullptr;
+            throw;
         }
     }
 
@@ -264,6 +201,94 @@ public:
     }
 
 private:
+    static int abortWhenStopped(
+        void* stopRequested, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+        return static_cast<std::atomic_bool*>(stopRequested)->load() ? 1 : 0;
+    }
+
+    void connectAndHandshake(const ParsedUrl& parsed, std::atomic_bool& stopRequested) {
+        curl_easy_setopt(easy, CURLOPT_URL, parsed.curlUrl.c_str());
+        curl_easy_setopt(easy, CURLOPT_CONNECT_ONLY, 1L);
+        curl_easy_setopt(easy, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+        curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 0L);
+        curl_easy_setopt(easy, CURLOPT_TCP_KEEPALIVE, 1L);
+        curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT_MS, 15000L);
+        // Leaving the stream while chat connects must not wait out the
+        // connect timeout: abort the TLS connect once stop is requested.
+        curl_easy_setopt(easy, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(easy, CURLOPT_XFERINFOFUNCTION, abortWhenStopped);
+        curl_easy_setopt(easy, CURLOPT_XFERINFODATA, &stopRequested);
+
+        const CURLcode connected = curl_easy_perform(easy);
+        if (connected != CURLE_OK)
+            throw std::runtime_error(
+                std::string("Chat connection failed: ") +
+                curl_easy_strerror(connected));
+
+        std::array<uint8_t, 16> nonce{};
+        std::random_device random;
+        for (auto& byte : nonce)
+            byte = static_cast<uint8_t>(random() & 0xFF);
+
+        const std::string key = base64Encode(nonce.data(), nonce.size());
+        const std::string request =
+            "GET " + path + " HTTP/1.1\r\n"
+            "Host: " + host + "\r\n"
+            "Origin: https://kick.com\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: " + key + "\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36\r\n\r\n";
+
+        sendRaw(
+            reinterpret_cast<const uint8_t*>(request.data()),
+            request.size());
+
+        std::string response;
+        std::array<uint8_t, 2048> buffer{};
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+
+        while (response.find("\r\n\r\n") == std::string::npos) {
+            if (stopRequested.load())
+                throw std::runtime_error("Chat stopped");
+            if (std::chrono::steady_clock::now() > deadline)
+                throw std::runtime_error("Timed out during chat WebSocket handshake");
+
+            size_t received = 0;
+            const CURLcode code =
+                curl_easy_recv(easy, buffer.data(), buffer.size(), &received);
+            if (code == CURLE_AGAIN) {
+                sleepBriefly();
+                continue;
+            }
+            if (code != CURLE_OK)
+                throw std::runtime_error(
+                    std::string("Chat handshake failed: ") +
+                    curl_easy_strerror(code));
+
+            response.append(
+                reinterpret_cast<const char*>(buffer.data()),
+                received);
+        }
+
+        if (response.find(" 101 ") == std::string::npos)
+            throw std::runtime_error(
+                "Kick rejected the chat WebSocket handshake");
+
+        const auto end = response.find("\r\n\r\n");
+        if (end != std::string::npos && end + 4 < response.size()) {
+            const auto* first =
+                reinterpret_cast<const uint8_t*>(response.data() + end + 4);
+            receiveBuffer.insert(
+                receiveBuffer.end(),
+                first,
+                first + response.size() - end - 4);
+        }
+    }
+
     void sendRaw(const uint8_t* data, size_t size) {
         size_t offset = 0;
         while (offset < size) {
@@ -435,7 +460,7 @@ struct KickChatroomInfo {
     std::string pusherUrl = DEFAULT_KICK_PUSHER_URL;
 };
 
-KickChatroomInfo resolveKickChatroom(const std::string& channelSlug) {
+KickChatroomInfo resolveKickChatroom(const std::string& channelSlug, HTTP::Cancel cancel = nullptr) {
     const std::string slug = normalizeChannel(channelSlug);
     if (slug.empty()) throw std::runtime_error("No Kick channel was specified");
 
@@ -451,12 +476,14 @@ KickChatroomInfo resolveKickChatroom(const std::string& channelSlug) {
         root = json::parse(HTTP::get(
             "https://kick.com/api/v2/channels/" + percentEncode(slug),
             headers,
-            HTTP::Timeout{15000}));
+            HTTP::Timeout{15000},
+            cancel));
     } catch (...) {
         root = json::parse(HTTP::get(
             "https://kick.com/api/v2/channels/" + percentEncode(slug) + "/info",
             headers,
-            HTTP::Timeout{15000}));
+            HTTP::Timeout{15000},
+            cancel));
     }
 
     const json& data = (root.contains("data") && root["data"].is_object()) ? root["data"] : root;
@@ -493,13 +520,15 @@ KickChatroomInfo resolveKickChatroom(const std::string& channelSlug) {
                         percentEncode(info.channelId) + "/chat/connection",
                     reqBody.dump(),
                     postHeaders,
-                    HTTP::Timeout{8000});
+                    HTTP::Timeout{8000},
+                    cancel);
             } catch (...) {
                 connResp = HTTP::post(
                     "https://web.kick.com/api/v1/realtime/connection",
                     reqBody.dump(),
                     postHeaders,
-                    HTTP::Timeout{8000});
+                    HTTP::Timeout{8000},
+                    cancel);
             }
 
             const json connRoot = json::parse(connResp);
@@ -525,7 +554,8 @@ KickChatroomInfo resolveKickChatroom(const std::string& channelSlug) {
                                 "https://web.kick.com/api/v1/realtime/auth/connection",
                                 authBody.dump(),
                                 postHeaders,
-                                HTTP::Timeout{8000});
+                                HTTP::Timeout{8000},
+                                cancel);
                             const json authRoot = json::parse(authResp);
                             if (authRoot.contains("data") && authRoot["data"].is_object()) {
                                 const auto& inner = authRoot["data"];
@@ -727,7 +757,10 @@ void dispatchKickChatEvent(
             message.userName = "viewer";
         }
 
-        const std::string rawContent = jsonFieldToString(eventData, "content");
+        // Text in scripts the Switch fonts lack becomes a short note; emote
+        // tokens are ASCII, so they come through unchanged.
+        const std::string rawContent =
+            misc::replaceUnsupportedText(jsonFieldToString(eventData, "content"));
         parseKickContentFragments(rawContent, message.text, message.fragments);
 
         if (!message.text.empty() && messageCallback) {
@@ -781,9 +814,10 @@ public:
     CentrifugoEventListener(
         const KickChatroomInfo& chatroom,
         ChatMessageCallback onMessage,
-        ChatStatusCallback onStatus)
+        ChatStatusCallback onStatus,
+        std::atomic_bool& stopRequested)
         : chatroomInfo(chatroom),
-          socket(chatroom.centrifugoUrl),
+          socket(chatroom.centrifugoUrl, stopRequested),
           messageCallback(std::move(onMessage)),
           statusCallback(std::move(onStatus)) {}
 
@@ -931,9 +965,10 @@ public:
     PusherEventListener(
         const KickChatroomInfo& chatroom,
         ChatMessageCallback onMessage,
-        ChatStatusCallback onStatus)
+        ChatStatusCallback onStatus,
+        std::atomic_bool& stopRequested)
         : chatroomInfo(chatroom),
-          socket(chatroom.pusherUrl),
+          socket(chatroom.pusherUrl, stopRequested),
           messageCallback(std::move(onMessage)),
           statusCallback(std::move(onStatus)) {}
 
@@ -1468,7 +1503,7 @@ void sendChatMessageAsync(
         });
 }
 
-int fetchActiveChattersCount(const std::string& channelIdOrSlug) {
+int fetchActiveChattersCount(const std::string& channelIdOrSlug, HTTP::Cancel cancel) {
     if (channelIdOrSlug.empty()) return 0;
 
     const HTTP::Header headers = {
@@ -1485,7 +1520,8 @@ int fetchActiveChattersCount(const std::string& channelIdOrSlug) {
             const std::string chResp = HTTP::get(
                 "https://kick.com/api/v2/channels/" + percentEncode(channelIdOrSlug),
                 headers,
-                HTTP::Timeout{8000});
+                HTTP::Timeout{8000},
+                cancel);
             const json chRoot = json::parse(chResp);
             if (chRoot.contains("id") && chRoot["id"].is_number_integer()) {
                 numericId = std::to_string(chRoot["id"].get<long long>());
@@ -1503,14 +1539,16 @@ int fetchActiveChattersCount(const std::string& channelIdOrSlug) {
             "https://web.kick.com/api/v1/channels/" +
                 percentEncode(numericId) + "/chat/active-chatters",
             headers,
-            HTTP::Timeout{8000});
+            HTTP::Timeout{8000},
+            cancel);
     } catch (...) {
         try {
             response = HTTP::get(
                 "https://kick.com/api/v2/channels/" +
                     percentEncode(channelIdOrSlug) + "/chat/active-chatters",
                 headers,
-                HTTP::Timeout{8000});
+                HTTP::Timeout{8000},
+                cancel);
         } catch (...) {
             return 0;
         }
@@ -1616,6 +1654,7 @@ ChatClient::~ChatClient() {
 
 void ChatClient::stop() {
     if (stopRequested.exchange(true)) return;
+    cancelRequests->store(true);
 #ifdef BOREALIS_USE_STD_THREAD
     if (thread && thread->joinable()) thread->join();
     thread.reset();
@@ -1664,7 +1703,7 @@ void ChatClient::chattersRun() {
         }
 
         if (!targetId.empty()) {
-            const int count = fetchActiveChattersCount(targetId);
+            const int count = fetchActiveChattersCount(targetId, cancelRequests);
             if (count > 0 && chattersCallback && !stopRequested.load()) {
                 chattersCallback(count);
             }
@@ -1686,7 +1725,7 @@ void ChatClient::run() {
         try {
             if (statusCallback) statusCallback("Connecting to Kick chat…");
 
-            const KickChatroomInfo chatroom = resolveKickChatroom(channel);
+            const KickChatroomInfo chatroom = resolveKickChatroom(channel, cancelRequests);
             if (stopRequested.load()) break;
 
             {
@@ -1700,14 +1739,16 @@ void ChatClient::run() {
                 CentrifugoEventListener listener(
                     chatroom,
                     messageCallback,
-                    statusCallback);
+                    statusCallback,
+                    stopRequested);
                 retrySeconds = 1;
                 listener.listen(stopRequested, recentIds, recentIdSet);
             } else {
                 PusherEventListener listener(
                     chatroom,
                     messageCallback,
-                    statusCallback);
+                    statusCallback,
+                    stopRequested);
                 retrySeconds = 1;
                 listener.listen(stopRequested, recentIds, recentIdSet);
             }
@@ -1723,10 +1764,11 @@ void ChatClient::run() {
         }
 
         if (stopRequested.load()) break;
-        for (int second = 0;
-             second < retrySeconds && !stopRequested.load();
-             ++second)
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+        // Waits in short steps so stop() is not held up by a retry delay.
+        for (int tick = 0;
+             tick < retrySeconds * 10 && !stopRequested.load();
+             ++tick)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         retrySeconds = std::min(retrySeconds * 2, 20);
     }
 }

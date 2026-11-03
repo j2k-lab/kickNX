@@ -10,10 +10,6 @@ include(${BOREALIS_LIBRARY}/cmake/commonOption.cmake)
 
 option(USE_SYSTEM_CURL "use system installed libcurl" ON)
 
-# Linux
-# Using CMAKE_INSTALL_PREFIX specifies the location where the application is installed.
-cmake_dependent_option(CMAKE_INSTALL "Install to system path" OFF "UNIX;NOT APPLE" OFF)
-
 # NintendoSwitch
 cmake_dependent_option(BUILTIN_NSP "Built in NSP forwarder" OFF "PLATFORM_SWITCH" OFF)
 cmake_dependent_option(USE_LIBUSBHSFS "Use libusbhsfs for ums access" OFF "PLATFORM_SWITCH" OFF)
@@ -74,22 +70,17 @@ include(${BOREALIS_LIBRARY}/cmake/toolchain.cmake)
 project(KickNX)
 set(VERSION_MAJOR "0")
 set(VERSION_MINOR "5")
-set(VERSION_ALTER "0")
+set(VERSION_ALTER "1")
 set(PROJECT_TITLEID "010ff000ffff0006")
 set(PROJECT_AUTHOR "j2k")
 set(PROJECT_DISPLAY_NAME "kickNX")
 set(PACKAGE_NAME "app.kicknx")
-set(VITA_TITLEID "KICKNX000")
-set(PSN_TITLE_ID "KCKNX0000")
-set(VITA_VERSION "00.30")
 set(PROJECT_ICON ${CMAKE_CURRENT_SOURCE_DIR}/resources/icon/icon.jpg)
 set(PROJECT_RESOURCES ${CMAKE_CURRENT_SOURCE_DIR}/resources)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 if (CUSTOM_RESOURCES_DIR)
     set(BRLS_RESOURCES_DIR ${CUSTOM_RESOURCES_DIR})
-elseif (CMAKE_INSTALL)
-    set(BRLS_RESOURCES_DIR ${CMAKE_INSTALL_PREFIX}/share/kicknx)
 endif ()
 
 # setting src and include
@@ -97,16 +88,6 @@ file(GLOB_RECURSE MAIN_SRC CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/app/src/*.cp
 if (PLATFORM_SWITCH)
     # System service initialization functions required for libnx
     list(APPEND MAIN_SRC ${BOREALIS_LIBRARY}/lib/platforms/switch/switch_wrapper.c)
-elseif (PLATFORM_PS4)
-    # Show backtrace when app crash
-    list(APPEND MAIN_SRC ${BOREALIS_LIBRARY}/lib/platforms/ps4/crashlog.c)
-elseif (PLATFORM_PSV)
-    configure_file("${CMAKE_SOURCE_DIR}/app/platform/vita/template.xml.in" "${CMAKE_BINARY_DIR}/template.xml")
-elseif (WIN32)
-    configure_file("${CMAKE_SOURCE_DIR}/app/platform/win32/app.rc.in" "${CMAKE_BINARY_DIR}/app.rc")
-    list(APPEND MAIN_SRC ${CMAKE_BINARY_DIR}/app.rc)
-elseif (APPLE)
-    list(APPEND MAIN_SRC ${CMAKE_SOURCE_DIR}/app/platform/osx/app.icns)
 endif ()
 
 if (USE_LIBROMFS)
@@ -267,51 +248,11 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 # building release file
 if (PLATFORM_DESKTOP)
-    if (APPLE)
-        if (NOT CMAKE_OSX_ARCHITECTURES)
-            set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "" FORCE)
-            set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "" FORCE)
-            set(CMAKE_XCODE_ATTRIBUTE_MACOSX_DEPLOYMENT_TARGET[arch=arm64] "11.0" CACHE STRING "" FORCE)
-        endif ()
-        message(STATUS "CMAKE_OSX_ARCHITECTURES: ${CMAKE_OSX_ARCHITECTURES}")
-
-        set_target_properties(${PROJECT_NAME} PROPERTIES
-            MACOSX_BUNDLE TRUE
-            MACOSX_BUNDLE_BUNDLE_NAME ${PROJECT_NAME}
-            MACOSX_BUNDLE_BUNDLE_VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_ALTER}"
-            MACOSX_BUNDLE_LONG_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_ALTER}"
-            MACOSX_BUNDLE_SHORT_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}"
-            MACOSX_BUNDLE_ICON_FILE "app.icns"
-            MACOSX_BUNDLE_COPYRIGHT "Copyright 2026 ${PROJECT_AUTHOR}"
-            RESOURCE "${CMAKE_SOURCE_DIR}/app/platform/osx/app.icns"
-        )
-
-        if (CMAKE_PREFIX_PATH)
-            set(BUNDLE_ARG -s ${CMAKE_PREFIX_PATH}/lib)
-        endif ()
-
-        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND "${CMAKE_COMMAND}" -E copy_directory ${PROJECT_RESOURCES} Resources/resources
-            COMMAND otool -L MacOS/${PROJECT_NAME}
-            COMMAND dylibbundler -cd -ns -b ${BUNDLE_ARG} -x MacOS/${PROJECT_NAME} -d Frameworks/ -p "@executable_path/../Frameworks/"
-            COMMAND codesign --sign - --force Frameworks/*
-            WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/${PROJECT_NAME}.app/Contents"
-        )
-    elseif (CMAKE_INSTALL)
-        set(icon_dirs 32x32 48x48 64x64 128x128 256x256)
-        linux_install(
-            "${PROJECT_RESOURCES}" "${BRLS_RESOURCES_DIR}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/switchfin.svg"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/icons" "${icon_dirs}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/${PACKAGE_NAME}.appdata.xml"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/${PACKAGE_NAME}.desktop"
-        )
-    elseif (NOT USE_LIBROMFS)
+    if (NOT USE_LIBROMFS)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_directory ${PROJECT_RESOURCES} ${PROJECT_BINARY_DIR}/resources
         )
     endif()
-
 elseif (PLATFORM_SWITCH)
     if (BUILTIN_NSP)
         add_dependencies(${PROJECT_NAME} forwarder.nsp)
@@ -323,48 +264,15 @@ elseif (PLATFORM_SWITCH)
     # also names the save folder (sdmc:/switch/KickNX) and the user agent.
     # The old file is removed first: on a case-insensitive drive, writing
     # over KickNX.nro would keep its old capitalisation.
+    # The romfs copy is cleared first so files deleted from resources/ are
+    # not packed into the NRO from an earlier build.
     set(PROJECT_NRO_NAME kickNX)
     add_custom_target(${PROJECT_NRO_NAME}.nro DEPENDS ${PROJECT_NAME}
         COMMAND ${NX_NACPTOOL_EXE} --create "${PROJECT_DISPLAY_NAME}" "${PROJECT_AUTHOR}" "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_ALTER}" ${PROJECT_NAME}.nacp
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/resources
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_RESOURCES} ${CMAKE_BINARY_DIR}/resources
         COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/resources/font/keymap*.ttf ${CMAKE_BINARY_DIR}/resources/font/*_fallback.ttf ${CMAKE_BINARY_DIR}/resources/font/switch_font.ttf
         COMMAND ${CMAKE_COMMAND} -E remove ${PROJECT_NAME}.nro ${PROJECT_NRO_NAME}.nro
         COMMAND ${NX_ELF2NRO_EXE} ${PROJECT_NAME}.elf ${PROJECT_NRO_NAME}.nro --icon=${PROJECT_ICON} --nacp=${PROJECT_NAME}.nacp --romfsdir=${CMAKE_BINARY_DIR}/resources
-    )
-elseif (PLATFORM_PSV)
-    set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -d ATTRIBUTE2=12") # max heap size mode
-    set(PSV_ASSETS_FILES
-        FILE ${CMAKE_SOURCE_DIR}/app/platform/vita/sce_sys/icon0.png sce_sys/icon0.png
-        FILE ${CMAKE_SOURCE_DIR}/app/platform/vita/sce_sys/pic0.png sce_sys/pic0.png
-        FILE ${CMAKE_SOURCE_DIR}/app/platform/vita/sce_sys/bg.png sce_sys/livearea/contents/bg.png
-        FILE ${CMAKE_SOURCE_DIR}/app/platform/vita/sce_sys/startup.png sce_sys/livearea/contents/startup.png
-        FILE ${CMAKE_BINARY_DIR}/template.xml sce_sys/livearea/contents/template.xml
-    )
-    if (NOT USE_LIBROMFS)
-        list(APPEND PSV_ASSETS_FILES ${CMAKE_SOURCE_DIR}/resources resources)
-    endif ()
-    if (USE_VITA_SHARK)
-        list(APPEND PSV_ASSETS_FILES "${CMAKE_BINARY_DIR}/vendor/SceShaccCg" module)
-    endif ()
-    vita_create_self(${PROJECT_NAME}.self ${PROJECT_NAME} UNSAFE NOASLR)
-    vita_create_vpk(${PROJECT_NAME}.vpk ${VITA_TITLEID} ${PROJECT_NAME}.self
-        VERSION ${VITA_VERSION}
-        NAME ${PROJECT_NAME}
-        FILE ${PSV_ASSETS_FILES}
-    )
-elseif (PLATFORM_PS4)
-    add_self(${PROJECT_NAME})
-    add_pkg(${PROJECT_NAME}
-            ${CMAKE_BINARY_DIR}/ps4
-            ${PSN_TITLE_ID}
-            "switchfin"
-            ${VITA_VERSION}
-            8388608
-    )
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory ${BOREALIS_DIR}/ps4/sce_module ${CMAKE_BINARY_DIR}/ps4/sce_module
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory ${CMAKE_SOURCE_DIR}/app/platform/ps4/sce_sys ${CMAKE_BINARY_DIR}/ps4/sce_sys
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory ${BOREALIS_DIR}/ps4/sce_sys/about ${CMAKE_BINARY_DIR}/ps4/sce_sys/about
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory ${PROJECT_RESOURCES} ${CMAKE_BINARY_DIR}/ps4/resources
     )
 endif ()

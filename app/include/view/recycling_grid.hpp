@@ -108,10 +108,6 @@ public:
     void draw(NVGcontext* vg, float x, float y, float width, float height, brls::Style style,
         brls::FrameContext* ctx) override;
 
-    void setDefaultCellFocus(size_t index);
-
-    size_t getDefaultCellFocus() const;
-
     void setDataSource(RecyclingGridDataSource* source) override;
 
     // 重新加载数据
@@ -123,13 +119,7 @@ public:
     /// 注意，因为是循环使用列表项的，所以此指针只能在获取时刻在主线程内使用
     RecyclingGridItem* getGridItemByIndex(size_t index);
 
-    std::vector<RecyclingGridItem*>& getGridItems();
-
     void clearData();
-
-    void setEmpty(std::string title = "", std::string icon = "");
-
-    void setError(std::string error = "");
 
     void selectRowAt(size_t index, bool animated);
 
@@ -146,8 +136,6 @@ public:
     // Enable finite index arithmetic for controller navigation. This is
     // opt-in so unrelated grids keep their existing navigation behaviour.
     void setIndexNavigationEnabled(bool enabled);
-
-    void forceRequestNextPage();
 
     void onLayout() override;
 

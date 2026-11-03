@@ -28,15 +28,11 @@
 #endif
 #endif
 
-typedef std::unordered_map<std::string, std::string> MPVMap;
-
 class MPVCore : public brls::Singleton<MPVCore> {
 public:
     MPVCore();
 
     ~MPVCore() = default;
-
-    void restart();
 
     void init();
 
@@ -52,10 +48,6 @@ public:
 
     bool isPaused();
 
-    double getSpeed() const;
-
-    std::string getCacheSpeed() const;
-
     void setUrl(const std::string &url, const std::string &extra = "", const std::string &method = "replace",
         uint64_t userdata = 0);
 
@@ -68,12 +60,10 @@ public:
     void setInt(const std::string &key, int64_t value);
 
     std::unordered_map<std::string, mpv_node> getNodeMap(const std::string &key);
-    bool getNodeMapStringValue(
-        const std::string& property,
-        const std::string& key,
-        std::string& value);
-    std::unordered_map<std::string, std::string> getNodeStringMap(
-        const std::string& property);
+
+    /// Seconds before the current position that are still in the demuxer
+    /// cache, i.e. how far back a seek can go without reloading.
+    double getCacheBackSeconds();
 
     void togglePlay();
 
@@ -102,20 +92,7 @@ public:
     /// @return
     MPVEvent *getEvent() { return &this->mpvCoreEvent; }
 
-    /// @brief 可以用于共享自定义事件
-    /// @return
-    MPVCustomEvent *getCustomEvent() { return &this->mpvCoreCustomEvent; }
-
-    /// @brief 异步命令回调
-    /// @return
-    MPVCommandReply *getCommandReply() { return &this->mpvCommandReply; }
-
     void reset();
-
-    // Flushes stale live-stream state and reinitializes the configured
-    // hardware decoder. The decoder is re-enabled before the next URL loads;
-    // this is not a software-decoding fallback.
-    void prepareHardwareDecoderRecovery();
 
 #if defined(KICKNX_PLAYBACK_PERF_DEBUG)
     // Diagnostic decoder and frame-timing probes. Production builds compile
@@ -128,8 +105,6 @@ public:
     // Writes a bounded, privacy-safe snapshot of the active MPV presentation.
     void logPlaybackSnapshot(const char* reason);
 #endif
-
-    MPVMap supportCodecs();
 
     // core states
     int64_t duration = 0;  // second
@@ -153,7 +128,6 @@ public:
     // 是否开启 TV 客户端的控制逻辑
     inline static bool OSD_TV_MODE = false;
     inline static bool TOUCH_GESTURE = true;
-    inline static bool CLIP_POINT = true;
 
     // 低画质解码，剔除解码过程中的部分步骤，可以用来节省cpu
     inline static bool LOW_QUALITY = false;
@@ -178,16 +152,11 @@ public:
 #else
     inline static std::string VO = "libmpv";
 #endif
-    inline static std::string VIDEO_CODEC = "h264";
     inline static int64_t VIDEO_QUALITY = 0;
-
-    inline static bool FORCE_DIRECTPLAY = false;
 
     // 触发倍速时的默认值，单位为 %
     inline static int VIDEO_SPEED = 200;
 
-    // 是否镜像视频
-    inline static int VIDEO_FILTER = 0;
     inline static int VIDEO_ROTATION = 0;
     // 强制的视频比例 (-1 为自动)
     inline static std::string VIDEO_ASPECT = "auto";
@@ -200,7 +169,6 @@ private:
     brls::Rect rect = {0, 0, 1920, 1080};
     bool video_stopped = true;
     bool video_paused = false;
-    int64_t cache_speed = 0;  // Bps
 
 #ifdef MPV_SW_RENDER
     const int PIXCEL_SIZE = 4;
@@ -267,10 +235,6 @@ private:
 
     // MPV 内部事件，传递内容为: 事件类型
     MPVEvent mpvCoreEvent;
-    // 自定义的事件，传递内容为: string类型的事件名与一个任意类型的指针
-    MPVCustomEvent mpvCoreCustomEvent;
-    // 命令异步回调
-    MPVCommandReply mpvCommandReply;
 
     // 当前软件是否在前台的回调
     brls::Event<bool>::Subscription focusSubscription;

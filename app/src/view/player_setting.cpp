@@ -227,50 +227,54 @@ PlayerSetting::PlayerSetting(std::string kickChannel) {
                     "selector value before reloading",
                     qualityLabel);
 
-                ThreadPool::instance().submit(
-                    [config, generation](HTTP&) mutable {
-                        std::this_thread::sleep_for(
-                            std::chrono::milliseconds(650));
+                // Debounce on the UI timer instead of a sleeping worker, so
+                // the shared ThreadPool stays free while the selector settles.
+                brls::delay(650, [config, generation]() {
+                    if (generation != kickQualitySwitchGeneration.load())
+                        return;
+                    // Rewound into the live VOD: the player reopens it at
+                    // the same moment in the new quality.
+                    if (kick::reloadLiveVodInPlayer()) return;
 
-                        if (generation != kickQualitySwitchGeneration.load())
-                            return;
-
-                        try {
-                            auto result = kick::resolveLive(config);
-                            brls::sync(
-                                [generation, result = std::move(result)]()
-                                    mutable {
+                    ThreadPool::instance().submit(
+                        [config, generation](HTTP&) mutable {
+                            try {
+                                auto result = kick::resolveLive(config);
+                                brls::sync(
+                                    [generation, result = std::move(result)]()
+                                        mutable {
+                                        if (generation !=
+                                            kickQualitySwitchGeneration.load())
+                                            return;
+                                        MPVCore::BOTTOM_BAR = false;
+                                        MPVCore::instance().setUrl(
+                                            result.selected.url,
+                                            kick::mpvExtra());
+                                        brls::Application::notify(
+                                            "kickNX: switched to " +
+                                            result.selected.name);
+                                    });
+                            } catch (const std::exception& exception) {
+                                const std::string message = exception.what();
+                                brls::sync([generation, message]() {
                                     if (generation !=
                                         kickQualitySwitchGeneration.load())
                                         return;
-                                    MPVCore::BOTTOM_BAR = false;
-                                    MPVCore::instance().setUrl(
-                                        result.selected.url,
-                                        kick::mpvExtra());
                                     brls::Application::notify(
-                                        "kickNX: switched to " +
-                                        result.selected.name);
+                                        "kickNX quality error: " + message);
                                 });
-                        } catch (const std::exception& exception) {
-                            const std::string message = exception.what();
-                            brls::sync([generation, message]() {
-                                if (generation !=
-                                    kickQualitySwitchGeneration.load())
-                                    return;
-                                brls::Application::notify(
-                                    "kickNX quality error: " + message);
-                            });
-                        } catch (...) {
-                            brls::sync([generation]() {
-                                if (generation !=
-                                    kickQualitySwitchGeneration.load())
-                                    return;
-                                brls::Application::notify(
-                                    "kickNX quality error: unknown resolver "
-                                    "error");
-                            });
-                        }
-                    });
+                            } catch (...) {
+                                brls::sync([generation]() {
+                                    if (generation !=
+                                        kickQualitySwitchGeneration.load())
+                                        return;
+                                    brls::Application::notify(
+                                        "kickNX quality error: unknown resolver "
+                                        "error");
+                                });
+                            }
+                        });
+                });
             });
 
         auto& orientationController =
@@ -352,6 +356,9 @@ PlayerSetting::PlayerSetting(std::string kickChannel) {
                 if (kickChannel.empty()) {
                     return;
                 }
+                // Rewound into the live VOD: the player reopens it at the
+                // same moment with the new decoder.
+                if (kick::reloadLiveVodInPlayer()) return;
 
                 auto config = kick::loadConfig();
                 config.channel = kickChannel;
@@ -641,7 +648,6 @@ PlayerSetting::PlayerSetting(std::string kickChannel) {
     } else if (subTrack.size() > 1) {
         this->subtitleTrack->setVisibility(brls::Visibility::VISIBLE);
         this->subtitleTrack->init("main/player/subtitle"_i18n, subTrack, currentSubIndex, [&mpv, subTrackIds](int selected) {
-            selectedSubtitle = selected;
             if (selected <= 0 || static_cast<size_t>(selected) >= subTrackIds.size() || subTrackIds[selected] <= 0) {
                 mpv.command("set", "sid", "no");
             } else {
@@ -666,8 +672,6 @@ PlayerSetting::PlayerSetting(std::string kickChannel) {
     } else {
         this->audioTrack->setVisibility(brls::Visibility::GONE);
     }
-
-    auto& conf = AppConfig::instance();
 
     /// Subsync
     double subDelay = mpv.getDouble("sub-delay");
@@ -696,8 +700,8 @@ PlayerSetting::PlayerSetting(std::string kickChannel) {
         btnEqualizerContrast, "main/setting/equalizer/contrast"_i18n, Equalizer::CONTRAST, mpv.getDouble("contrast"));
     setupEqualizer(btnEqualizerSaturation, "main/setting/equalizer/saturation"_i18n, Equalizer::SATURATION,
         mpv.getDouble("saturation"));
-    setupEqualizer(btnEqualizerGamma, "main/setting/equalizer/gamma"_i18n, Equalizer::GAMMA, mpv.getDouble("hue"));
-    setupEqualizer(btnEqualizerHue, "main/setting/equalizer/hue"_i18n, Equalizer::HUE, mpv.getDouble("gamma"));
+    setupEqualizer(btnEqualizerGamma, "main/setting/equalizer/gamma"_i18n, Equalizer::GAMMA, mpv.getDouble("gamma"));
+    setupEqualizer(btnEqualizerHue, "main/setting/equalizer/hue"_i18n, Equalizer::HUE, mpv.getDouble("hue"));
 }
 
 PlayerSetting::~PlayerSetting() { brls::Logger::debug("PlayerSetting: delete"); }

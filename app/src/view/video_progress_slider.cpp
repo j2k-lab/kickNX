@@ -8,8 +8,6 @@
 using namespace brls;
 
 VideoProgressSlider::VideoProgressSlider() {
-    input = Application::getPlatform()->getInputManager();
-
     line = new brls::Rectangle();
     lineEmpty = new brls::Rectangle();
     pointerIcon = new SVGImage();
@@ -149,22 +147,7 @@ void VideoProgressSlider::updateUI() {
 
 VideoProgressSlider::~VideoProgressSlider() = default;
 
-void VideoProgressSlider::clearClipPoint() { clipPointList.clear(); }
-
-void VideoProgressSlider::setClipPoint(const std::vector<float>& data) { clipPointList = data; }
-
 void VideoProgressSlider::draw(
     NVGcontext* vg, float x, float y, float width, float height, Style style, FrameContext* ctx) {
-    for (View* child : this->getChildren()) {
-        if (child == this->pointer) {
-            // draw clip point before pointer
-            nvgBeginPath(vg);
-            nvgFillColor(vg, a(nvgRGBf(1.0f, 1.0f, 1.0f)));
-            for (auto& i : clipPointList) {
-                nvgCircle(vg, x + 32 + i * (width - 64), y + height / 2, 3);
-            }
-            nvgFill(vg);
-        }
-        child->frame(ctx);
-    }
+    for (View* child : this->getChildren()) child->frame(ctx);
 }

@@ -58,17 +58,12 @@ std::unordered_map<AppConfig::Item, AppConfig::Option> AppConfig::settingMap = {
     {APP_LANG, {"app_lang", {brls::LOCALE_AUTO, brls::LOCALE_EN_US, brls::LOCALE_ZH_HANS, brls::LOCALE_ZH_HANT,
                                 brls::LOCALE_JA, brls::LOCALE_Ko, brls::LOCALE_RU, brls::LOCALE_DE, brls::LOCALE_FR,
                                 brls::LOCALE_ES, brls::LOCALE_PT, "cs", "uk", "tr", "vi"}}},
-    {APP_UPDATE, {"app_update"}},
     {APP_UI_SCALE, {"app_ui_scale", {"544p", "720p", "900p", "1080p"}}},
     {AUDIO_CHANNELS, {"audio-channels", {"auto-safe", "stereo", "mono"}}},
     {KEYMAP, {"keymap", {"xbox", "ps", "keyboard"}}},
     {WINDOW_STATE, {"window_state"}},
-    {TRANSCODEC, {"transcodec", {"h264", "hevc", "av1"}}},
-    {FORCE_DIRECTPLAY, {"force_directplay"}},
     {FULLSCREEN, {"fullscreen"}},
     {TOUCH_GESTURE, {"touch_gesture"}},
-    {CLIP_POINT, {"clip_point"}},
-    {SYNC_SETTING, {"sync_setting"}},
     {OVERCLOCK, {"overclock"}},
     {MPV_VO, {"mpv_vo", {"gpu", "gpu-next", "mediacodec_embed"}}},
     {PLAYER_LOW_QUALITY, {"player_low_quality"}},
@@ -284,8 +279,6 @@ bool AppConfig::init() {
         brls::Application::ORIGINAL_WINDOW_HEIGHT = 1080;
     }
 
-    AppConfig::SYNC = this->getItem(SYNC_SETTING, true);
-
     HTTP::TIMEOUT = this->getItem(REQUEST_TIMEOUT, 3000L);
     HTTP::PROXY_STATUS = this->getItem(HTTP_PROXY_STATUS, false);
     HTTP::PROXY = this->getItem(HTTP_PROXY, std::string("http://192.168.1.1:1080"));
@@ -295,7 +288,6 @@ bool AppConfig::init() {
 
     // 初始化是否固定显示底部进度条
     MPVCore::TOUCH_GESTURE = this->getItem(TOUCH_GESTURE, true);
-    MPVCore::CLIP_POINT = this->getItem(CLIP_POINT, true);
     // 初始化内存缓存大小
     MPVCore::INMEMORY_CACHE = this->getItem(PLAYER_INMEMORY_CACHE, 10);
     // 是否使用低质量解码
@@ -309,8 +301,6 @@ bool AppConfig::init() {
     // 初始化是否使用硬件加速
     MPVCore::VO = this->getItem(MPV_VO, MPVCore::VO);
     MPVCore::HARDWARE_DEC = this->getItem(PLAYER_HWDEC, true);
-    MPVCore::FORCE_DIRECTPLAY = this->getItem(FORCE_DIRECTPLAY, false);
-    MPVCore::VIDEO_CODEC = this->getItem(TRANSCODEC, MPVCore::VIDEO_CODEC);
     MPVCore::AUDIO_CHANNELS = this->getItem(AUDIO_CHANNELS, MPVCore::AUDIO_CHANNELS);
     // 初始化自定义的硬件加速方案
     MPVCore::PLAYER_HWDEC_METHOD = this->getItem(PLAYER_HWDEC_CUSTOM, MPVCore::PLAYER_HWDEC_METHOD);
@@ -503,34 +493,6 @@ void AppConfig::checkRestart(char* argv[]) {
 #endif
 }
 
-int AppConfig::getOptionIndex(const Item item, int default_index) const {
-    auto it = settingMap.find(item);
-    if (setting.contains(it->second.key)) {
-        try {
-            std::string value = this->setting.at(it->second.key);
-            for (size_t i = 0; i < it->second.options.size(); ++i)
-                if (it->second.options[i] == value) return i;
-        } catch (const std::exception& e) {
-            brls::Logger::error("Damaged config found: {}/{}", it->second.key, e.what());
-        }
-    }
-    return default_index;
-}
-
-int AppConfig::getValueIndex(const Item item, int default_index) const {
-    auto it = settingMap.find(item);
-    if (setting.contains(it->second.key)) {
-        try {
-            long value = this->setting.at(it->second.key);
-            for (size_t i = 0; i < it->second.values.size(); ++i)
-                if (it->second.values[i] == value) return i;
-        } catch (const std::exception& e) {
-            brls::Logger::error("Damaged config found: {}/{}", it->second.key, e.what());
-        }
-    }
-    return default_index;
-}
-
 void AppConfig::addColor(const brls::ThemeVariant tv, const std::string& name, NVGcolor defaultColor) {
     auto& theme = (tv == brls::ThemeVariant::LIGHT) ? brls::Theme::getLightTheme() : brls::Theme::getDarkTheme();
 
@@ -570,94 +532,22 @@ void AppConfig::initThemes() {
     this->addColor(brls::ThemeVariant::DARK, "brls/sidebar/active_item", nvgRGB(83, 252, 24));
     this->addColor(brls::ThemeVariant::DARK, "brls/header/border", nvgRGB(83, 252, 24));
     this->addColor(brls::ThemeVariant::DARK, "brls/header/rectangle", nvgRGB(83, 252, 24));
-    // metadata pills (detail pages)
-    this->addColor(brls::ThemeVariant::LIGHT, "color/pill", nvgRGBA(0, 0, 0, 18));
-    this->addColor(brls::ThemeVariant::DARK, "color/pill", nvgRGBA(255, 255, 255, 22));
-    // surfaces placed over the background (content cards, PIN code panel...)
-    this->addColor(brls::ThemeVariant::LIGHT, "color/surface", nvgRGB(255, 255, 255));
-    this->addColor(brls::ThemeVariant::DARK, "color/surface", nvgRGB(22, 24, 29));
     // 用于骨架屏背景色
     this->addColor(brls::ThemeVariant::LIGHT, "color/grey_1", nvgRGB(245, 246, 247));
     this->addColor(brls::ThemeVariant::DARK, "color/grey_1", nvgRGB(51, 52, 53));
-    this->addColor(brls::ThemeVariant::LIGHT, "color/grey_2", nvgRGB(245, 245, 245));
-    this->addColor(brls::ThemeVariant::DARK, "color/grey_2", nvgRGB(51, 53, 55));
     this->addColor(brls::ThemeVariant::LIGHT, "color/grey_3", nvgRGBA(200, 200, 200, 16));
     this->addColor(brls::ThemeVariant::DARK, "color/grey_3", nvgRGBA(160, 160, 160, 160));
-    this->addColor(brls::ThemeVariant::LIGHT, "color/danger", nvgRGB(198, 28, 28));
-    this->addColor(brls::ThemeVariant::DARK, "color/danger", nvgRGBA(198, 28, 28, 180));
     this->addColor(brls::ThemeVariant::LIGHT, "color/white", nvgRGB(255, 255, 255));
     this->addColor(brls::ThemeVariant::DARK, "color/white", nvgRGBA(255, 255, 255, 180));
-    // 分割线颜色
-    this->addColor(brls::ThemeVariant::LIGHT, "color/line", nvgRGB(208, 208, 208));
-    this->addColor(brls::ThemeVariant::DARK, "color/line", nvgRGB(100, 100, 100));
     // 深浅配色通用的灰色字体颜色
     this->addColor(brls::ThemeVariant::LIGHT, "font/grey", nvgRGB(148, 153, 160));
     this->addColor(brls::ThemeVariant::DARK, "font/grey", nvgRGB(148, 153, 160));
 
     if (brls::Application::ORIGINAL_WINDOW_HEIGHT == 544) {
-        brls::getStyle().addMetric("app/album/height", 215);
-        brls::getStyle().addMetric("app/books/height", 270);
-        brls::getStyle().addMetric("app/video/height", 290);
-        // row = width x image ratio (poster 2:3 = 1.5, wide 16:9 = 0.5625)
-        // + 55 of label area (margin 10 + title 25 + subtitle 20), so the
-        // image fill keeps exactly the media's ratio
-        brls::getStyle().addMetric("app/card/poster/width", 150);
-        brls::getStyle().addMetric("app/card/poster/row", 280);
-        brls::getStyle().addMetric("app/card/wide/width", 280);
-        brls::getStyle().addMetric("app/card/wide/row", 213);
-        brls::getStyle().addMetric("app/grid/6", 5);
-        brls::getStyle().addMetric("app/grid/5", 4);
-        brls::getStyle().addMetric("app/grid/4", 3);
-        brls::getStyle().addMetric("app/grid/3", 2);
-        brls::getStyle().addMetric("app/grid/2", 1);
         brls::getStyle().addMetric("brls/tab_frame/content_padding_sides", 30);
         brls::getStyle().addMetric("main/content_padding_sides", 15);
         brls::getStyle().addMetric("main/content_padding_top_bottom", 20);
     } else {
-        switch (brls::Application::ORIGINAL_WINDOW_HEIGHT) {
-        case 1080:
-            brls::getStyle().addMetric("app/album/height", 250);
-            brls::getStyle().addMetric("app/books/height", 320);
-            brls::getStyle().addMetric("app/video/height", 340);
-            brls::getStyle().addMetric("app/card/poster/width", 225);
-            brls::getStyle().addMetric("app/card/poster/row", 393);
-            brls::getStyle().addMetric("app/card/wide/width", 410);
-            brls::getStyle().addMetric("app/card/wide/row", 286);
-            brls::getStyle().addMetric("app/grid/6", 8);
-            brls::getStyle().addMetric("app/grid/5", 7);
-            brls::getStyle().addMetric("app/grid/4", 6);
-            brls::getStyle().addMetric("app/grid/3", 5);
-            brls::getStyle().addMetric("app/grid/2", 4);
-            break;
-        case 900:
-            brls::getStyle().addMetric("app/album/height", 240);
-            brls::getStyle().addMetric("app/books/height", 305);
-            brls::getStyle().addMetric("app/video/height", 325);
-            brls::getStyle().addMetric("app/card/poster/width", 205);
-            brls::getStyle().addMetric("app/card/poster/row", 363);
-            brls::getStyle().addMetric("app/card/wide/width", 375);
-            brls::getStyle().addMetric("app/card/wide/row", 266);
-            brls::getStyle().addMetric("app/grid/6", 7);
-            brls::getStyle().addMetric("app/grid/5", 6);
-            brls::getStyle().addMetric("app/grid/4", 5);
-            brls::getStyle().addMetric("app/grid/3", 4);
-            brls::getStyle().addMetric("app/grid/2", 3);
-            break;
-        default:
-            brls::getStyle().addMetric("app/album/height", 225);
-            brls::getStyle().addMetric("app/books/height", 280);
-            brls::getStyle().addMetric("app/video/height", 300);
-            // row = width x image ratio + 55 of labels (cf. PSV block)
-            brls::getStyle().addMetric("app/card/poster/width", 185);
-            brls::getStyle().addMetric("app/card/poster/row", 333);
-            brls::getStyle().addMetric("app/card/wide/width", 340);
-            brls::getStyle().addMetric("app/card/wide/row", 246);
-            brls::getStyle().addMetric("app/grid/6", 6);
-            brls::getStyle().addMetric("app/grid/5", 5);
-            brls::getStyle().addMetric("app/grid/4", 4);
-            brls::getStyle().addMetric("app/grid/3", 3);
-            brls::getStyle().addMetric("app/grid/2", 2);
-        }
         brls::getStyle().addMetric("main/content_padding_sides", 25);
         brls::getStyle().addMetric("main/content_padding_top_bottom", 30);
     }

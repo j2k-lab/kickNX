@@ -1,0 +1,56 @@
+name: Download badge
+
+# Adds the GitHub release downloads and the Homebrew App Store downloads
+# together and saves the total to the badges branch for the README badge.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: download-badge
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Count downloads
+        id: count
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          github=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[].assets[].download_count] | add // 0' | jq -s 'add // 0')
+          hbas=$(curl -fsSL --retry 3 https://switch.cdn.fortheusers.org/repo.json \
+            | jq '[.packages[] | select(.name == "kickNX") | .app_dls] | first // empty')
+          if [ -z "$hbas" ]; then
+            echo "kickNX not found in the HBAS repo.json" >&2
+            exit 1
+          fi
+          echo "GitHub: $github, HBAS: $hbas"
+          echo "total=$((github + hbas))" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the badges branch
+        uses: actions/checkout@v4
+        with:
+          ref: badges
+
+      - name: Save the total
+        env:
+          TOTAL: ${{ steps.count.outputs.total }}
+        run: |
+          set -euo pipefail
+          printf '{"schemaVersion":1,"label":"downloads","message":"%s","color":"green"}\n' "$TOTAL" > downloads.json
+          if git diff --quiet; then
+            echo "No change"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Update downloads to $TOTAL"
+          git push

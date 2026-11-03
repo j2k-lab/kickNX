@@ -23,8 +23,6 @@ std::string sec2Time(int64_t t);
 
 std::string formatSize(uint64_t s);
 
-std::string formatTime(const std::string& str);
-
 std::string randHex(const int len);
 
 std::string hexEncode(const unsigned char* data, size_t len);
@@ -35,10 +33,9 @@ bool sendIPC(const std::string& sock, const std::string& payload);
 
 void initCrashDump();
 
+/// Replaces text in scripts the Switch fonts cannot draw (Arabic, Hebrew,
+/// Thai...) with a note such as "(Arabic text not shown)". Text with nothing
+/// readable left becomes "Arabic text not available".
+std::string replaceUnsupportedText(const std::string& text);
+
 }  // namespace misc
-
-namespace base64 {
-
-std::string encode(const std::string& input);
-
-}

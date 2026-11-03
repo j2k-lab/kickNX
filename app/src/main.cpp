@@ -7,7 +7,6 @@
 #include "utils/theme.hpp"
 
 #include "view/svg_image.hpp"
-#include "view/custom_button.hpp"
 #include "view/recycling_grid.hpp"
 #include "view/h_recycling.hpp"
 #include "view/video_progress_slider.hpp"
@@ -15,13 +14,11 @@
 #include "view/video_view.hpp"
 #include "view/selector_cell.hpp"
 #include "view/button_close.hpp"
-#include "view/text_box.hpp"
-#include "view/icon_button.hpp"
 #include "view/kick_loading_view.hpp"
 #include "view/mpv_core.hpp"
+#include "utils/updater.hpp"
 
 #include "activity/hint_activity.hpp"
-#include "tab/remote_view.hpp"
 #include "activity/kicknx_home.hpp"
 
 #if defined(__SDL2__)
@@ -51,6 +48,7 @@ int main(int argc, char* argv[]) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 #endif
+    if (argc > 0) updater::setNroPath(argv[0]);
     std::vector<std::string> items;
     for (int i = 1; i < argc; i++) {
         if (std::strcmp(argv[i], "-d") == 0) {
@@ -60,7 +58,7 @@ int main(int argc, char* argv[]) {
         } else if (std::strcmp(argv[i], "-t") == 0) {
             MPVCore::DEBUG = true;
         } else if (std::strcmp(argv[i], "-o") == 0) {
-            const char* path = (i + 1 < argc) ? argv[++i] : "switchfin.log";
+            const char* path = (i + 1 < argc) ? argv[++i] : "kicknx.log";
             brls::Logger::setLogOutput(std::fopen(path, "w+"));
         } else if (std::strcmp(argv[i], "-version") == 0) {
             brls::Logger::info("{} {}", AppVersion::getDeviceName(), AppVersion::getCommit());
@@ -122,10 +120,7 @@ int main(int argc, char* argv[]) {
 
     // Register custom views (including tabs, which are views)
     brls::Application::registerXMLView("SVGImage", SVGImage::create);
-    brls::Application::registerXMLView("IconButton", IconButton::create);
-    brls::Application::registerXMLView("CustomButton", CustomButton::create);
     brls::Application::registerXMLView("SelectorCell", SelectorCell::create);
-    brls::Application::registerXMLView("TextBox", TextBox::create);
     brls::Application::registerXMLView("ButtonClose", ButtonClose::create);
     brls::Application::registerXMLView("RecyclingGrid", RecyclingGrid::create);
     brls::Application::registerXMLView("HRecyclerFrame", HRecyclerFrame::create);
@@ -138,14 +133,13 @@ int main(int argc, char* argv[]) {
     } else {
         brls::Application::pushActivity(new brls::Activity(new KickNXHome()));
     }
-    // KickNX: analytics disabled.
-    // KickNX: Switchfin update checks disabled.
-// Run the app
+    // Run the app
     while (brls::Application::mainLoop());
 
     kicknx::portrait::OrientationController::instance().shutdown();
     ThreadPool::instance().stop();
     cleanWatchLaterCache(conf.configDir() + "/watch-later");
+    updater::applyPending();
 
     conf.checkRestart(argv);
 #if defined(KICKNX_PLAYBACK_DEBUG)

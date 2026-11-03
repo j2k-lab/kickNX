@@ -21,29 +21,13 @@ public:
     using Form = std::unordered_map<std::string, std::string>;
     // For cancellable requests
     using Cancel = std::shared_ptr<std::atomic_bool>;
-    using Progress = brls::Event<curl_off_t, curl_off_t>;
 
     inline static bool PROXY_STATUS = false;
     inline static std::string PROXY;
 
-    struct Range {
-        int start = 0;
-        int end = 0;
-    };
-
     struct Timeout {
         long timeout = TIMEOUT;
     };
-
-    struct Cookie {
-        std::string name;
-        std::string value;
-        std::string domain;
-        std::string path;
-        bool http_only;
-    };
-
-    using Cookies = std::vector<Cookie>;
 
     HTTP();
     HTTP(const HTTP& other) = delete;
@@ -51,14 +35,10 @@ public:
 
     static std::string encode_form(const Form& form);
     void _get(const std::string& url, std::ostream* out);
-    bool getinfo(char** arg);
-    int propfind(const std::string& url, std::ostream* out);
     std::string _post(const std::string& url, const std::string& data);
-    void set_user_agent(const std::string& agent);
     /// Marks a ThreadPool worker's handle, whose image downloads share fewer
     /// connection slots so Kick API calls always have one free.
     void set_pooled(bool value) { pooled = value; }
-    void set_basic_auth(const std::string& user, const std::string& passwd);
     void _delete(const std::string& url, std::ostream* out);
 
     template <typename... Ts>
@@ -74,14 +54,6 @@ public:
         set_option(s, std::forward<Ts>(ts)...);
         s._get(url, &body);
         return body.str();
-    }
-
-    template <typename... Ts>
-    static void download(const std::string& url, const std::string& path, Ts&&... ts) {
-        HTTP s;
-        std::ofstream of(path, std::ios_base::binary);
-        set_option(s, std::forward<Ts>(ts)...);
-        s._get(url, &of);
     }
 
     // Post methods
@@ -117,13 +89,9 @@ private:
         void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);
     int perform(std::ostream* body);
 
-    void add_header(const std::string& header);
     void set_option(const Header& hs);
-    void set_option(const Range& r);
     void set_option(const Timeout& t);
     void set_option(const Cancel& c);
-    void set_option(const Cookies& cookies);
-    void set_option(Progress::Callback p);
 
     template <typename CT>
     void set_option_internal(CT&& option) {
@@ -139,9 +107,5 @@ private:
     void* easy;
     struct curl_slist* chunk;
     Cancel is_cancel;
-    Progress event;
-    // Cancellation is needed for image requests, but progress callbacks are
-    // enabled only for callers that explicitly request progress reporting.
-    bool report_progress = false;
     bool pooled = false;
 };

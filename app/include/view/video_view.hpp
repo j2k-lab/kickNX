@@ -18,14 +18,6 @@ enum class OSDState {
     ALWAYS_ON = 2,
 };
 
-enum class ClickState {
-    IDLE = 0,
-    PRESS = 1,
-    FAST_RELEASE = 3,
-    FAST_PRESS = 4,
-    CLICK_DOUBLE = 5,
-};
-
 class VideoView : public brls::Box {
 public:
     VideoView();
@@ -48,12 +40,6 @@ public:
     void showLoading();
     void hideLoading(bool dimming = true);
 
-    void setList(const std::vector<std::string>& values, int index = -1);
-
-    void setClipPoint(const std::vector<float>& clips);
-
-    void playNext(int offset);
-
     brls::Event<int>* getPlayEvent() { return &this->playIndexEvent; }
 
     brls::VoidEvent* getSettingEvent() { return &this->settingEvent; }
@@ -64,9 +50,7 @@ public:
 
     VideoProfile* getProfile() { return this->profile; }
 
-    void hideVideoProgressSlider();
     void hideVideoQuality();
-    void registerVideoQuality(brls::ActionListener action);
     void registerActions(const std::string& hintText, const brls::ControllerButton button,
         const brls::BrlsKeyCombination key, const brls::ActionListener& actionListener, bool hidden = false,
         bool allowRepeating = false);
@@ -86,6 +70,30 @@ public:
     int64_t getCurrentStreamUptime() const;
     void updateLiveProgressUI();
 
+    /// Live rewind beyond the cache plays Kick's recording of the broadcast.
+    /// With a recording the bar covers the whole stream; a seek the live cache
+    /// can't reach (or any seek while the recording plays) goes to the handler
+    /// with how far behind live to play, 0 meaning back to live.
+    using LiveSeekHandler = std::function<void(int64_t behindSeconds)>;
+    /// Kick's recording trails live by about this much (measured ~16 s; it
+    /// grows in 10 s segments). Also the most the end of the bar snaps to
+    /// live.
+    static constexpr int64_t LIVE_RECORDING_DELAY = 20;
+    /// The recording is only opened this far behind live or more, which
+    /// stays inside what it holds even just before its next segment lands.
+    int64_t liveRecordingGap() const { return LIVE_RECORDING_DELAY + 12; }
+    void setLiveSeekHandler(LiveSeekHandler handler);
+    void setLiveRecordingAvailable(bool available);
+    void setWatchingRecording(bool watching);
+    bool isWatchingRecording() const { return this->watchingRecording; }
+    /// How far behind live playback is now, in seconds.
+    int64_t liveBehind() const { return this->currentLiveBehind(); }
+    /// mpv opens a file at its start and seeks to the requested point once
+    /// it runs. Keeps the (paused) picture covered until playback has
+    /// reached `position`, then resumes.
+    void holdUntilPosition(double position);
+    bool isHoldingPosition() const { return this->holdPosition >= 0; }
+
     using CloseHandler = std::function<void()>;
     static void setGlobalCloseHandler(CloseHandler handler);
     static bool close(bool quit = false);
@@ -93,8 +101,6 @@ public:
 private:
     /// OSD
     BRLS_BIND(brls::Label, titleLabel, "video/osd/title");
-    BRLS_BIND(brls::Box, btnForward, "video/osd/forward");
-    BRLS_BIND(brls::Box, btnBackward, "video/osd/backward");
     BRLS_BIND(brls::Box, btnSetting, "video/osd/setting");
     BRLS_BIND(brls::Box, btnChannel, "video/osd/channel");
     BRLS_BIND(brls::Image, channelImage, "video/osd/channel/image");
@@ -102,7 +108,6 @@ private:
     BRLS_BIND(brls::Box, btnToggle, "video/osd/toggle");
     BRLS_BIND(brls::Box, btnVideoQuality, "video/quality/box");
     BRLS_BIND(brls::Box, btnVideoSpeed, "video/speed/box");
-    BRLS_BIND(brls::Box, btnEpisode, "show/episode/box");
     BRLS_BIND(brls::Box, btnVolume, "video/osd/volume");
     BRLS_BIND(brls::Box, btnClose, "video/close/box");
     BRLS_BIND(brls::Box, iconBox, "video/osd/icon/box");
@@ -127,11 +132,8 @@ private:
     BRLS_BIND(brls::Label, centerStatusLabel, "video/center/status");
     BRLS_BIND(brls::Label, rightStatusLabel, "video/right/status");
     BRLS_BIND(brls::Label, videoSpeedLabel, "video/speed/label");
-    BRLS_BIND(brls::Label, showEpisodeLabel, "show/episode/label");
     BRLS_BIND(brls::Label, speedHintLabel, "video/speed/hint/label");
     BRLS_BIND(brls::Box, speedHintBox, "video/speed/hint/box");
-    BRLS_BIND(brls::Label, hintLabel, "video/osd/hint/label");
-    BRLS_BIND(brls::Box, hintBox, "video/osd/hint/box");
 
     void registerMpvEvent();
     void unRegisterMpvEvent();
@@ -142,7 +144,6 @@ private:
     void hideOSD();
     bool toggleSpeed();
     bool toggleVolume(brls::View* view);
-    void showHint(const std::string& value);
     void setTvMode(bool state);
 
     /// @brief 延迟 200ms 触发进度跳转到 seeking_range
@@ -157,6 +158,16 @@ private:
     void scrubProcessing();
     void moveScrub(double deltaSeconds);
     void endScrub(bool released);
+    /// Length of the bar in seconds: the VOD, or the live rewind range.
+    double barLength() const;
+    double liveBarLength() const;
+    /// How far behind live playback is now, in seconds.
+    int64_t currentLiveBehind() const;
+    /// Plays the live stream `behind` seconds behind live.
+    void seekLive(int64_t behind);
+    void showLiveBehind(int64_t behind);
+    /// Small "-time" over the bar at the scrub position (live only).
+    void drawScrubTip(NVGcontext* vg);
     /// @brief notify videoview closed
     static void disableDimming(bool disable);
 
@@ -170,7 +181,6 @@ private:
     // OSD
     bool isOsdShown = false;
     brls::Time osdLastShowTime = 0;
-    brls::Time hintLastShowTime = 0;
     brls::Time profileLastShowTime = 0;
     const brls::Time OSD_SHOW_TIME = 5000000;  //默认5秒
     OSDState osdState = OSDState::HIDDEN;
@@ -190,8 +200,6 @@ private:
     brls::Time scrubLastTick = 0;
 
     MPVEvent::Subscription eventSubscribeID;
-    brls::Rect oldRect = brls::Rect(-1, -1, -1, -1);
-    brls::InputManager* input = nullptr;
 
     NVGcolor bottomBarColor = brls::Application::getTheme().getColor("color/app");
 
@@ -204,4 +212,13 @@ private:
     std::chrono::steady_clock::time_point streamUptimeBaselineTime;
     int64_t liveRewindSeconds = 0;
     brls::Time lastLiveProgressTick = 0;
+    bool liveRecordingAvailable = false;
+    bool liveRecordingChecked = false;  // Kick answered whether there is one
+    bool watchingRecording = false;
+    double holdPosition = -1;
+    std::string scrubTip;  // shown over the bar while scrubbing live
+    float scrubTipProgress = 0;
+    brls::Time holdStarted = 0;
+    LiveSeekHandler liveSeekHandler;
+    brls::Time lastRewindLimitNote = 0;
 };

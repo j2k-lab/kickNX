@@ -15,9 +15,7 @@ typedef enum MpvEventEnum {
     UPDATE_PROGRESS,
     START_FILE,
     END_OF_FILE,
-    CACHE_SPEED_CHANGE,
     VIDEO_SPEED_CHANGE,
-    VIDEO_VOLUME_CHANGE,
     VIDEO_MUTE,
     VIDEO_UNMUTE,
     MPV_FILE_ERROR,
@@ -26,13 +24,3 @@ typedef enum MpvEventEnum {
 } MpvEventEnum;
 
 typedef brls::Event<MpvEventEnum> MPVEvent;
-typedef brls::Event<std::string, void *> MPVCustomEvent;
-typedef brls::Event<uint64_t, int64_t> MPVCommandReply;
-
-// 用于 VideoView 可以接收的自定义事件
-const std::string VIDEO_CLOSE = "VIDEO_CLOSE";
-// 用于播放器可以接收的自定义事件
-const std::string QUALITY_CHANGE = "QUALITY_CHANGE";
-const std::string SYNC_STOP = "SYNC_STOP";
-
-const std::string TRACK_START = "TRACK_START";

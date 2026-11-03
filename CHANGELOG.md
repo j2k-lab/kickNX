@@ -15,6 +15,28 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.5.1]
+
+### Added
+- **Rewind a live stream to its start**: the live progress bar now covers the whole stream, like on kick.com. Rewinds within the last ~30 seconds stay in the live buffer; longer ones switch to the stream's live VOD at that moment, with chat staying live. Scrubbing to the end of the bar, or catching up to live, goes back to the live stream. The first long rewind briefly stops the stream while kickNX fetches the live VOD ("Fetching live VOD…"), and it opens on the chosen moment without flashing the start of the broadcast. Channels that don't save their broadcasts keep a short rewind and say so. If the streamer goes offline, the live VOD keeps playing.
+- **Live broadcast on streamer pages**: in Recent broadcasts, the broadcast that is still live shows as a "LIVE now" card that opens the live stream. Once the stream ends it becomes a normal VOD.
+- **Install updates from the app**: when "Check for updates" on the About page finds a newer release, kickNX offers to install it. It downloads the new version, checks that it arrived complete, replaces itself and restarts. The dialog also lists the release's main changes. A download that was never applied is deleted the next time kickNX starts.
+- **Applet-mode help**: opening kickNX from the Album now shows three short slides: a warning not to launch it from the Album, how to open it through the Homebrew Menu (hold R while starting a game, or use an hbmenu icon on the HOME Menu), and an optional suggestion to install a kickNX forwarder with Sphaira.
+- **Unsupported text notes**: stream titles, descriptions and chat messages written in scripts the Switch fonts can't draw show a short note instead of empty boxes.
+- **Live viewers on category cards** on Home and streamer pages, and live event cards show total viewers and live streams. Events are sorted by viewers.
+
+### Changed
+- **Scrub label over the bar**: while scrubbing (holding A, L/R or a swipe), a small label over the progress bar shows how far behind live, or which time in a VOD, you are going. It replaces the seek hint in the middle of the screen.
+- **One time under the live bar**: the position in the broadcast, which counts up while playing (the uptime at live).
+- **Larger live buffer**: live streams keep about 30 seconds of watched video for rewinding (it was about 7). It uses no extra data.
+- **Faster Home**: all Home sections share one connection to kick.com.
+- **Faster chat**: chat lines keep their layout instead of measuring it again, and chat stops its requests and connection promptly when it closes.
+- **Green viewer counts**: viewers on stream cards and views on clip and VOD cards use the accent green.
+- **Smaller app**: leftover Switchfin code, settings, resources and non-Switch packaging were removed.
+
+### Fixed
+- **Crash after scrubbing**: closing the live player after a scrub could leave focus on the closed player, and the next stick input on Home crashed kickNX.
+
 ## [0.5.0]
 
 ### Added

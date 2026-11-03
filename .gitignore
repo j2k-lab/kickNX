@@ -34,15 +34,10 @@
 /resources/forwarder.nsp
 /resources/shaders/*.dksh
 /scripts/*/*/*.tar.*
-/scripts/aur/*.tar.*
 /scripts/*/*/src
 /jniLibs/
 
 # Upstream packaging output
-/debian/debhelper-build-stamp
-/debian/files
-/debian/switchfin*
-/debian/.debhelper/
 /.wget-hsts
 
 # OS metadata

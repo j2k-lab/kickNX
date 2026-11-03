@@ -17,11 +17,6 @@ public:
     static std::string getDeviceName();
     static std::string getPackageName();
     static std::string getCommit();
-    static bool needUpdate(std::string latestVersion);
-    static void checkUpdate(int delay = 2000, bool showUpToDateDialog = false);
-
-    inline static std::shared_ptr<std::atomic_bool> updating = std::make_shared<std::atomic_bool>(true);
-    inline static std::string git_repo = "dragonflylee/switchfin";
 };
 
 class AppConfig : public brls::Singleton<AppConfig> {
@@ -32,16 +27,11 @@ public:
         APP_THEME,
         APP_COLOR_THEME,
         APP_LANG,
-        APP_UPDATE,
         APP_UI_SCALE,
         AUDIO_CHANNELS,
         KEYMAP,
         WINDOW_STATE,
-        TRANSCODEC,
-        FORCE_DIRECTPLAY,
         TOUCH_GESTURE,
-        CLIP_POINT,
-        SYNC_SETTING,
         MPV_VO,
         PLAYER_LOW_QUALITY,
         PLAYER_INMEMORY_CACHE,
@@ -111,15 +101,7 @@ public:
         std::vector<long> values;
     };
 
-    int getOptionIndex(const Item item, int default_index = 0) const;
-    int getValueIndex(const Item item, int default_index = 0) const;
-    inline const Option& getOptions(const Item item) const { return settingMap[item]; }
-
-    const std::string& getDeviceId() { return this->device; }
-
     NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(AppConfig, device, setting);
-
-    inline static bool SYNC = true;
 
 private:
     static std::unordered_map<Item, Option> settingMap;

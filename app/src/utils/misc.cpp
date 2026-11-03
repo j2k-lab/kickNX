@@ -2,6 +2,7 @@
 #include <borealis/core/logger.hpp>
 #include <borealis/core/i18n.hpp>
 #include <fmt/chrono.h>
+#include <cctype>
 #include <random>
 #include <sstream>
 #include <iomanip>
@@ -112,7 +113,7 @@ LONG WINAPI createMiniDump(_EXCEPTION_POINTERS* pep) {
     DWORD cbTemp = ::GetTempPathA(sizeof(tempPath), tempPath);
     ::GetLocalTime(&lt);
 
-    snprintf(tempPath + cbTemp, sizeof(tempPath) - cbTemp, "switchfin-%04d%02d%02d-%02d%02d%02d.dmp", lt.wYear,
+    snprintf(tempPath + cbTemp, sizeof(tempPath) - cbTemp, "kicknx-%04d%02d%02d-%02d%02d%02d.dmp", lt.wYear,
         lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond);
     HANDLE hDump = ::CreateFileA(tempPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 
@@ -157,27 +158,6 @@ std::string misc::formatSize(uint64_t s) {
     if (s < (1 << 20)) return fmt::format("{}KB", s / 1024);
     if (s < (1 << 30)) return fmt::format("{:.2f}MB", (s >> 10) / 1024.0f);
     return fmt::format("{:.2f}GB", (s >> 20) / 1024.0f);
-}
-
-std::string misc::formatTime(const std::string& str) {
-    std::tm t = {};
-    char tz[20];
-    std::istringstream ss(str);
-    ss >> std::get_time(&t, "%Y-%m-%dT%H:%M:%S");
-    std::time_t tt = std::time(nullptr);
-    std::time_t gt = std::mktime(std::gmtime(&tt));
-
-    int64_t diff = int64_t(std::difftime(gt, std::mktime(&t)));
-    if (diff < 60) {
-        return "main/dashboard/within_minute"_i18n;
-    }
-    if (diff < 30 * 60) {
-        return fmt::format(fmt::runtime("main/dashboard/minute_ago"_i18n), diff / 60);
-    }
-
-    std::time_t lt = tt - diff;
-    std::strftime(tz, sizeof(tz), "%Y-%m-%d %H:%M:%S", std::localtime(&lt));
-    return tz;
 }
 
 std::string misc::randHex(const int len) {
@@ -241,48 +221,130 @@ bool misc::sendIPC(const std::string& sock, const std::string& payload) {
 #endif
 }
 
-namespace base64 {
+namespace {
 
-const char kEncodeLookup[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const char kPadCharacter = '=';
+// Scripts the Switch system fonts have no glyphs for. Each is drawn as a box
+// with an X, so it is replaced by a short note instead. An empty name gives
+// the generic note.
+struct UnsupportedScript {
+    uint32_t first;
+    uint32_t last;
+    const char* name;
+};
 
-using byte = std::uint8_t;
+constexpr UnsupportedScript UNSUPPORTED_SCRIPTS[] = {
+    {0x0530, 0x058F, ""},        // Armenian
+    {0x0590, 0x05FF, "Hebrew"},
+    {0x0600, 0x06FF, "Arabic"},
+    {0x0700, 0x074F, ""},        // Syriac
+    {0x0750, 0x077F, "Arabic"},
+    {0x0780, 0x07BF, ""},        // Thaana
+    {0x08A0, 0x08FF, "Arabic"},
+    {0x0900, 0x097F, "Hindi"},   // Devanagari
+    {0x0980, 0x0DFF, ""},        // Bengali to Sinhala
+    {0x0E00, 0x0E7F, "Thai"},
+    {0x0E80, 0x0EFF, ""},        // Lao
+    {0x1000, 0x109F, ""},        // Myanmar
+    {0x10A0, 0x10FF, ""},        // Georgian
+    {0x1200, 0x139F, ""},        // Ethiopic
+    {0x1780, 0x17FF, ""},        // Khmer
+    {0xFB1D, 0xFB4F, "Hebrew"},
+    {0xFB50, 0xFDFF, "Arabic"},
+    {0xFE70, 0xFEFF, "Arabic"},
+};
 
-std::string encode(const std::string& input) {
-    std::string encoded;
-    encoded.reserve(((input.size() / 3) + (input.size() % 3 > 0)) * 4);
-
-    std::uint32_t temp{};
-    auto it = input.begin();
-
-    for (std::size_t i = 0; i < input.size() / 3; ++i) {
-        temp = (*it++) << 16;
-        temp += (*it++) << 8;
-        temp += (*it++);
-        encoded.append(1, kEncodeLookup[(temp & 0x00FC0000) >> 18]);
-        encoded.append(1, kEncodeLookup[(temp & 0x0003F000) >> 12]);
-        encoded.append(1, kEncodeLookup[(temp & 0x00000FC0) >> 6]);
-        encoded.append(1, kEncodeLookup[(temp & 0x0000003F)]);
+const UnsupportedScript* unsupportedScript(uint32_t codepoint) {
+    for (const auto& script : UNSUPPORTED_SCRIPTS) {
+        if (codepoint >= script.first && codepoint <= script.last) return &script;
     }
-
-    switch (input.size() % 3) {
-    case 1:
-        temp = (*it++) << 16;
-        encoded.append(1, kEncodeLookup[(temp & 0x00FC0000) >> 18]);
-        encoded.append(1, kEncodeLookup[(temp & 0x0003F000) >> 12]);
-        encoded.append(2, kPadCharacter);
-        break;
-    case 2:
-        temp = (*it++) << 16;
-        temp += (*it++) << 8;
-        encoded.append(1, kEncodeLookup[(temp & 0x00FC0000) >> 18]);
-        encoded.append(1, kEncodeLookup[(temp & 0x0003F000) >> 12]);
-        encoded.append(1, kEncodeLookup[(temp & 0x00000FC0) >> 6]);
-        encoded.append(1, kPadCharacter);
-        break;
-    }
-
-    return encoded;
+    return nullptr;
 }
 
-}  // namespace base64
+// Spaces, ASCII punctuation and digits, general punctuation and the
+// direction marks: they stay inside a run of another script.
+bool isNeutral(uint32_t codepoint) {
+    if (codepoint < 0x80) return !std::isalpha(static_cast<int>(codepoint));
+    return codepoint == 0x00A0 || (codepoint >= 0x2000 && codepoint <= 0x206F);
+}
+
+// Decodes the UTF-8 sequence at `pos`, moving `pos` past it. Malformed bytes
+// are returned one at a time as themselves.
+uint32_t nextCodepoint(const std::string& text, size_t& pos) {
+    const auto byte = [&](size_t i) { return static_cast<unsigned char>(text[i]); };
+    const unsigned char lead = byte(pos);
+    const size_t length = lead < 0x80 ? 1 : (lead >> 5) == 0x6 ? 2 : (lead >> 4) == 0xE ? 3 : (lead >> 3) == 0x1E ? 4 : 1;
+    if (length == 1 || pos + length > text.size()) {
+        ++pos;
+        return lead;
+    }
+    uint32_t codepoint = lead & (0x7F >> length);
+    for (size_t i = 1; i < length; ++i) codepoint = (codepoint << 6) | (byte(pos + i) & 0x3F);
+    pos += length;
+    return codepoint;
+}
+
+}  // namespace
+
+std::string misc::replaceUnsupportedText(const std::string& text) {
+    std::string result;
+    bool replaced = false;
+    bool readable = false;     // anything left that the fonts can draw
+    const char* wholeName = nullptr;
+    bool oneScript = true;
+
+    const UnsupportedScript* run = nullptr;  // script of the open run
+    size_t pending = 0;                      // neutral bytes held after the run
+
+    const auto closeRun = [&]() {
+        if (!run) return;
+        const std::string name = run->name;
+        result += name.empty() ? "(text not shown)" : "(" + name + " text not shown)";
+        replaced = true;
+        if (!wholeName) wholeName = run->name;
+        else if (std::string(wholeName) != run->name) oneScript = false;
+        run = nullptr;
+    };
+
+    size_t pos = 0;
+    while (pos < text.size()) {
+        const size_t start = pos;
+        const uint32_t codepoint = nextCodepoint(text, pos);
+        const auto* script = unsupportedScript(codepoint);
+
+        if (script) {
+            // Neutral text between two runs of the same script joins them.
+            if (run && std::string(run->name) == script->name) {
+                pending = 0;
+            } else {
+                if (run) {
+                    closeRun();
+                    result.append(text, start - pending, pending);
+                }
+                pending = 0;
+                run = script;
+            }
+            continue;
+        }
+        if (run && isNeutral(codepoint)) {
+            pending += pos - start;
+            continue;
+        }
+        if (run) {
+            closeRun();
+            result.append(text, start - pending, pending);
+            pending = 0;
+        }
+        if (!isNeutral(codepoint)) readable = true;
+        result.append(text, start, pos - start);
+    }
+    if (run) {
+        closeRun();
+        result.append(text, text.size() - pending, pending);
+    }
+
+    if (!replaced) return text;
+    if (readable) return result;
+    // Nothing readable is left: one line instead of a note per paragraph.
+    if (oneScript && wholeName && *wholeName) return std::string(wholeName) + " text not available";
+    return "Text not available in this language";
+}

@@ -135,7 +135,9 @@ void sendChatMessageAsync(
     ChatSendCallback success,
     ErrorCallback failure);
 
-int fetchActiveChattersCount(const std::string& channelIdOrSlug);
+int fetchActiveChattersCount(
+    const std::string& channelIdOrSlug,
+    std::shared_ptr<std::atomic_bool> cancel = nullptr);
 
 class ChatClient {
 public:
@@ -162,6 +164,10 @@ private:
     ChatStatusCallback statusCallback;
     ChattersCountCallback chattersCallback;
     std::atomic_bool stopRequested{false};
+    // Set by stop() so Kick requests still in flight give up straight away
+    // instead of running to their timeouts while stop() waits for them.
+    std::shared_ptr<std::atomic_bool> cancelRequests =
+        std::make_shared<std::atomic_bool>(false);
     std::mutex channelIdMutex;
     std::string resolvedChannelId;
 

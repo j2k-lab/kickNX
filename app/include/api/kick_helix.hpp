@@ -45,6 +45,7 @@ struct ChannelVideo {
     std::string duration;
     std::string language;
     int viewCount = 0;
+    bool isLive = false;  // the recording of the broadcast that is still live
 };
 
 struct ChannelClip {
@@ -89,6 +90,8 @@ struct Category {
     std::string id;
     std::string name;
     std::string boxArtUrl;
+    /// Live viewers across the category, or -1 when Kick did not send it.
+    int viewerCount = -1;
 };
 
 struct ChannelPageData {
@@ -170,14 +173,6 @@ struct HomeData {
                !popularClipsError.empty() ||
                !categoriesError.empty();
     }
-
-    bool hasAnySection() const {
-        return followed.loaded ||
-               offlineFollowed.loaded ||
-               popular.loaded ||
-               popularClips.loaded ||
-               categories.loaded;
-    }
 };
 
 using HomeCallback = std::function<void(HomeData)>;
@@ -197,6 +192,18 @@ void loadChannelProfileAsync(
     UserProfileCallback success,
     ErrorCallback failure,
     HTTP::Cancel cancel = nullptr);
+
+// Finds the recording Kick keeps of a channel's current broadcast (the live
+// entry in its video list). `url` is empty when the channel isn't saving
+// one. `known` is false when Kick couldn't be asked, so callers can retry.
+// `recordedSeconds` is how much of the broadcast the recording holds right
+// now (0 when unknown): the reliable way to tell how long it has been live.
+using LiveRecordingCallback = std::function<void(
+    bool known, std::string url, double recordedSeconds, std::string error)>;
+void findLiveRecordingAsync(
+    const Config& config,
+    const std::string& login,
+    LiveRecordingCallback done);
 
 void loadChannelPageAsync(
     const Config& config,

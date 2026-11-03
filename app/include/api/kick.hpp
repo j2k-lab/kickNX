@@ -55,6 +55,13 @@ void resolveLiveAsync(
 using LiveCheckCallback = std::function<void(bool known, bool live)>;
 void checkChannelLiveAsync(const std::string& channel, LiveCheckCallback done);
 
+// While the live player shows the live VOD (a rewind), quality and decoder
+// changes must reopen that instead of the live stream. The player registers
+// a handler; it returns true when it took care of the reload.
+using LiveVodReloadHandler = std::function<bool()>;
+void setLiveVodReloadHandler(LiveVodReloadHandler handler);
+bool reloadLiveVodInPlayer();
+
 // Per-file mpv options for Kick live playback, mirroring twiNX's Twitch setup.
 std::string mpvExtra();
 

@@ -1,6 +1,7 @@
 #include "api/kick_auth.hpp"
 
 #include "api/http.hpp"
+#include "utils/config.hpp"
 #include "utils/thread.hpp"
 
 #include <borealis.hpp>
@@ -76,40 +77,6 @@ public:
 
     bool valid() const { return curl != nullptr; }
 
-    std::string getCookie(const std::string& name) const {
-        if (!curl) return {};
-        struct curl_slist* cookies = nullptr;
-        if (curl_easy_getinfo(curl, CURLINFO_COOKIELIST, &cookies) != CURLE_OK || !cookies)
-            return {};
-        std::string result;
-        for (struct curl_slist* item = cookies; item; item = item->next) {
-            if (!item->data) continue;
-            std::string line(item->data);
-            std::istringstream iss(line);
-            std::string col;
-            std::vector<std::string> cols;
-            while (std::getline(iss, col, '\t')) {
-                cols.push_back(col);
-            }
-            if (cols.size() >= 7 && cols[5] == name) {
-                result = cols[6];
-                break;
-            }
-        }
-        curl_slist_free_all(cookies);
-        return result;
-    }
-
-    std::string unescape(const std::string& str) const {
-        if (!curl || str.empty()) return str;
-        int outLen = 0;
-        char* unescaped = curl_easy_unescape(curl, str.c_str(), static_cast<int>(str.size()), &outLen);
-        if (!unescaped) return str;
-        std::string res(unescaped, outLen);
-        curl_free(unescaped);
-        return res;
-    }
-
     RawResponse request(
         const std::string& method,
         const std::string& url,
@@ -155,33 +122,6 @@ public:
         return resp;
     }
 
-    std::string exportCookies() const {
-        if (!curl) return {};
-        struct curl_slist* cookies = nullptr;
-        if (curl_easy_getinfo(curl, CURLINFO_COOKIELIST, &cookies) != CURLE_OK || !cookies)
-            return {};
-        std::string result;
-        for (struct curl_slist* item = cookies; item; item = item->next) {
-            if (item->data) {
-                result += item->data;
-                result += "\n";
-            }
-        }
-        curl_slist_free_all(cookies);
-        return result;
-    }
-
-    void importCookies(const std::string& cookieData) {
-        if (!curl || cookieData.empty()) return;
-        std::istringstream iss(cookieData);
-        std::string line;
-        while (std::getline(iss, line)) {
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (line.empty() || line[0] == '#') continue;
-            curl_easy_setopt(curl, CURLOPT_COOKIELIST, line.c_str());
-        }
-    }
-
 private:
     CURL* curl = nullptr;
 };
@@ -204,7 +144,8 @@ RawResponse postFormRaw(const std::string& url, const HTTP::Form& form) {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 15000L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 15000L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "kickNX/0.5.0 (Nintendo Switch)");
+    const std::string userAgent = "kickNX/" + AppVersion::getVersion() + " (Nintendo Switch)";
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeBody);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
@@ -222,111 +163,6 @@ RawResponse postFormRaw(const std::string& url, const HTTP::Form& form) {
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return response;
-}
-
-RawResponse postJsonRaw(
-    const std::string& url,
-    const std::string& jsonBody,
-    const HTTP::Header& extraHeaders = {}) {
-    CURL* curl = curl_easy_init();
-    if (!curl) throw std::runtime_error("Could not initialize Kick auth network request");
-
-    RawResponse response;
-    curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "Accept: application/json");
-    headers = curl_slist_append(headers, "x-app-platform: web");
-    headers = curl_slist_append(headers, "Origin: https://kick.com");
-    headers = curl_slist_append(headers, "Referer: https://kick.com/");
-    for (const auto& header : extraHeaders) {
-        headers = curl_slist_append(headers, header.c_str());
-    }
-
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonBody.c_str());
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(jsonBody.size()));
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 15000L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 15000L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT,
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36");
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeBody);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-
-    const CURLcode result = curl_easy_perform(curl);
-    if (result != CURLE_OK) {
-        const std::string error = curl_easy_strerror(result);
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-        throw std::runtime_error("Kick auth request failed: " + error);
-    }
-
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-    return response;
-}
-
-std::string normalizeBearerToken(std::string token) {
-    auto isSpaceOrQuote = [](unsigned char c) {
-        return std::isspace(c) || c == '"' || c == '\'' || c == '\r' || c == '\n';
-    };
-    while (!token.empty() && isSpaceOrQuote(static_cast<unsigned char>(token.front())))
-        token.erase(token.begin());
-    while (!token.empty() && isSpaceOrQuote(static_cast<unsigned char>(token.back())))
-        token.pop_back();
-
-    const std::vector<std::string> prefixes = {
-        "Authorization: Bearer ",
-        "Authorization: bearer ",
-        "Authorization: ",
-        "Bearer ",
-        "bearer ",
-        "session_token=",
-        "session_token: ",
-        "token=",
-        "token: ",
-    };
-    for (const auto& prefix : prefixes) {
-        if (token.size() > prefix.size() &&
-            token.compare(0, prefix.size(), prefix) == 0) {
-            token.erase(0, prefix.size());
-            while (!token.empty() && isSpaceOrQuote(static_cast<unsigned char>(token.front())))
-                token.erase(token.begin());
-            break;
-        }
-    }
-
-    // Browser session_token cookies URL-encode the pipe separator as %7C.
-    for (const std::string& encoded : {"%7C", "%7c"}) {
-        size_t pos = 0;
-        while ((pos = token.find(encoded, pos)) != std::string::npos) {
-            token.replace(pos, encoded.size(), "|");
-            pos += 1;
-        }
-    }
-    return token;
-}
-
-void populateUserFromJson(const json& user, OAuthSession& session) {
-    if (!user.is_object()) return;
-    const std::string id = jsonIdToString(user, "id");
-    if (!id.empty()) session.userId = id;
-    std::string username = user.value("username", "");
-    if (username.empty()) username = user.value("slug", "");
-    if (!username.empty()) {
-        session.login = username;
-        session.displayName = user.value("username", username);
-    }
-    if (user.contains("profile_pic") && user["profile_pic"].is_string())
-        session.profileImageUrl = user["profile_pic"].get<std::string>();
-    else if (user.contains("profilepic") && user["profilepic"].is_string())
-        session.profileImageUrl = user["profilepic"].get<std::string>();
 }
 
 std::vector<std::string> parseScopes(const json& value) {
@@ -615,7 +451,7 @@ void pollTVLinkAuthAsync(
                     url,
                     payload,
                     headers,
-                    "Mozilla/5.0 (Nintendo Switch; kickNX/0.5.0)");
+                    "Mozilla/5.0 (Nintendo Switch; kickNX/" + AppVersion::getVersion() + ")");
 
                 if (cancel && cancel->load()) return;
 
@@ -686,38 +522,6 @@ void pollTVLinkAuthAsync(
                         statusCallback(false, "Unknown TV link authentication error");
                     });
                 }
-            }
-        });
-}
-
-void loginWithTokenAsync(
-    const Config& config,
-    const std::string& bearerToken,
-    AuthCallback success,
-    ErrorCallback failure) {
-    ThreadPool::instance().submit(
-        [config, bearerToken, success = std::move(success),
-            failure = std::move(failure)](HTTP&) mutable {
-            try {
-                OAuthSession session = loadOAuth();
-                std::string tokenToUse = normalizeBearerToken(bearerToken);
-                if (!tokenToUse.empty()) {
-                    session.accessToken = tokenToUse;
-                    session.userId.clear();
-                }
-
-                if (session.accessToken.empty()) {
-                    throw std::runtime_error(
-                        "A valid Kick session token is required to sign in.");
-                }
-
-                session = fetchIdentity(config, std::move(session));
-                saveOAuth(session);
-                brls::sync(std::bind(success, session));
-            } catch (const std::exception& exception) {
-                brls::sync(std::bind(failure, std::string(exception.what())));
-            } catch (...) {
-                brls::sync(std::bind(failure, std::string("Unknown Kick token login error")));
             }
         });
 }

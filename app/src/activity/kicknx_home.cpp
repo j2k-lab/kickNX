@@ -1,5 +1,6 @@
 #include "activity/kicknx_home.hpp"
 #include "utils/theme.hpp"
+#include "view/kick_detail_line.hpp"
 #include "view/theme_header.hpp"
 #include "activity/kick_channel.hpp"
 #include "api/kick.hpp"
@@ -9,6 +10,7 @@
 #include "utils/image.hpp"
 #include "utils/config.hpp"
 #include "utils/thread.hpp"
+#include "utils/updater.hpp"
 #include "api/http.hpp"
 #include "view/h_recycling.hpp"
 #include "view/mpv_core.hpp"
@@ -22,6 +24,7 @@
 #include <functional>
 #include <fmt/format.h>
 #include <memory>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -271,14 +274,17 @@ std::string eventKey(const kick::LiveEvent& item) {
     return item.id;
 }
 
-std::string eventSubtitle(const kick::LiveEvent& item) {
-    std::string detail = item.categoryName;
+// Viewers across the event's streams (Kick's view_count) and how many are
+// live; upcoming and finished events report neither.
+std::string eventStats(const kick::LiveEvent& item) {
+    std::string stats;
+    if (item.isLive() && item.viewCount > 0) stats = viewersText(item.viewCount);
     if (item.liveStreamCount > 0) {
-        if (!detail.empty()) detail += " \u00b7 ";
-        detail += std::to_string(item.liveStreamCount) +
+        if (!stats.empty()) stats += " \u00b7 ";
+        stats += std::to_string(item.liveStreamCount) +
             (item.liveStreamCount == 1 ? " live stream" : " live streams");
     }
-    return detail.empty() ? std::string("Kick event") : detail;
+    return stats;
 }
 
 std::string clipKey(const kick::ChannelClip& item) {
@@ -336,14 +342,19 @@ public:
         title->setTextColor(kicknx::theme::current().textPrimary);
         this->addView(title);
 
-        subtitle = new brls::Label();
-        subtitle->setFontSize(15);
-        subtitle->setSingleLine(true);
+        subtitle = new KickDetailLine(15);
         subtitle->setMarginTop(3);
         subtitle->setMarginLeft(10);
         subtitle->setMarginRight(10);
-        subtitle->setTextColor(kicknx::theme::current().textMuted);
         this->addView(subtitle);
+
+        // Third line, used only by event cards (viewers and live streams).
+        stats = new KickDetailLine(15);
+        stats->setMarginTop(3);
+        stats->setMarginLeft(10);
+        stats->setMarginRight(10);
+        stats->setVisibility(brls::Visibility::GONE);
+        this->addView(stats);
 
         this->getFocusEvent()->subscribe([this](brls::View*) {
             if (onFocused) onFocused();
@@ -365,9 +376,15 @@ public:
         Image::cancel(picture);
         picture->setImageFromRes("img/video-card-bg.png");
         title->setText("");
-        subtitle->setText("");
+        subtitle->clear();
+        setStats("");
         onFocused = nullptr;
         upTarget = nullptr;
+    }
+
+    void setStats(const std::string& text) {
+        stats->setParts("", text);
+        stats->setVisibility(text.empty() ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
     }
 
     void cacheForReuse() override {
@@ -378,7 +395,8 @@ public:
 
     brls::Image* picture = nullptr;
     brls::Label* title = nullptr;
-    brls::Label* subtitle = nullptr;
+    KickDetailLine* subtitle = nullptr;
+    KickDetailLine* stats = nullptr;
     std::function<void()> onFocused;
     std::function<brls::View*()> upTarget;
 };
@@ -408,6 +426,16 @@ public:
         title->setTextColor(kicknx::theme::current().textPrimary);
         this->addView(title);
 
+        viewers = new brls::Label();
+        viewers->setFontSize(15);
+        viewers->setSingleLine(true);
+        viewers->setMarginTop(3);
+        viewers->setMarginLeft(8);
+        viewers->setMarginRight(8);
+        viewers->setTextColor(kicknx::theme::current().accent);
+        viewers->setVisibility(brls::Visibility::GONE);
+        this->addView(viewers);
+
         this->getFocusEvent()->subscribe([this](brls::View*) {
             if (onFocused) onFocused();
         });
@@ -424,11 +452,21 @@ public:
 
     ~CategoryCell() override { Image::cancel(picture); }
 
+    void setViewerCount(int count) {
+        if (count < 0) {
+            viewers->setVisibility(brls::Visibility::GONE);
+            return;
+        }
+        viewers->setText(viewersText(count));
+        viewers->setVisibility(brls::Visibility::VISIBLE);
+    }
+
     void prepareForReuse() override {
         Image::cancel(picture);
         picture->setScalingType(brls::ImageScalingType::FILL);
         picture->setImageFromRes("img/category-card-bg.png");
         title->setText("");
+        setViewerCount(-1);
         onFocused = nullptr;
         upTarget = nullptr;
     }
@@ -441,6 +479,7 @@ public:
 
     brls::Image* picture = nullptr;
     brls::Label* title = nullptr;
+    brls::Label* viewers = nullptr;
     std::function<void()> onFocused;
     std::function<brls::View*()> upTarget;
 };
@@ -467,20 +506,15 @@ public:
         const auto& item = items.at(index);
         cell->upTarget = upTarget;
         cell->title->setText(item.userName.empty() ? item.userLogin : item.userName);
-        std::string detail = item.gameName;
+        std::string game = item.gameName;
+        if (!game.empty()) game += " ·";
         if (item.isLive) {
-            if (!detail.empty()) detail += " · ";
-            detail += viewersText(item.viewerCount);
+            cell->subtitle->setParts(game, viewersText(item.viewerCount));
         } else {
-            if (item.followersCount > 0) {
-                if (!detail.empty()) detail += " · ";
-                detail += followersText(item.followersCount);
-            } else {
-                if (!detail.empty()) detail += " · ";
-                detail += "Offline";
-            }
+            cell->subtitle->setParts(
+                game + (game.empty() ? "" : " ") +
+                (item.followersCount > 0 ? followersText(item.followersCount) : "Offline"));
         }
-        cell->subtitle->setText(detail);
         if (!item.thumbnailUrl.empty()) {
             Image::with(cell->picture, kick::streamThumbnail(item.thumbnailUrl));
         }
@@ -551,11 +585,12 @@ public:
         cell->upTarget = upTarget;
         cell->title->setText(item.title);
 
-        std::string detail = item.channelName.empty() ? item.creatorName : item.channelName;
-        if (!detail.empty()) detail += " · ";
-        detail += viewsText(item.viewCount);
-        if (item.duration > 0.0f) detail += " · " + clipDurationText(item.duration);
-        cell->subtitle->setText(detail);
+        std::string channel = item.channelName.empty() ? item.creatorName : item.channelName;
+        if (!channel.empty()) channel += " ·";
+        cell->subtitle->setParts(
+            channel,
+            viewsText(item.viewCount),
+            item.duration > 0.0f ? "· " + clipDurationText(item.duration) : "");
         if (!item.thumbnailUrl.empty()) Image::with(cell->picture, item.thumbnailUrl);
 
         const kick::ChannelClip focusedItem = item;
@@ -623,7 +658,8 @@ public:
         const auto& item = items.at(index);
         cell->upTarget = upTarget;
         cell->title->setText(item.title);
-        cell->subtitle->setText(eventSubtitle(item));
+        cell->subtitle->setParts(item.categoryName.empty() ? "Kick event" : item.categoryName);
+        cell->setStats(eventStats(item));
         if (!item.thumbnailUrl.empty()) Image::with(cell->picture, item.thumbnailUrl);
 
         const kick::LiveEvent focusedItem = item;
@@ -676,6 +712,7 @@ public:
         const auto& item = items.at(index);
         cell->upTarget = upTarget;
         cell->title->setText(item.name);
+        cell->setViewerCount(item.viewerCount);
         if (!item.boxArtUrl.empty()) {
             cell->picture->setScalingType(brls::ImageScalingType::FIT);
             Image::with(cell->picture, kick::categoryThumbnail(item.boxArtUrl));
@@ -746,7 +783,8 @@ public:
 
         recycler = new HRecyclerFrame();
         const bool cardRow = kind != Kind::Categories;
-        recycler->setHeight(cardRow ? 225 : 285);
+        // Event cards have a third line (viewers and live streams).
+        recycler->setHeight(kind == Kind::Events ? 255 : (cardRow ? 225 : 285));
         recycler->estimatedRowWidth = cardRow ? 315 : 175;
         recycler->estimatedRowSpace = 18;
         recycler->setPadding(0, 4, 0, 4);
@@ -2157,21 +2195,103 @@ std::string joinVersion(const std::vector<int>& parts) {
     return out;
 }
 
+/// A short "What's new" list from a release's Markdown notes: the bold title
+/// of each bullet ("- **Colour Themes:** ..."), or the start of the bullet
+/// when it has none. Empty when the notes have no bullets.
+std::string releaseHighlights(const std::string& notes) {
+    constexpr size_t maxItems = 5;
+    constexpr size_t maxLength = 48;
+    std::istringstream in(notes);
+    std::string line;
+    std::vector<std::string> items;
+    size_t total = 0;
+    while (std::getline(in, line)) {
+        const size_t start = line.find_first_not_of(" \t");
+        if (start == std::string::npos || line.size() < start + 2) continue;
+        if ((line[start] != '-' && line[start] != '*') || line[start + 1] != ' ') continue;
+        ++total;
+        if (items.size() >= maxItems) continue;
+
+        std::string text = line.substr(start + 2);
+        if (text.rfind("**", 0) == 0) {
+            const size_t end = text.find("**", 2);
+            if (end != std::string::npos) text = text.substr(2, end - 2);
+        }
+        text.erase(std::remove_if(text.begin(), text.end(),
+                       [](char c) { return c == '*' || c == '`' || c == '\r'; }),
+            text.end());
+        while (!text.empty() && (text.back() == ':' || text.back() == ' ')) text.pop_back();
+        if (text.size() > maxLength) {
+            text.resize(maxLength);
+            // Don't cut a UTF-8 character in half.
+            while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0) == 0x80)
+                text.pop_back();
+            if (!text.empty()) text.pop_back();
+            text += "…";
+        }
+        if (!text.empty()) items.push_back(text);
+    }
+    if (items.empty()) return "";
+
+    std::string out = "\n\nWhat's new:";
+    for (const auto& item : items) out += "\n• " + item;
+    if (total > items.size())
+        out += "\n…and " + std::to_string(total - items.size()) + " more";
+    return out;
+}
+
 void showUpdateResult(const std::string& message) {
     auto* dialog = new brls::Dialog(message);
     dialog->addButton("OK", []() {});
     dialog->open();
 }
 
+std::atomic_bool updateBusy{false};
+
+/// Downloads the new NRO, then quits so main() can swap it in and relaunch.
+void installUpdate(const std::string& url, long long size) {
+    if (updateBusy.exchange(true)) return;
+    brls::Application::notify("Downloading update…");
+
+    ThreadPool::instance().submit([url, size](HTTP&) {
+        try {
+            updater::download(url, size, [](int percent) {
+                if (percent == 25 || percent == 50 || percent == 75) {
+                    brls::sync([percent]() {
+                        brls::Application::notify(
+                            "Downloading update… " + std::to_string(percent) + "%");
+                    });
+                }
+            });
+            brls::sync([]() {
+                brls::Application::notify("Update installed. Restarting kickNX…");
+                brls::Application::quit();
+            });
+        } catch (const std::exception& ex) {
+            brls::Logger::error("update download failed: {}", ex.what());
+            brls::sync([]() {
+                updateBusy.store(false);
+                showUpdateResult("The update couldn't be downloaded. Check your "
+                                 "internet connection and try again, or download it "
+                                 "from github.com/j2k-lab/kickNX/releases");
+            });
+        }
+    });
+}
+
 /// Asks GitHub for the newest release and tells the viewer whether it is
-/// newer than this build. Only runs when the viewer presses the button.
+/// newer than this build. On the Switch it offers to install it right away.
+/// Only runs when the viewer presses the button.
 void checkForUpdates() {
-    static std::atomic_bool checking{false};
-    if (checking.exchange(true)) return;
+    if (updateBusy.exchange(true)) return;
     brls::Application::notify("Checking for updates…");
 
     ThreadPool::instance().submit([](HTTP&) {
         std::string message;
+        std::string latestText;
+        std::string highlights;
+        std::string nroUrl;
+        long long nroSize = 0;
         try {
             const auto release = nlohmann::json::parse(
                 HTTP::get(KICKNX_LATEST_RELEASE_URL, HTTP::Timeout{}));
@@ -2183,7 +2303,18 @@ void checkForUpdates() {
                 message = "Couldn't read the latest version from GitHub. "
                           "Check github.com/j2k-lab/kickNX/releases.";
             } else if (latest > current) {
-                message = "kickNX " + joinVersion(latest) + " is available. "
+                latestText = joinVersion(latest);
+                if (release.contains("body") && release["body"].is_string())
+                    highlights = releaseHighlights(release["body"].get<std::string>());
+                for (const auto& asset : release.value("assets", nlohmann::json::array())) {
+                    const std::string name = asset.value("name", "");
+                    if (name.size() > 4 && name.compare(name.size() - 4, 4, ".nro") == 0) {
+                        nroUrl = asset.value("browser_download_url", "");
+                        nroSize = asset.value("size", 0LL);
+                        break;
+                    }
+                }
+                message = "kickNX " + latestText + " is available. "
                           "You have " + AppVersion::getVersion() + ".\n\n"
                           "Update from the Homebrew App Store, or download it from "
                           "github.com/j2k-lab/kickNX/releases";
@@ -2197,9 +2328,21 @@ void checkForUpdates() {
                       "Check your internet connection and try again.";
         }
 
-        brls::sync([message]() {
-            checking.store(false);
-            showUpdateResult(message);
+        brls::sync([message, latestText, highlights, nroUrl, nroSize]() {
+            updateBusy.store(false);
+            if (nroUrl.empty() || nroSize <= 0 || !updater::supported()) {
+                showUpdateResult(message + highlights);
+                return;
+            }
+            auto* dialog = new brls::Dialog(
+                "kickNX " + latestText + " is available. You have " +
+                AppVersion::getVersion() + "." + highlights + "\n\n"
+                "Update now? kickNX will restart when it's done.");
+            dialog->addButton("Later", []() {});
+            dialog->addButton("Update", [nroUrl, nroSize]() {
+                installUpdate(nroUrl, nroSize);
+            });
+            dialog->open();
         });
     });
 }
@@ -2333,6 +2476,7 @@ void KickNXHome::showAbout() {
         "• Featured live streams, subcategories and live search by channel or game with viewer counts\n"
         "• Detailed channel pages with past broadcasts (VODs), clips and categories\n"
         "• Live AWS IVS HLS, VOD and clip playback with quality selection\n"
+        "• Rewind live streams back to their start through the live VOD\n"
         "• Selectable Software, Hardware and Hybrid playback modes\n"
         "• Automatic portrait mode using attached Joy-Con motion sensors, with either rotation supported\n"
         "• Smartphone-style portrait player combining video, live Pusher chat, a persistent message draft, inline touch keyboard and emote sheet\n"
@@ -2350,7 +2494,21 @@ void KickNXHome::showAbout() {
 
     addSection("Changelog");
     addBody(
-        "0.5.0 (Current)\n"
+        "0.5.1 (Current)\n"
+        "• Rewind a live stream to its start: long rewinds switch to the live VOD, "
+        "with chat staying live.\n"
+        "• Recent broadcasts show a still-live broadcast as a LIVE card.\n"
+        "• A label over the bar shows where you are scrubbing to.\n"
+        "• Live streams keep about 30 seconds for rewinding.\n"
+        "• Check for updates installs the new version and restarts kickNX.\n"
+        "• Update dialog lists what's new in the release.\n"
+        "• Applet-mode help: how to open kickNX from the Homebrew Menu, plus an "
+        "optional Sphaira forwarder.\n"
+        "• A note replaces titles and chat messages the Switch fonts can't draw.\n"
+        "• Live viewers on category cards; live events sorted by viewers.\n"
+        "• Faster Home and chat, and a smaller app.\n"
+        "• Fixed a crash on Home after scrubbing in the live player.\n\n"
+        "0.5.0\n"
         "• Colour themes: OLED (default), Dark Grey and Kick, chosen from a pop-up on Home.\n"
         "• Kick theme: muted green pages, grey cards and a dark K pattern on headers and sign-in.\n"
         "• Live events row and event pages with live streams and popular clips.\n"
@@ -2919,20 +3077,3 @@ void KickNXHome::playChannel(const kick::Stream& stream) {
     RemoteView::playLive(config, stream.uptimeSeconds, stream.title);
 }
 
-void KickNXHome::clearRows() {
-    clearHero();
-    followedRow->clear();
-    offlineFollowedRow->clear();
-    popularRow->clear();
-    popularClipsRow->clear();
-    eventsRow->clear();
-    categoryStreamsRow->clear();
-    categoriesRow->clear();
-    searchRow->clear();
-    followedCursor.clear();
-    popularCursor.clear();
-    popularClipsCursor.clear();
-    categoriesCursor.clear();
-    searchCursor.clear();
-    categoryStreamsCursor.clear();
-}

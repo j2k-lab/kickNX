@@ -3,14 +3,18 @@
 #include "api/http.hpp"
 #include "api/kick.hpp"
 #include "api/kick_playlist.hpp"
+#include "utils/misc.hpp"
 #include "utils/thread.hpp"
 
 #include <borealis.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -138,12 +142,51 @@ void throwIfCancelled(const HTTP::Cancel& cancel) {
     if (cancel && cancel->load()) throw std::runtime_error("Request cancelled");
 }
 
+// While a SharedConnection is alive on a thread, kickGet sends that thread's
+// requests on one handle, so a batch such as Home reuses an open TLS
+// connection to kick.com instead of making a new handshake for every section.
+// The handles are looked up by thread id rather than kept in a thread_local:
+// libnx does not set up the register GCC reads thread_local variables from,
+// so on Switch a thread_local access crashes the app.
+std::mutex sharedConnectionsMutex;
+std::unordered_map<std::thread::id, HTTP*> sharedConnections;
+
+class SharedConnection {
+public:
+    SharedConnection() {
+        std::lock_guard<std::mutex> lock(sharedConnectionsMutex);
+        sharedConnections[std::this_thread::get_id()] = &http;
+    }
+    ~SharedConnection() {
+        std::lock_guard<std::mutex> lock(sharedConnectionsMutex);
+        sharedConnections.erase(std::this_thread::get_id());
+    }
+    SharedConnection(const SharedConnection&) = delete;
+    SharedConnection& operator=(const SharedConnection&) = delete;
+
+    static HTTP* forThisThread() {
+        std::lock_guard<std::mutex> lock(sharedConnectionsMutex);
+        const auto found = sharedConnections.find(std::this_thread::get_id());
+        return found == sharedConnections.end() ? nullptr : found->second;
+    }
+
+private:
+    HTTP http;
+};
+
 std::string kickGet(
     const Config& config,
     OAuthSession& session,
     const std::string& url,
     const HTTP::Cancel& cancel) {
     throwIfCancelled(cancel);
+    if (HTTP* sharedConnection = SharedConnection::forThisThread()) {
+        std::ostringstream body;
+        HTTP::set_option(*sharedConnection, kickHeaders(config, session), HTTP::Timeout{15000});
+        if (cancel) HTTP::set_option(*sharedConnection, cancel);
+        sharedConnection->_get(url, &body);
+        return body.str();
+    }
     if (cancel) {
         return HTTP::get(url, kickHeaders(config, session), HTTP::Timeout{15000}, cancel);
     }
@@ -192,14 +235,14 @@ UserProfile parseKickChannelProfile(const json& root, const std::string& fallbac
     if (item.contains("user") && item["user"].is_object()) {
         const auto& user = item["user"];
         profile.displayName = jsonString(user, "username", profile.login);
-        profile.description = jsonString(user, "bio");
+        profile.description = misc::replaceUnsupportedText(jsonString(user, "bio"));
         profile.profileImageUrl = jsonImageUrl(user.value("profile_pic", json()));
         if (profile.profileImageUrl.empty()) {
             profile.profileImageUrl = jsonImageUrl(user.value("profilepic", json()));
         }
     } else {
         profile.displayName = jsonString(item, "username", jsonString(item, "user_username", profile.login));
-        profile.description = jsonString(item, "bio");
+        profile.description = misc::replaceUnsupportedText(jsonString(item, "bio"));
         profile.profileImageUrl = jsonImageUrl(item.value("profile_picture", json()));
         if (profile.profileImageUrl.empty()) {
             profile.profileImageUrl = jsonImageUrl(item.value("profile_pic", json()));
@@ -296,6 +339,7 @@ Category parseKickCategory(const json& item) {
     Category category;
     category.id = jsonString(item, "slug", jsonString(item, "id"));
     category.name = jsonString(item, "name");
+    category.viewerCount = jsonInt(item, "viewers", jsonInt(item, "viewer_count", -1));
     if (item.contains("banner")) {
         category.boxArtUrl = jsonImageUrl(item["banner"]);
     }
@@ -351,7 +395,7 @@ Category parseKickCategory(const json& item) {
 Stream parseKickStream(const json& item) {
     Stream stream;
     stream.id = jsonString(item, "id", jsonString(item, "slug"));
-    stream.title = jsonString(item, "session_title", jsonString(item, "title"));
+    stream.title = misc::replaceUnsupportedText(jsonString(item, "session_title", jsonString(item, "title")));
     stream.language = jsonString(item, "language");
     stream.viewerCount = jsonInt(item, "viewers", jsonInt(item, "viewer_count", 0));
     stream.followersCount = jsonInt(item, "followersCount",
@@ -368,7 +412,7 @@ Stream parseKickStream(const json& item) {
             const auto& ls = item["livestream"];
             stream.isLive = jsonBool(ls, "is_live", true);
             const std::string sessionTitle = jsonString(ls, "session_title");
-            if (!sessionTitle.empty()) stream.title = sessionTitle;
+            if (!sessionTitle.empty()) stream.title = misc::replaceUnsupportedText(sessionTitle);
             stream.viewerCount = jsonInt(ls, "viewers", jsonInt(ls, "viewer_count", stream.viewerCount));
             if (stream.createdAt.empty()) {
                 stream.createdAt = jsonString(ls, "created_at", jsonString(ls, "start_time"));
@@ -392,7 +436,7 @@ Stream parseKickStream(const json& item) {
                 const auto& ls = ch["livestream"];
                 stream.isLive = jsonBool(ls, "is_live", true);
                 const std::string sessionTitle = jsonString(ls, "session_title");
-                if (!sessionTitle.empty()) stream.title = sessionTitle;
+                if (!sessionTitle.empty()) stream.title = misc::replaceUnsupportedText(sessionTitle);
                 stream.viewerCount = jsonInt(ls, "viewers", jsonInt(ls, "viewer_count", stream.viewerCount));
                 if (stream.createdAt.empty()) {
                     stream.createdAt = jsonString(ls, "created_at", jsonString(ls, "start_time"));
@@ -421,7 +465,7 @@ Stream parseKickStream(const json& item) {
     }
 
     if (stream.title.empty()) {
-        stream.title = jsonString(item, "description", stream.isLive ? "Live stream" : "Offline");
+        stream.title = misc::replaceUnsupportedText(jsonString(item, "description", stream.isLive ? "Live stream" : "Offline"));
         if (stream.title.empty()) stream.title = stream.isLive ? "Live stream" : "Offline";
     }
 
@@ -682,6 +726,7 @@ void populateChannelInfoAndLiveStream(
                     if (!isValidImageUrl(dup->boxArtUrl) && isValidImageUrl(cat.boxArtUrl)) {
                         dup->boxArtUrl = cat.boxArtUrl;
                     }
+                    if (dup->viewerCount < 0) dup->viewerCount = cat.viewerCount;
                     if (!cat.id.empty() && (dup->id.empty() || std::all_of(dup->id.begin(), dup->id.end(), ::isdigit))) {
                         dup->id = cat.id;
                     }
@@ -720,6 +765,7 @@ void populateChannelInfoAndLiveStream(
                 if (!isValidImageUrl(dup->boxArtUrl) && isValidImageUrl(cat.boxArtUrl)) {
                     dup->boxArtUrl = cat.boxArtUrl;
                 }
+                if (dup->viewerCount < 0) dup->viewerCount = cat.viewerCount;
                 if (!cat.id.empty() && (dup->id.empty() || std::all_of(dup->id.begin(), dup->id.end(), ::isdigit))) {
                     dup->id = cat.id;
                 }
@@ -776,7 +822,7 @@ std::vector<ChannelVideo> getChannelVideos(
         // can play it immediately, or fallback to the video UUID.
         video.id = !sourceUrl.empty() ? sourceUrl : uuid;
         video.url = sourceUrl;
-        video.title = jsonString(item, "session_title", jsonString(item, "title", "Past Broadcast"));
+        video.title = misc::replaceUnsupportedText(jsonString(item, "session_title", jsonString(item, "title", "Past Broadcast")));
         video.createdAt = jsonString(item, "created_at", jsonString(item, "start_time"));
         video.publishedAt = video.createdAt;
         if (item.contains("thumbnail")) {
@@ -785,6 +831,7 @@ std::vector<ChannelVideo> getChannelVideos(
         video.duration = formatDurationMs(jsonInt(item, "duration", 0));
         video.language = jsonString(item, "language");
         video.viewCount = jsonInt(item, "views", jsonInt(item, "view_count", 0));
+        video.isLive = jsonBool(item, "is_live", false);
 
         if (!video.id.empty()) {
             result.push_back(std::move(video));
@@ -823,7 +870,7 @@ std::vector<ChannelClip> parseClipList(
         const std::string rawId = jsonString(item, "id");
         clip.id = !clipUrl.empty() ? clipUrl : rawId;
         clip.url = clipUrl;
-        clip.title = jsonString(item, "title", "Clip");
+        clip.title = misc::replaceUnsupportedText(jsonString(item, "title", "Clip"));
         clip.createdAt = jsonString(item, "created_at");
         clip.thumbnailUrl = jsonString(item, "thumbnail_url");
         if (item.contains("creator") && item["creator"].is_object()) {
@@ -898,7 +945,7 @@ const json* jsonList(const json& root, const char* key) {
 }
 
 // Events from kick.com/events (web.kick.com/api/v1/events/browse). Live events
-// come first, busiest first; upcoming and finished events follow.
+// come first, most viewers first; upcoming and finished events follow.
 EventPage getEvents(
     const Config& config,
     OAuthSession& session,
@@ -919,8 +966,8 @@ EventPage getEvents(
         if (event.id.empty() || event.slug.empty()) continue;
         if (jsonBool(item, "is_draft", false)) continue;
 
-        event.title = jsonString(item, "title", jsonString(item, "name", event.slug));
-        event.description = jsonString(item, "description");
+        event.title = misc::replaceUnsupportedText(jsonString(item, "title", jsonString(item, "name", event.slug)));
+        event.description = misc::replaceUnsupportedText(jsonString(item, "description"));
         event.phase = jsonString(item, "phase");
         event.startTime = jsonString(item, "start_time");
         event.liveStreamCount = jsonInt(item, "num_livestreams", 0);
@@ -942,6 +989,7 @@ EventPage getEvents(
     std::stable_sort(page.items.begin(), page.items.end(), [](const LiveEvent& a, const LiveEvent& b) {
         const auto rank = [](const LiveEvent& e) { return e.isLive() ? 0 : (e.phase == "pre" ? 1 : 2); };
         if (rank(a) != rank(b)) return rank(a) < rank(b);
+        if (a.viewCount != b.viewCount) return a.viewCount > b.viewCount;
         return a.liveStreamCount > b.liveStreamCount;
     });
     return page;
@@ -976,7 +1024,7 @@ StreamPage getEventStreams(
         stream.userId = jsonString(channel, "id");
         stream.userName = jsonString(user, "username", stream.userLogin);
         stream.id = jsonString(livestream, "id");
-        stream.title = jsonString(livestream, "title");
+        stream.title = misc::replaceUnsupportedText(jsonString(livestream, "title"));
         stream.language = jsonString(livestream, "language");
         stream.viewerCount = jsonInt(livestream, "view_count", 0);
         stream.thumbnailUrl = jsonString(jsonChild(livestream, "thumbnail"), "src");
@@ -1630,6 +1678,105 @@ void loadChannelProfileAsync(
         });
 }
 
+namespace {
+// Picks one rendition of a recording and reads how long it is so far.
+// Playing a single rendition instead of the master playlist matters on long
+// broadcasts: mpv's HLS reader downloads and parses every rendition's full
+// segment list when it opens a master, thousands of entries each.
+// `playUrl` is the rendition for the viewer's quality (the best for Auto);
+// the length comes from Kick's total tag, otherwise the segment durations
+// added up, and is 0 when unknown.
+double readRecording(
+    const Config& config,
+    OAuthSession& session,
+    const std::string& masterUrl,
+    std::string& playUrl) {
+    try {
+        auto normalize = [](const std::string& text) {
+            std::string out;
+            for (unsigned char c : text)
+                if (std::isalnum(c)) out.push_back(static_cast<char>(std::tolower(c)));
+            return out;
+        };
+        const std::string wanted = normalize(loadPreferredQuality());
+        const bool automatic = wanted.empty() || wanted == "auto" || wanted == "source";
+
+        const std::string master = kickGet(config, session, masterUrl, nullptr);
+        std::istringstream lines(master);
+        std::string line;
+        std::string first;
+        std::string chosen;
+        while (std::getline(lines, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.empty() || line[0] == '#') continue;
+            if (first.empty()) first = line;
+            if (automatic) break;
+            // Renditions sit in folders named after their quality,
+            // e.g. "720p30/playlist.m3u8".
+            const std::string name = normalize(line.substr(0, line.find('/')));
+            if (name == wanted || (chosen.empty() && name.rfind(wanted, 0) == 0)) {
+                chosen = line;
+                if (name == wanted) break;
+            }
+        }
+        std::string variant = chosen.empty() ? first : chosen;
+        if (variant.empty()) return 0;
+        if (variant.rfind("http", 0) != 0)
+            variant = masterUrl.substr(0, masterUrl.rfind('/') + 1) + variant;
+        playUrl = variant;
+
+        const std::string playlist = kickGet(config, session, variant, nullptr);
+        const std::string totalTag = "#EXT-X-TWITCH-TOTAL-SECS:";
+        double total = 0;
+        std::istringstream media(playlist);
+        while (std::getline(media, line)) {
+            if (line.rfind(totalTag, 0) == 0) return std::stod(line.substr(totalTag.size()));
+            if (line.rfind("#EXTINF:", 0) == 0) total += std::stod(line.substr(8));
+        }
+        return total;
+    } catch (const std::exception& exception) {
+        brls::Logger::warning("kickNX: couldn't read the recording: {}", exception.what());
+        return 0;
+    }
+}
+}  // namespace
+
+void findLiveRecordingAsync(
+    const Config& config,
+    const std::string& login,
+    LiveRecordingCallback done) {
+    ThreadPool::instance().submit(
+        [config, login, done = std::move(done)](HTTP&) mutable {
+            bool known = false;
+            std::string url;
+            double recordedSeconds = 0;
+            std::string error;
+            try {
+                // The same request streamer pages make, with the browser
+                // headers and sign-in Kick expects from the Switch.
+                OAuthSession session = ensureOAuth(config);
+                const auto videos = getChannelVideos(config, session, login, nullptr);
+                known = true;
+                for (const auto& video : videos) {
+                    if (!video.isLive) continue;
+                    url = video.url;
+                    break;
+                }
+                if (!url.empty()) {
+                    std::string rendition;
+                    recordedSeconds = readRecording(config, session, url, rendition);
+                    if (!rendition.empty()) url = rendition;
+                }
+            } catch (const std::exception& exception) {
+                error = exception.what();
+            } catch (...) {
+                error = "Unknown Kick error";
+            }
+            brls::sync(std::bind(
+                std::move(done), known, std::move(url), recordedSeconds, std::move(error)));
+        });
+}
+
 static void resolveCategoryBanner(
     const Config& config,
     OAuthSession& session,
@@ -2048,6 +2195,8 @@ void loadHomeAsync(
         [config, success = std::move(success), failure = std::move(failure),
             cancel = std::move(cancel)](HTTP&) mutable {
             try {
+                const auto startedAt = std::chrono::steady_clock::now();
+                SharedConnection connection;
                 HomeData result;
                 result.account = ensureOAuth(config);
                 throwIfCancelled(cancel);
@@ -2109,6 +2258,10 @@ void loadHomeAsync(
                     throw std::runtime_error(
                         "Kick did not return any home sections. Check the connection and retry.");
                 }
+                brls::Logger::info(
+                    "kickNX: Home loaded in {} ms",
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - startedAt).count());
                 brls::sync(std::bind(success, std::move(result)));
             } catch (const std::exception& exception) {
                 brls::sync(std::bind(failure, std::string(exception.what())));

@@ -37,13 +37,7 @@ public:
     // Manual dragging is over
     brls::Event<float>& getProgressSetEvent() { return this->progressSetEvent; }
 
-    // Clear all the points
-    void clearClipPoint();
-
-    void setClipPoint(const std::vector<float>& data);
-
 private:
-    brls::InputManager* input;
     brls::Rectangle* line;
     brls::Rectangle* lineEmpty;
     SVGImage* pointerIcon;
@@ -51,7 +45,6 @@ private:
 
     brls::Event<float> progressEvent;
     brls::Event<float> progressSetEvent;
-    std::vector<float> clipPointList;
 
     float progress = 1;
 

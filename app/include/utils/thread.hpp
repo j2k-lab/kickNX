@@ -24,7 +24,7 @@ public:
     void submit(Task fn) {
         {
             std::lock_guard<std::mutex> locker(this->taskMutex);
-            this->tasks.push_back(fn);
+            this->tasks.push_back(std::move(fn));
         }
         this->taskCond.notify_one();
     }
