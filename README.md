@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Release 0.5.1" src="https://img.shields.io/badge/release-0.5.1-green?logo=github&style=flat-square" height="20"></a>
-  <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/j2k-lab/kickNX/total?color=green&style=flat-square" height="20"></a>
+  <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fj2k-lab%2FkickNX%2Fbadges%2Fdownloads.json&style=flat-square" height="20"></a>
   <img alt="Nintendo Switch" src="https://img.shields.io/badge/platform-Nintendo%20Switch-E60012?logo=nintendoswitch&logoColor=white&style=flat-square" height="20">
   <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=c%2B%2B&logoColor=white&style=flat-square" height="20">
   <a href="LICENSE"><img alt="License GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0--only-green?style=flat-square" height="20"></a>
