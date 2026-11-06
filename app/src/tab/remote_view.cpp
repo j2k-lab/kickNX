@@ -144,65 +144,85 @@ public:
                         throw std::runtime_error(
                             "animated emote download is empty or too large");
 
-                    int* sourceDelays = nullptr;
                     int width = 0;
                     int height = 0;
                     int frameCount = 0;
-                    int components = 0;
-                    stbi_uc* decoded =
-                        stbi_load_gif_from_memory(
-                            reinterpret_cast<const stbi_uc*>(data.data()),
-                            static_cast<int>(data.size()),
-                            &sourceDelays,
-                            &width,
-                            &height,
-                            &frameCount,
-                            &components,
-                            4);
+                    std::shared_ptr<stbi_uc> pixels;
+                    std::vector<int> delays;
 
-                    if (!decoded || width <= 0 || height <= 0 ||
-                        frameCount <= 0) {
+                    // Some collectible emotes are animated WebP rather than
+                    // GIF; the WebP decoder enforces the same limits.
+                    if (isWebpData(data)) {
+                        auto frames = std::make_shared<std::vector<uint8_t>>();
+                        std::vector<int> webpDelays;
+                        if (!decodeWebpAnimation(
+                                data, MAX_DIMENSION, MAX_FRAMES, MAX_DECODED_BYTES,
+                                *frames, webpDelays, width, height))
+                            throw std::runtime_error(
+                                "animated emote WebP could not be decoded or exceeds KickNX safety limits");
+                        frameCount = static_cast<int>(webpDelays.size());
+                        pixels = std::shared_ptr<stbi_uc>(frames, frames->data());
+                        for (const int delay : webpDelays)
+                            delays.push_back(std::clamp(delay > 0 ? delay : 100, 20, 1000));
+                    } else {
+                        int* sourceDelays = nullptr;
+                        int components = 0;
+                        stbi_uc* decoded =
+                            stbi_load_gif_from_memory(
+                                reinterpret_cast<const stbi_uc*>(data.data()),
+                                static_cast<int>(data.size()),
+                                &sourceDelays,
+                                &width,
+                                &height,
+                                &frameCount,
+                                &components,
+                                4);
+
+                        if (!decoded || width <= 0 || height <= 0 ||
+                            frameCount <= 0) {
+                            if (sourceDelays)
+                                stbi_image_free(sourceDelays);
+                            if (decoded)
+                                stbi_image_free(decoded);
+                            throw std::runtime_error(
+                                "animated emote GIF could not be decoded");
+                        }
+
+                        const size_t decodedBytes =
+                            static_cast<size_t>(width) *
+                            static_cast<size_t>(height) * 4 *
+                            static_cast<size_t>(frameCount);
+
+                        if (width > MAX_DIMENSION ||
+                            height > MAX_DIMENSION ||
+                            frameCount > MAX_FRAMES ||
+                            decodedBytes > MAX_DECODED_BYTES) {
+                            stbi_image_free(decoded);
+                            if (sourceDelays)
+                                stbi_image_free(sourceDelays);
+                            throw std::runtime_error(
+                                "animated emote exceeds KickNX safety limits");
+                        }
+
+                        // Frames go straight from the decoder's buffer to the
+                        // GPU on the UI thread; no copy of up to 16 MB.
+                        pixels = std::shared_ptr<stbi_uc>(decoded, stbi_image_free);
+
+                        delays.reserve(static_cast<size_t>(frameCount));
+                        for (int index = 0; index < frameCount; ++index) {
+                            const int delay = sourceDelays
+                                ? sourceDelays[index]
+                                : 100;
+                            delays.push_back(
+                                std::clamp(delay, 20, 1000));
+                        }
                         if (sourceDelays)
                             stbi_image_free(sourceDelays);
-                        if (decoded)
-                            stbi_image_free(decoded);
-                        throw std::runtime_error(
-                            "animated emote GIF could not be decoded");
                     }
 
                     const size_t pixelsPerFrame =
                         static_cast<size_t>(width) *
                         static_cast<size_t>(height) * 4;
-                    const size_t decodedBytes =
-                        pixelsPerFrame *
-                        static_cast<size_t>(frameCount);
-
-                    if (width > MAX_DIMENSION ||
-                        height > MAX_DIMENSION ||
-                        frameCount > MAX_FRAMES ||
-                        decodedBytes > MAX_DECODED_BYTES) {
-                        stbi_image_free(decoded);
-                        if (sourceDelays)
-                            stbi_image_free(sourceDelays);
-                        throw std::runtime_error(
-                            "animated emote exceeds KickNX safety limits");
-                    }
-
-                    // Frames go straight from the decoder's buffer to the
-                    // GPU on the UI thread; no copy of up to 16 MB.
-                    std::shared_ptr<stbi_uc> pixels(decoded, stbi_image_free);
-
-                    std::vector<int> delays;
-                    delays.reserve(static_cast<size_t>(frameCount));
-                    for (int index = 0; index < frameCount; ++index) {
-                        const int delay = sourceDelays
-                            ? sourceDelays[index]
-                            : 100;
-                        delays.push_back(
-                            std::clamp(delay, 20, 1000));
-                    }
-                    if (sourceDelays)
-                        stbi_image_free(sourceDelays);
 
                     brls::sync(
                         [entry,
@@ -932,40 +952,24 @@ private:
         backToKeyboard->addGestureRecognizer(new brls::TapGestureRecognizer(backToKeyboard));
         headerBar->addView(backToKeyboard);
 
-        btnRecentTab = new brls::Button();
-        btnRecentTab->setText("Recent");
-        btnRecentTab->setFontSize(14.0f);
-        btnRecentTab->setHeight(36.0f);
-        btnRecentTab->setPadding(4, 12, 4, 12);
-        btnRecentTab->setMarginLeft(8.0f);
-        btnRecentTab->setStyle(&brls::BUTTONSTYLE_PRIMARY);
-        headerBar->addView(btnRecentTab);
-
-        btnAllTab = new brls::Button();
-        btnAllTab->setText("All");
-        btnAllTab->setFontSize(14.0f);
-        btnAllTab->setHeight(36.0f);
-        btnAllTab->setPadding(4, 12, 4, 12);
-        btnAllTab->setMarginLeft(4.0f);
-        btnAllTab->setStyle(&brls::BUTTONSTYLE_DEFAULT);
-        headerBar->addView(btnAllTab);
-
-        btnRecentTab->registerClickAction([this](brls::View*) {
-            emoteTab = EmoteTab::Recent;
-            btnRecentTab->setStyle(&brls::BUTTONSTYLE_PRIMARY);
-            btnAllTab->setStyle(&brls::BUTTONSTYLE_DEFAULT);
-            refreshEmoteGrid();
-            return true;
-        });
-        btnAllTab->registerClickAction([this](brls::View*) {
-            emoteTab = EmoteTab::All;
-            btnAllTab->setStyle(&brls::BUTTONSTYLE_PRIMARY);
-            btnRecentTab->setStyle(&brls::BUTTONSTYLE_DEFAULT);
-            refreshEmoteGrid();
-            return true;
-        });
-        btnRecentTab->addGestureRecognizer(new brls::TapGestureRecognizer(btnRecentTab));
-        btnAllTab->addGestureRecognizer(new brls::TapGestureRecognizer(btnAllTab));
+        const char* tabNames[EMOTE_TAB_COUNT] = {"Recent", "Channel", "Global", "Collectibles"};
+        for (int index = 0; index < EMOTE_TAB_COUNT; ++index) {
+            auto* button = new brls::Button();
+            button->setText(tabNames[index]);
+            button->setFontSize(14.0f);
+            button->setHeight(36.0f);
+            button->setPadding(4, 10, 4, 10);
+            button->setMarginLeft(index == 0 ? 8.0f : 4.0f);
+            const auto value = static_cast<EmoteTab>(index);
+            button->registerClickAction([this, value](brls::View*) {
+                emoteTab = value;
+                refreshEmoteGrid();
+                return true;
+            });
+            button->addGestureRecognizer(new brls::TapGestureRecognizer(button));
+            headerBar->addView(button);
+            emoteTabButtons[index] = button;
+        }
 
         emoteStatus = new brls::Label();
         emoteStatus->setText("Loading emotes...");
@@ -990,17 +994,51 @@ private:
         refreshEmoteGrid();
     }
 
+    enum class EmoteTab { Recent, Channel, Global, Collectible };
+    static constexpr int EMOTE_TAB_COUNT = 4;
+
+    std::vector<kick::UserEmote> emotesInTab(EmoteTab value) const {
+        if (value == EmoteTab::Recent) return recentEmotes;
+        const char* category = value == EmoteTab::Channel ? "channel"
+            : value == EmoteTab::Collectible              ? "collectible"
+                                                          : "global";
+        std::vector<kick::UserEmote> result;
+        for (const auto& emote : emotes)
+            if (emote.emoteType == category) result.push_back(emote);
+        return result;
+    }
+
+    // Channel and Collectibles show only when they have emotes; Recent and
+    // Global always show.
+    bool emoteTabAvailable(EmoteTab value) const {
+        if (value == EmoteTab::Channel || value == EmoteTab::Collectible)
+            return !emotesInTab(value).empty();
+        return true;
+    }
+
     void refreshEmoteGrid() {
-        const auto displayList = (emoteTab == EmoteTab::Recent && !recentEmotes.empty())
-            ? recentEmotes
-            : emotes;
+        if (!emoteTabAvailable(emoteTab)) emoteTab = EmoteTab::Global;
+        for (int index = 0; index < EMOTE_TAB_COUNT; ++index) {
+            auto* button = emoteTabButtons[index];
+            if (!button) continue;
+            const auto value = static_cast<EmoteTab>(index);
+            button->setVisibility(
+                emoteTabAvailable(value) ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+            button->setStyle(
+                value == emoteTab ? &brls::BUTTONSTYLE_PRIMARY : &brls::BUTTONSTYLE_DEFAULT);
+        }
+
+        const auto displayList = emotesInTab(emoteTab);
+        const char* emptyText = emoteTab == EmoteTab::Recent ? "No recent emotes"
+            : emoteTab == EmoteTab::Collectible              ? "No collectible emotes"
+                                                             : "No emotes available";
 
         if (emoteStatus) {
             emoteStatus->setText(
                 loading
                     ? "Loading emotes..."
                     : displayList.empty()
-                        ? (emoteTab == EmoteTab::Recent ? "No recent emotes" : "No emotes available")
+                        ? emptyText
                         : fmt::format("{} emotes", displayList.size()));
         }
         emoteGrid->setVisibility(brls::Visibility::GONE);
@@ -1069,10 +1107,8 @@ private:
     brls::Box* emotePanel = nullptr;
     brls::Label* emoteStatus = nullptr;
     RecyclingGrid* emoteGrid = nullptr;
-    enum class EmoteTab { Recent, All };
     EmoteTab emoteTab = EmoteTab::Recent;
-    brls::Button* btnRecentTab = nullptr;
-    brls::Button* btnAllTab = nullptr;
+    brls::Button* emoteTabButtons[EMOTE_TAB_COUNT] = {};
     std::vector<kick::UserEmote> recentEmotes;
     std::vector<kick::UserEmote> emotes;
     bool loading = true;

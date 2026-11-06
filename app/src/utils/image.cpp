@@ -4,8 +4,71 @@
 #include <borealis/core/cache_helper.hpp>
 #ifdef USE_WEBP
 #include <webp/decode.h>
+#include <webp/demux.h>
 #endif
 #include <stb_image.h>
+#include <cstdlib>
+#include <cstring>
+
+bool isWebpData(const std::string& data) {
+    return data.size() >= 12 && data.compare(0, 4, "RIFF") == 0 && data.compare(8, 4, "WEBP") == 0;
+}
+
+bool decodeWebpAnimation(
+    const std::string& data,
+    int maxDimension,
+    int maxFrames,
+    size_t maxBytes,
+    std::vector<uint8_t>& frames,
+    std::vector<int>& delaysMs,
+    int& width,
+    int& height) {
+#ifdef USE_WEBP
+    WebPAnimDecoderOptions options;
+    if (!WebPAnimDecoderOptionsInit(&options)) return false;
+    options.color_mode = MODE_RGBA;
+    options.use_threads = 0;
+
+    const WebPData webpData{reinterpret_cast<const uint8_t*>(data.data()), data.size()};
+    WebPAnimDecoder* decoder = WebPAnimDecoderNew(&webpData, &options);
+    if (!decoder) return false;
+
+    WebPAnimInfo info;
+    bool ok = WebPAnimDecoderGetInfo(decoder, &info) && info.canvas_width > 0 && info.canvas_height > 0 &&
+              static_cast<int>(info.canvas_width) <= maxDimension &&
+              static_cast<int>(info.canvas_height) <= maxDimension;
+    if (ok) {
+        width = static_cast<int>(info.canvas_width);
+        height = static_cast<int>(info.canvas_height);
+        const size_t frameBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+        int previousTimestamp = 0;
+        while (ok && WebPAnimDecoderHasMoreFrames(decoder)) {
+            if (static_cast<int>(delaysMs.size()) >= maxFrames || frames.size() + frameBytes > maxBytes) {
+                ok = false;
+                break;
+            }
+            uint8_t* canvas = nullptr;
+            int timestamp = 0;
+            if (!WebPAnimDecoderGetNext(decoder, &canvas, &timestamp)) {
+                ok = false;
+                break;
+            }
+            frames.insert(frames.end(), canvas, canvas + frameBytes);
+            delaysMs.push_back(timestamp - previousTimestamp);
+            previousTimestamp = timestamp;
+            // A caller asking for one frame only wants the first picture.
+            if (maxFrames == 1) break;
+        }
+        ok = ok && !delaysMs.empty();
+    }
+    WebPAnimDecoderDelete(decoder);
+    return ok;
+#else
+    (void)data, (void)maxDimension, (void)maxFrames, (void)maxBytes;
+    (void)frames, (void)delaysMs, (void)width, (void)height;
+    return false;
+#endif
+}
 
 #ifdef BOREALIS_USE_GXM
 #ifndef MAX
@@ -172,6 +235,17 @@ void Image::doRequest(HTTP& s) {
         if (data.size() >= 12 &&
             WebPGetInfo((const uint8_t*)data.c_str(), data.size(), &imageW, &imageH)) {
             imageData = WebPDecodeRGBA((const uint8_t*)data.c_str(), data.size(), &imageW, &imageH);
+            if (!imageData) {
+                // The simple decoder rejects animated WebP (some Kick
+                // collectible emotes); show its first frame instead. The copy
+                // is malloc'd, which WebPFree releases.
+                std::vector<uint8_t> frame;
+                std::vector<int> delays;
+                if (decodeWebpAnimation(data, 4096, 1, 64u << 20, frame, delays, imageW, imageH)) {
+                    imageData = static_cast<uint8_t*>(malloc(frame.size()));
+                    if (imageData) memcpy(imageData, frame.data(), frame.size());
+                }
+            }
             isWebp = true;
         } else
 #endif

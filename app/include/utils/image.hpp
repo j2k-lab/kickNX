@@ -4,6 +4,23 @@
 #include "api/http.hpp"
 #include "config.hpp"
 
+/// Whether the bytes are a WebP file (RIFF....WEBP).
+bool isWebpData(const std::string& data);
+
+/// Decodes an animated WebP into canvas-sized RGBA frames and per-frame
+/// delays in milliseconds. Fails without decoding anything when the canvas is
+/// larger than maxDimension, and stops (failing) once the frames would pass
+/// maxFrames or maxBytes. Always fails in builds without WebP support.
+bool decodeWebpAnimation(
+    const std::string& data,
+    int maxDimension,
+    int maxFrames,
+    size_t maxBytes,
+    std::vector<uint8_t>& frames,
+    std::vector<int>& delaysMs,
+    int& width,
+    int& height);
+
 class Image {
     using Ref = std::shared_ptr<Image>;
 

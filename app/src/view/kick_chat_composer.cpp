@@ -377,41 +377,36 @@ KickChatComposer::KickChatComposer(
 
     recentTab = makeActionButton("Recent");
     channelTab = makeActionButton("Channel");
-    allTab = makeActionButton("All");
+    globalTab = makeActionButton("Global");
+    collectibleTab = makeActionButton("Collectibles");
 
-    recentTab->registerClickAction(
-        [this](brls::View*) {
-            setTab(Tab::Recent);
-            return true;
-        });
-    channelTab->registerClickAction(
-        [this](brls::View*) {
-            setTab(Tab::Channel);
-            return true;
-        });
-    allTab->registerClickAction(
-        [this](brls::View*) {
-            setTab(Tab::All);
-            return true;
-        });
+    const std::pair<brls::Box*, Tab> tabs[] = {
+        {recentTab, Tab::Recent},
+        {channelTab, Tab::Channel},
+        {globalTab, Tab::Global},
+        {collectibleTab, Tab::Collectible},
+    };
+    for (const auto& [button, value] : tabs) {
+        const Tab target = value;
+        button->registerClickAction(
+            [this, target](brls::View*) {
+                setTab(target);
+                return true;
+            });
+        tabRow->addView(button);
 
-    tabRow->addView(recentTab);
-    tabRow->addView(channelTab);
-    tabRow->addView(allTab);
+        // The controls above the emote grid form an explicit vertical chain:
+        // first emote row -> active filter tab -> message draft.
+        button->setCustomNavigationRoute(
+            brls::FocusDirection::UP,
+            draftButton);
+    }
 
-    // The controls above the emote grid form an explicit vertical chain:
-    // first emote row -> active filter tab -> message draft.
-    recentTab->setCustomNavigationRoute(
-        brls::FocusDirection::UP,
-        draftButton);
-    channelTab->setCustomNavigationRoute(
-        brls::FocusDirection::UP,
-        draftButton);
-    allTab->setCustomNavigationRoute(
-        brls::FocusDirection::UP,
-        draftButton);
-
+    // Channel and Collectibles appear once the catalogue shows they have
+    // emotes.
     channelTab->setVisibility(
+        brls::Visibility::GONE);
+    collectibleTab->setVisibility(
         brls::Visibility::GONE);
 
     focusedEmoteLabel = new brls::Label();
@@ -438,17 +433,7 @@ KickChatComposer::KickChatComposer(
     grid->setIndexNavigationEnabled(true);
     grid->setTopBoundaryFocusRoute(
         [this]() -> brls::View* {
-            switch (tab) {
-            case Tab::Recent:
-                return recentTab;
-            case Tab::Channel:
-                return channelSubscribed
-                    ? channelTab
-                    : allTab;
-            case Tab::All:
-            default:
-                return allTab;
-            }
+            return tabButton(tab);
         });
     emotePanel->addView(grid);
 
@@ -535,8 +520,6 @@ KickChatComposer::KickChatComposer(
                     catalogue) {
                 emotes =
                     std::move(catalogue.emotes);
-                channelSubscribed =
-                    catalogue.channelSubscribed;
                 subscriptionPermissionGranted =
                     catalogue.subscriptionPermissionGranted;
                 loading = false;
@@ -553,7 +536,7 @@ KickChatComposer::KickChatComposer(
                 }
 
                 reconcileRecentEmotes();
-                updateChannelTabVisibility();
+                updateTabVisibility();
                 updateDraft();
                 refreshGrid();
                 this->ptrUnlock();
@@ -631,12 +614,7 @@ void KickChatComposer::setEmotePanelVisible(
                 brls::Application::giveFocus(grid);
                 return;
             }
-            brls::View* activeTab = recentTab;
-            if (tab == Tab::Channel && channelSubscribed)
-                activeTab = channelTab;
-            else if (tab == Tab::All)
-                activeTab = allTab;
-            brls::Application::giveFocus(activeTab);
+            brls::Application::giveFocus(tabButton(tab));
         });
     } else {
         brls::Application::giveFocus(
@@ -661,15 +639,9 @@ void KickChatComposer::updateSendRoute() {
         return;
     }
 
-    brls::View* activeTab = recentTab;
-    if (tab == Tab::Channel && channelSubscribed)
-        activeTab = channelTab;
-    else if (tab == Tab::All)
-        activeTab = allTab;
-
     sendButton->setCustomNavigationRoute(
         brls::FocusDirection::DOWN,
-        activeTab);
+        tabButton(tab));
 }
 
 void KickChatComposer::insertEmote(
@@ -772,9 +744,8 @@ void KickChatComposer::sendMessage() {
 }
 
 void KickChatComposer::setTab(Tab value) {
-    if (value == Tab::Channel &&
-        !channelSubscribed)
-        value = Tab::All;
+    if (!tabAvailable(value))
+        value = Tab::Global;
 
     tab = value;
     updateTabs();
@@ -783,18 +754,51 @@ void KickChatComposer::setTab(Tab value) {
 
 void KickChatComposer::cycleTab(
     int direction) {
-    if (!channelSubscribed) {
-        setTab(
-            tab == Tab::Recent
-                ? Tab::All
-                : Tab::Recent);
-        return;
-    }
-
+    // Steps over the tabs that are hidden because they have no emotes.
+    constexpr int TAB_COUNT = 4;
     int value = static_cast<int>(tab);
-    value =
-        (value + direction + 3) % 3;
+    for (int step = 0; step < TAB_COUNT; ++step) {
+        value = (value + direction + TAB_COUNT) % TAB_COUNT;
+        if (tabAvailable(static_cast<Tab>(value))) break;
+    }
     setTab(static_cast<Tab>(value));
+}
+
+bool KickChatComposer::tabAvailable(Tab value) const {
+    if (value == Tab::Channel || value == Tab::Collectible)
+        return !emotesInTab(value).empty();
+    return true;
+}
+
+brls::Box* KickChatComposer::tabButton(Tab value) const {
+    switch (value) {
+    case Tab::Recent:
+        return recentTab;
+    case Tab::Channel:
+        return channelTab;
+    case Tab::Collectible:
+        return collectibleTab;
+    case Tab::Global:
+    default:
+        return globalTab;
+    }
+}
+
+std::vector<kick::UserEmote>
+KickChatComposer::emotesInTab(Tab value) const {
+    if (value == Tab::Recent)
+        return recentEmotes;
+
+    const char* category =
+        value == Tab::Channel       ? "channel"
+        : value == Tab::Collectible ? "collectible"
+                                    : "global";
+    std::vector<kick::UserEmote> result;
+    for (const auto& emote : emotes) {
+        if (emote.emoteType == category)
+            result.push_back(emote);
+    }
+    return result;
 }
 
 
@@ -851,15 +855,16 @@ void KickChatComposer::reconcileRecentEmotes() {
         std::move(resolved);
 }
 
-void KickChatComposer::updateChannelTabVisibility() {
-    channelTab->setVisibility(
-        channelSubscribed
-            ? brls::Visibility::VISIBLE
-            : brls::Visibility::GONE);
+void KickChatComposer::updateTabVisibility() {
+    for (Tab value : {Tab::Channel, Tab::Collectible}) {
+        tabButton(value)->setVisibility(
+            tabAvailable(value)
+                ? brls::Visibility::VISIBLE
+                : brls::Visibility::GONE);
+    }
 
-    if (!channelSubscribed &&
-        tab == Tab::Channel)
-        tab = Tab::All;
+    if (!tabAvailable(tab))
+        tab = Tab::Global;
 
     updateTabs();
 }
@@ -870,40 +875,19 @@ void KickChatComposer::updateTabs() {
     const NVGcolor inactive =
         nvgRGB(45, 50, 65);
 
-    recentTab->setBackgroundColor(
-        tab == Tab::Recent
-            ? active
-            : inactive);
-    channelTab->setBackgroundColor(
-        tab == Tab::Channel
-            ? active
-            : inactive);
-    allTab->setBackgroundColor(
-        tab == Tab::All
-            ? active
-            : inactive);
+    for (Tab value : {Tab::Recent, Tab::Channel, Tab::Global, Tab::Collectible}) {
+        tabButton(value)->setBackgroundColor(
+            tab == value
+                ? active
+                : inactive);
+    }
 
     updateSendRoute();
 }
 
 std::vector<kick::UserEmote>
 KickChatComposer::visibleEmotes() const {
-    if (tab == Tab::All)
-        return emotes;
-
-    if (tab == Tab::Channel) {
-        if (!channelSubscribed)
-            return {};
-
-        std::vector<kick::UserEmote> result;
-        for (const auto& emote : emotes) {
-            if (emote.channelEmote)
-                result.push_back(emote);
-        }
-        return result;
-    }
-
-    return recentEmotes;
+    return emotesInTab(tab);
 }
 
 void KickChatComposer::refreshGrid() {
@@ -923,7 +907,11 @@ void KickChatComposer::refreshGrid() {
                 "No available emotes from "
                 "this channel");
             break;
-        case Tab::All:
+        case Tab::Collectible:
+            focusedEmoteLabel->setText(
+                "No collectible emotes yet");
+            break;
+        case Tab::Global:
         default:
             focusedEmoteLabel->setText(
                 "No emotes available");

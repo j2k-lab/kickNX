@@ -59,6 +59,13 @@ std::string kickEmoteImageUrl(const std::string& id) {
     return "https://files.kick.com/emotes/" + id + "/fullsize";
 }
 
+// Kick names every collectible emote "collectibles…" (kick.com checks the
+// same prefix), whichever group it arrives in.
+std::string emoteCategory(const std::string& name, bool inChannelGroup) {
+    if (name.rfind("collectibles", 0) == 0) return "collectible";
+    return inChannelGroup ? "channel" : "global";
+}
+
 std::string utcTimestamp() {
     const auto now = std::time(nullptr);
     std::tm value{};
@@ -1370,12 +1377,20 @@ void loadUserEmotesAsync(
                     throw std::runtime_error("No Kick channel is active");
                 }
 
+                // Signed in, Kick also returns the emotes the account has
+                // unlocked, such as collectibles.
                 HTTP::Header headers = {
                     "Accept: application/json",
+                    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
                     "x-app-platform: web",
                     "Origin: https://kick.com",
                     "Referer: https://kick.com/",
                 };
+                const OAuthSession session = loadOAuth();
+                if (!session.accessToken.empty()) {
+                    headers.push_back("Authorization: Bearer " + session.accessToken);
+                    headers.push_back("Cookie: session_token=" + session.accessToken);
+                }
 
                 const std::string response = HTTP::get(
                     "https://kick.com/emotes/" + percentEncode(slug),
@@ -1394,8 +1409,15 @@ void loadUserEmotesAsync(
                             !group["emotes"].is_array())
                             continue;
 
+                        // Channel groups carry a slug: this channel's, plus
+                        // one per channel the account is subscribed to, which
+                        // are left out. The shared groups ("Global", "Emoji",
+                        // "Collectibles") have none.
                         const std::string groupId = jsonFieldToString(group, "id");
-                        const bool isChannelGroup = (groupId != "Global");
+                        const std::string groupSlug = jsonFieldToString(group, "slug");
+                        if (!groupSlug.empty() && normalizeChannel(groupSlug) != slug)
+                            continue;
+                        const bool isChannelGroup = !groupSlug.empty();
 
                         for (const auto& item : group["emotes"]) {
                             if (!item.is_object()) continue;
@@ -1406,8 +1428,8 @@ void loadUserEmotesAsync(
                             emote.id = jsonFieldToString(item, "id");
                             emote.name = jsonFieldToString(item, "name");
                             emote.ownerId = groupId;
-                            emote.emoteType = isChannelGroup ? "channel" : "global";
-                            emote.channelEmote = isChannelGroup;
+                            emote.emoteType = emoteCategory(emote.name, isChannelGroup);
+                            emote.channelEmote = emote.emoteType == "channel";
                             emote.imageUrl = kickEmoteImageUrl(emote.id);
 
                             if (emote.id.empty() ||

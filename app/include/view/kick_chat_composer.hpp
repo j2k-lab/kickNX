@@ -35,7 +35,8 @@ private:
     enum class Tab {
         Recent = 0,
         Channel = 1,
-        All = 2,
+        Global = 2,
+        Collectible = 3,
     };
 
     void setEmotePanelVisible(bool visible);
@@ -49,8 +50,11 @@ private:
     void refreshGrid();
     void updateDraft();
     void updateTabs();
-    void updateChannelTabVisibility();
+    void updateTabVisibility();
     void reconcileRecentEmotes();
+    bool tabAvailable(Tab value) const;
+    brls::Box* tabButton(Tab value) const;
+    std::vector<kick::UserEmote> emotesInTab(Tab value) const;
     std::vector<kick::UserEmote> visibleEmotes() const;
 
     std::string channel;
@@ -60,7 +64,6 @@ private:
     Tab tab = Tab::Recent;
     bool loading = true;
     bool sending = false;
-    bool channelSubscribed = false;
     bool subscriptionPermissionGranted = false;
     bool emotePanelVisible = false;
 
@@ -76,6 +79,7 @@ private:
     brls::Box* sendButton = nullptr;
     brls::Box* recentTab = nullptr;
     brls::Box* channelTab = nullptr;
-    brls::Box* allTab = nullptr;
+    brls::Box* globalTab = nullptr;
+    brls::Box* collectibleTab = nullptr;
     RecyclingGrid* grid = nullptr;
 };
