@@ -72,6 +72,9 @@ struct ChatPreferences {
     int dockedWidth = 330;
     int overlayWidth = 360;
     bool timestamps = false;
+    /// Keep Kick's viewer connection open so watching counts toward the
+    /// Daily Reward.
+    bool watchRewards = true;
 };
 
 struct ChatFragment {
@@ -128,6 +131,9 @@ void loadUserEmotesAsync(
     const std::string& channel,
     UserEmotesCallback success,
     ErrorCallback failure);
+
+/// Drops the cached emote lists, e.g. after a claimed reward added an emote.
+void forgetCachedEmotes();
 
 std::vector<UserEmote> loadRecentEmotes();
 void rememberRecentEmote(const UserEmote& emote);

@@ -71,6 +71,8 @@
                         id="setting/kick/chat_opacity" />
                     <brls:BooleanCell
                         id="setting/kick/chat_timestamps" />
+                    <brls:BooleanCell
+                        id="setting/kick/watch_rewards" />
                     <brls:SelectorCell
                         id="setting/track/audio" />
                     <brls:SelectorCell

@@ -6,6 +6,9 @@
 #include "api/kick.hpp"
 #include "api/kick_auth.hpp"
 #include "api/kick_helix.hpp"
+#include "api/kick_chat.hpp"
+#include "api/kick_rewards.hpp"
+#include "view/reward_dialog.hpp"
 #include "tab/remote_view.hpp"
 #include "utils/image.hpp"
 #include "utils/config.hpp"
@@ -226,6 +229,53 @@ public:
 private:
     brls::Image* loader = nullptr;
     std::string currentUrl;
+};
+
+/// A gift box drawn as vector shapes: a lid with angled top corners split by
+/// a ribbon gap, over the box body. Follows the theme's button text colour.
+class KickNXGiftIcon : public brls::View {
+public:
+    KickNXGiftIcon() {
+        this->setDimensions(24, 23);
+        this->setFocusable(false);
+    }
+
+    void draw(NVGcontext* vg, float x, float y, float width, float height,
+        brls::Style, brls::FrameContext*) override {
+        // Designed on a 16 x 16 grid.
+        const float unit = std::min(width, height) / 16.0f;
+        const float left = x + (width - unit * 16.0f) / 2.0f;
+        const float top = y + (height - unit * 16.0f) / 2.0f;
+        const auto px = [&](float value) { return left + value * unit; };
+        const auto py = [&](float value) { return top + value * unit; };
+
+        nvgFillColor(vg, kicknx::theme::current().buttonText);
+
+        // Lid, left half.
+        nvgBeginPath(vg);
+        nvgMoveTo(vg, px(0.0f), py(3.33f));
+        nvgLineTo(vg, px(2.0f), py(1.33f));
+        nvgLineTo(vg, px(7.33f), py(1.33f));
+        nvgLineTo(vg, px(7.33f), py(5.33f));
+        nvgLineTo(vg, px(0.0f), py(5.33f));
+        nvgClosePath(vg);
+        nvgFill(vg);
+
+        // Lid, right half.
+        nvgBeginPath(vg);
+        nvgMoveTo(vg, px(8.67f), py(1.33f));
+        nvgLineTo(vg, px(14.0f), py(1.33f));
+        nvgLineTo(vg, px(16.0f), py(3.33f));
+        nvgLineTo(vg, px(16.0f), py(5.33f));
+        nvgLineTo(vg, px(8.67f), py(5.33f));
+        nvgClosePath(vg);
+        nvgFill(vg);
+
+        // Body.
+        nvgBeginPath(vg);
+        nvgRect(vg, px(0.0f), py(6.67f), unit * 16.0f, unit * 8.0f);
+        nvgFill(vg);
+    }
 };
 
 brls::Box* makeButton(const std::string& text, brls::Label** outLabel = nullptr) {
@@ -1104,6 +1154,21 @@ KickNXHome::KickNXHome() {
     });
     actions->addView(themeButton);
 
+    // Gift icon for the Daily Reward, the same height as the text buttons.
+    rewardsButton = makeButton("");
+    rewardsButton->clearViews();
+    rewardsButton->setPadding(12, 16, 12, 16);
+    rewardsButton->setAlignItems(brls::AlignItems::CENTER);
+    rewardsButton->addView(new KickNXGiftIcon());
+    rewardsButton->registerClickAction([this](brls::View*) {
+        showRewards();
+        return true;
+    });
+    actions->addView(rewardsButton);
+    static_cast<KickNXActionButton*>(rewardsButton)->upTarget = [this]() -> brls::View* {
+        return (profileAvatar && profileAvatar->getVisibility() == brls::Visibility::VISIBLE) ? profileAvatar : nullptr;
+    };
+
     auto* avatar = static_cast<KickNXProfileAvatar*>(profileAvatar);
     avatar->downTarget = [this]() -> brls::View* {
         return aboutButton ? aboutButton : loginButton;
@@ -1285,7 +1350,7 @@ KickNXHome::KickNXHome() {
         return nullptr;
     };
 
-    for (auto* button : {loginButton, searchButton, refreshButton, aboutButton, themeButton}) {
+    for (auto* button : {loginButton, searchButton, refreshButton, aboutButton, themeButton, rewardsButton}) {
         if (auto* actionButton = dynamic_cast<KickNXActionButton*>(button))
             actionButton->downTarget = firstVisibleContentFocus;
     }
@@ -1565,6 +1630,221 @@ void KickNXHome::showThemePicker() {
     });
 }
 
+namespace {
+
+// Dimmed backdrop like the theme picker's; `alive` lets a reply that comes
+// back after the window closed be dropped.
+class RewardsOverlay : public brls::Box {
+public:
+    ~RewardsOverlay() override { alive->store(false); }
+    bool isTranslucent() override { return true; }
+    std::shared_ptr<std::atomic_bool> alive = std::make_shared<std::atomic_bool>(true);
+};
+
+// A rounded track with a fill, for the window's progress bar.
+class RewardProgressBar : public brls::View {
+public:
+    RewardProgressBar() {
+        this->setHeight(14);
+        this->setFocusable(false);
+    }
+
+    void setReward(const kick::DailyReward& value) {
+        reward = value;
+        hasReward = true;
+    }
+
+    void draw(NVGcontext* vg, float x, float y, float width, float height,
+        brls::Style, brls::FrameContext*) override {
+        const auto& palette = kicknx::theme::current();
+        const float radius = height / 2.0f;
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, x, y, width, height, radius);
+        nvgFillColor(vg, palette.surfaceAlt);
+        nvgFill(vg);
+        if (!hasReward || reward.threshold <= 0) return;
+
+        const float fraction = std::clamp(
+            static_cast<float>(reward.estimatedProgress()) / static_cast<float>(reward.threshold),
+            0.0f, 1.0f);
+        if (fraction <= 0.0f) return;
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, x, y, std::max(height, width * fraction), height, radius);
+        nvgFillColor(vg, palette.accent);
+        nvgFill(vg);
+    }
+
+private:
+    kick::DailyReward reward;
+    bool hasReward = false;
+};
+
+}  // namespace
+
+void KickNXHome::showRewards() {
+    const auto& palette = kicknx::theme::current();
+
+    auto* page = new RewardsOverlay();
+    page->setAxis(brls::Axis::COLUMN);
+    page->setDimensions(brls::Application::contentWidth, brls::Application::contentHeight);
+    page->setJustifyContent(brls::JustifyContent::CENTER);
+    page->setAlignItems(brls::AlignItems::CENTER);
+    page->setBackgroundColor(nvgRGBA(0, 0, 0, 160));
+
+    auto* panel = new brls::Box();
+    panel->setAxis(brls::Axis::COLUMN);
+    panel->setWidth(560);
+    panel->setCornerRadius(16);
+    panel->setBorderThickness(2.0f);
+    panel->setBorderColor(palette.outline);
+    panel->setBackgroundColor(palette.background);
+    page->addView(panel);
+
+    auto* heading = new brls::Box();
+    heading->setAxis(brls::Axis::ROW);
+    heading->setAlignItems(brls::AlignItems::CENTER);
+    heading->setPadding(20, 28, 16, 28);
+    heading->setWidthPercentage(100);
+    heading->setCornerRadius(16);
+    heading->setBackgroundColor(palette.header);
+    kicknx::theme::decorateHeader(heading);
+    panel->addView(heading);
+
+    auto* title = new brls::Label();
+    title->setText("Daily Reward");
+    title->setFontSize(30);
+    title->setTextColor(palette.headerAccent);
+    title->setGrow(1.0f);
+    heading->addView(title);
+
+    auto* backButton = makeButton("Back");
+    backButton->setMarginRight(0);
+    backButton->registerClickAction([](brls::View*) {
+        return brls::Application::popActivity();
+    });
+    heading->addView(backButton);
+
+    auto* body = new brls::Box();
+    body->setAxis(brls::Axis::COLUMN);
+    body->setPadding(24, 28, 28, 28);
+    panel->addView(body);
+
+    auto* headline = new brls::Label();
+    headline->setText("Loading…");
+    headline->setFontSize(24);
+    headline->setTextColor(palette.textPrimary);
+    headline->setMarginBottom(14);
+    body->addView(headline);
+
+    auto* bar = new RewardProgressBar();
+    bar->setVisibility(brls::Visibility::GONE);
+    bar->setMarginBottom(14);
+    body->addView(bar);
+
+    auto* detail = new brls::Label();
+    detail->setText("");
+    detail->setFontSize(17);
+    detail->setTextColor(palette.textMuted);
+    body->addView(detail);
+
+    auto* claimButton = makeButton("Claim reward");
+    claimButton->setMarginRight(0);
+    claimButton->setMarginTop(20);
+    claimButton->setAlignSelf(brls::AlignSelf::FLEX_START);
+    claimButton->setVisibility(brls::Visibility::GONE);
+    body->addView(claimButton);
+
+    static_cast<KickNXActionButton*>(backButton)->downTarget = [claimButton]() -> brls::View* {
+        return claimButton->getVisibility() == brls::Visibility::VISIBLE ? claimButton : nullptr;
+    };
+    static_cast<KickNXActionButton*>(claimButton)->upTarget = [backButton]() -> brls::View* {
+        return backButton;
+    };
+
+    page->registerAction("Back", brls::BUTTON_B, [](brls::View*) {
+        return brls::Application::popActivity();
+    });
+
+    auto current = std::make_shared<std::optional<kick::DailyReward>>();
+    const auto show = [current, headline, bar, detail, claimButton](const kick::DailyReward& reward) {
+        *current = reward;
+        const std::string resets = kicknx::timeUntil(reward.resetsAt);
+        bar->setReward(reward);
+        bar->setVisibility(brls::Visibility::VISIBLE);
+        claimButton->setVisibility(
+            reward.claimable() ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+
+        if (reward.claimed()) {
+            headline->setText("Claimed today");
+            bar->setVisibility(brls::Visibility::GONE);
+            detail->setText(resets.empty() ? "Come back tomorrow for the next one."
+                                           : "Next reward in " + resets + ".");
+        } else if (reward.claimable()) {
+            headline->setText("Ready to claim!");
+            detail->setText(resets.empty() ? "Claim it before the day resets."
+                                           : "Claim it within " + resets + ".");
+        } else {
+            headline->setText(fmt::format("{} / {} minutes watched", reward.progress, reward.threshold));
+            std::string text = "Watch live streams to fill it up.";
+            if (!resets.empty()) text += "\nResets in " + resets + ".";
+            detail->setText(text);
+        }
+    };
+
+    std::weak_ptr<std::atomic_bool> weakAlive = page->alive;
+    claimButton->registerClickAction([weakAlive, current, headline, claimButton, backButton, show](brls::View*) {
+        if (!*current || !(*current)->claimable()) return true;
+        const kick::DailyReward reward = **current;
+        headline->setText("Claiming…");
+        claimButton->setVisibility(brls::Visibility::GONE);
+        brls::Application::giveFocus(backButton);
+        kick::claimDailyRewardAsync(
+            reward.id,
+            [weakAlive, reward, show](kick::ClaimedReward prize) {
+                // A new collectible emote shows up the next time the
+                // keyboard opens.
+                kick::forgetCachedEmotes();
+                auto alive = weakAlive.lock();
+                if (alive && alive->load()) {
+                    kick::DailyReward claimed = reward;
+                    claimed.status = "claimed";
+                    show(claimed);
+                }
+                kicknx::showClaimedRewardDialog(prize);
+            },
+            [weakAlive, reward, show](const std::string& error) {
+                auto alive = weakAlive.lock();
+                if (alive && alive->load()) show(reward);
+                brls::Application::notify("kickNX: could not claim the reward: " + error);
+            });
+        return true;
+    });
+
+    // One request when the window opens; nothing polls while it stays open.
+    ThreadPool::instance().submit([weakAlive, show, headline, detail](HTTP&) {
+        std::optional<kick::DailyReward> reward;
+        std::string error;
+        try {
+            reward = kick::fetchDailyReward();
+        } catch (const std::exception& exception) {
+            error = exception.what();
+        }
+        brls::sync([weakAlive, show, headline, detail, reward, error]() {
+            auto alive = weakAlive.lock();
+            if (!alive || !alive->load()) return;
+            if (reward) {
+                show(*reward);
+            } else {
+                headline->setText(error.empty() ? "No reward today" : "Couldn't load your reward");
+                detail->setText(error.empty() ? "Kick isn't offering a Daily Reward right now." : error);
+            }
+        });
+    });
+
+    brls::Application::pushActivity(new brls::Activity(page));
+    brls::sync([backButton]() { brls::Application::giveFocus(backButton); });
+}
+
 void KickNXHome::rebuildForTheme() {
     KickNXHome* old = instance;
     if (!old || !themeRebuildPending) return;
@@ -1597,6 +1877,7 @@ void KickNXHome::updateAccount() {
             (session.displayName.empty() ? session.login : session.displayName));
         loginButtonLabel->setText("Sign out");
         if (profileAvatar) profileAvatar->setFocusable(true);
+        if (rewardsButton) rewardsButton->setVisibility(brls::Visibility::VISIBLE);
         if (!session.profileImageUrl.empty()) {
             updateProfileImage(session.profileImageUrl);
         }
@@ -1604,6 +1885,7 @@ void KickNXHome::updateAccount() {
         accountLabel->setText("Guest mode · Public Kick streams & live chat enabled");
         loginButtonLabel->setText("Sign in");
         if (profileAvatar) profileAvatar->setFocusable(false);
+        if (rewardsButton) rewardsButton->setVisibility(brls::Visibility::GONE);
         updateProfileImage("");
     }
 }

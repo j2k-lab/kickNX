@@ -40,6 +40,8 @@ private:
     void search();
     void showAbout();
     void showThemePicker();
+    /// Small window with the Daily Reward's progress (signed in only).
+    void showRewards();
     /// Replaces Home with a freshly built one so the new theme takes effect.
     static void rebuildForTheme();
     void searchFor(const std::string& query);
@@ -78,6 +80,7 @@ private:
     brls::Box* refreshButton = nullptr;
     brls::Box* aboutButton = nullptr;
     brls::Box* themeButton = nullptr;
+    brls::Box* rewardsButton = nullptr;
 
     brls::Box* errorBox = nullptr;
     brls::Label* errorLabel = nullptr;

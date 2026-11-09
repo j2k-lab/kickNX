@@ -388,6 +388,7 @@ PlayerSetting::PlayerSetting(std::string kickChannel) {
         btnKickChatFont->setVisibility(brls::Visibility::GONE);
         btnKickChatOpacity->setVisibility(brls::Visibility::GONE);
         btnKickChatTimestamps->setVisibility(brls::Visibility::GONE);
+        btnKickWatchRewards->setVisibility(brls::Visibility::GONE);
     } else {
         const kick::ChatPreferences chat = kick::loadChatPreferences();
 
@@ -574,6 +575,16 @@ PlayerSetting::PlayerSetting(std::string kickChannel) {
                 preferences.timestamps = enabled;
                 if (!kick::saveChatPreferences(preferences))
                     brls::Application::notify("kickNX: could not save timestamp preference");
+            });
+
+        btnKickWatchRewards->init(
+            "Count watch time for rewards",
+            chat.watchRewards,
+            [](bool enabled) {
+                auto preferences = kick::loadChatPreferences();
+                preferences.watchRewards = enabled;
+                if (!kick::saveChatPreferences(preferences))
+                    brls::Application::notify("kickNX: could not save reward preference");
             });
     }
 

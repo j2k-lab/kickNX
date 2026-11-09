@@ -11,7 +11,9 @@
 #include "view/kick_chat_composer.hpp"
 #include "view/kick_draft_preview.hpp"
 #include "view/kick_keyboard.hpp"
+#include "view/reward_dialog.hpp"
 #include "api/kick_chat.hpp"
+#include "api/kick_rewards.hpp"
 #include "api/kick.hpp"
 #include "utils/thread.hpp"
 #include "utils/misc.hpp"
@@ -1186,6 +1188,72 @@ private:
     bool emotePanelVisible = false;
 };
 
+/// Kick's Daily Reward as a slim bar above chat: it fills as watch time adds
+/// up and turns into a Claim button once the reward is ready. Hidden while
+/// signed out and once today's reward is claimed.
+class KickRewardBar : public brls::View {
+public:
+    KickRewardBar() {
+        this->setHeight(24);
+        this->setMarginBottom(7);
+        this->setFocusable(false);
+        this->setVisibility(brls::Visibility::GONE);
+        this->addGestureRecognizer(new brls::TapGestureRecognizer(this, [this]() {
+            if (reward && reward->claimable() && !claiming && claimRequested)
+                claimRequested();
+        }));
+    }
+
+    void setClaimHandler(std::function<void()> handler) { claimRequested = std::move(handler); }
+
+    void setState(const std::optional<kick::DailyReward>& value, bool isClaiming) {
+        reward = value;
+        claiming = isClaiming;
+        const bool show = reward && !reward->claimed() && reward->threshold > 0;
+        this->setVisibility(show ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+        this->invalidate();
+    }
+
+    void draw(NVGcontext* vg, float x, float y, float width, float height,
+        brls::Style style, brls::FrameContext* ctx) override {
+        if (!reward) return;
+        const float radius = height / 2.0f;
+        const bool ready = reward->claimable();
+        // Counts up minute by minute between Kick's checks.
+        const int minutes = reward->estimatedProgress();
+        const float fraction = ready ? 1.0f
+            : std::clamp(static_cast<float>(minutes) /
+                      static_cast<float>(std::max(1, reward->threshold)),
+                  0.0f, 1.0f);
+
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, x, y, width, height, radius);
+        nvgFillColor(vg, nvgRGB(45, 50, 65));
+        nvgFill(vg);
+
+        if (fraction > 0.0f) {
+            nvgBeginPath(vg);
+            nvgRoundedRect(vg, x, y, std::max(height, width * fraction), height, radius);
+            nvgFillColor(vg, ready ? nvgRGB(83, 252, 24) : nvgRGB(24, 115, 36));
+            nvgFill(vg);
+        }
+
+        const std::string text = claiming ? "Claiming…"
+            : ready ? "Claim daily reward (R-stick)"
+                    : fmt::format("Daily reward  {} / {} min", minutes, reward->threshold);
+        nvgFontFaceId(vg, brls::Application::getDefaultFont());
+        nvgFontSize(vg, 13.0f);
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(vg, ready ? nvgRGB(10, 12, 16) : nvgRGB(245, 246, 250));
+        nvgText(vg, x + width / 2.0f, y + height / 2.0f, text.c_str(), nullptr);
+    }
+
+private:
+    std::optional<kick::DailyReward> reward;
+    bool claiming = false;
+    std::function<void()> claimRequested;
+};
+
 class KickChatPanel : public brls::Box {
 public:
     KickChatPanel(
@@ -1245,6 +1313,9 @@ public:
         status->setMarginBottom(7);
         status->setVisibility(brls::Visibility::GONE);
         this->addView(status);
+
+        rewardBar = new KickRewardBar();
+        this->addView(rewardBar);
 
         messagesBox = new brls::Box();
         messagesBox->setAxis(brls::Axis::COLUMN);
@@ -1309,6 +1380,14 @@ public:
     void setComposeVisible(bool visible) {
         composeButton->setVisibility(
             visible ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+    }
+
+    void setClaimHandler(std::function<void()> handler) {
+        rewardBar->setClaimHandler(std::move(handler));
+    }
+
+    void setReward(const std::optional<kick::DailyReward>& reward, bool claiming) {
+        rewardBar->setState(reward, claiming);
     }
 
     void apply(const kick::ChatPreferences& value) {
@@ -1518,6 +1597,7 @@ private:
     brls::Label* status = nullptr;
     brls::Box* messagesBox = nullptr;
     brls::Button* composeButton = nullptr;
+    KickRewardBar* rewardBar = nullptr;
     std::vector<KickChatMessageView*> rows;
 };
 
@@ -1556,6 +1636,15 @@ struct ChatUiState {
         if (activePanel) activePanel->setChatterCount(count);
     }
 
+    void setReward(const std::optional<kick::DailyReward>& value, bool isClaiming) {
+        reward = value;
+        claiming = isClaiming;
+        if (activePanel) activePanel->setReward(reward, claiming);
+    }
+
+    std::optional<kick::DailyReward> reward;
+    bool claiming = false;
+
     void activate(KickChatPanel* panel) {
         if (activePanel == panel) return;
 
@@ -1570,6 +1659,7 @@ struct ChatUiState {
         messages = activePanel->visibleMessages();
         activePanel->setStatus(status);
         activePanel->setChatterCount(chatterCount);
+        activePanel->setReward(reward, claiming);
     }
 
 private:
@@ -2390,6 +2480,8 @@ public:
         }
 
         chatUi = std::make_shared<ChatUiState>();
+        chatOverlayPanel->setClaimHandler([this]() { claimReward(); });
+        chatDockedPanel->setClaimHandler([this]() { claimReward(); });
 
         if (this->kickChannel.empty()) {
             chatOverlayPanel->setVisibility(brls::Visibility::GONE);
@@ -2486,6 +2578,8 @@ public:
                     return true;
                 },
                 false);
+
+            startWatchSession(currentChatPreferences.watchRewards);
 
             channelSubscribeID =
                 view->getChannelEvent()->subscribe(
@@ -2711,6 +2805,8 @@ public:
 
         if (chatUi) chatUi->alive.store(false);
         stopChat();
+        // Closes the viewer connection with the stream.
+        watchSession.reset();
         resetPlayerVideoLayout();
 
         auto& mpv = MPVCore::instance();
@@ -2808,8 +2904,14 @@ public:
             chatModeAction = ACTION_NONE;
         }
 
+        if (claimAction != ACTION_NONE) {
+            this->unregisterAction(claimAction);
+            claimAction = ACTION_NONE;
+        }
+
         if (chatUi) chatUi->alive.store(false);
         chatClient.reset();
+        watchSession.reset();
         if (!this->kickChannel.empty()) {
             kick::chatPreferencesEvent()->unsubscribe(
                 chatPreferenceSubscribeID);
@@ -3324,6 +3426,84 @@ public:
                     kickChannel)));
     }
 
+    void startWatchSession(bool countWatchTime) {
+        watchSession.reset();
+        if (kickChannel.empty() || playerShuttingDown || !kick::hasChatWriteScope())
+            return;
+
+        watchSessionCountsTime = countWatchTime;
+        std::weak_ptr<ChatUiState> weak = chatUi;
+        watchSession = std::make_unique<kick::WatchSession>(
+            kickChannel,
+            countWatchTime,
+            [this, weak](kick::DailyReward reward) {
+                brls::sync([this, weak, reward]() {
+                    // chatUi stays alive (and `this` with it) until playback
+                    // is torn down.
+                    auto state = weak.lock();
+                    if (!state || !state->alive.load() || state->claiming) return;
+                    state->setReward(reward, false);
+                    updateClaimAction();
+                });
+            });
+    }
+
+    /// Right-stick press claims while a reward is ready.
+    void updateClaimAction() {
+        const bool ready = chatUi && chatUi->reward &&
+            chatUi->reward->claimable() && !chatUi->claiming;
+        if (ready && claimAction == ACTION_NONE) {
+            claimAction = this->registerAction(
+                "Claim reward",
+                brls::BUTTON_RSB,
+                [this](brls::View*) {
+                    claimReward();
+                    return true;
+                },
+                false);
+        } else if (!ready && claimAction != ACTION_NONE) {
+            this->unregisterAction(claimAction);
+            claimAction = ACTION_NONE;
+        }
+    }
+
+    void claimReward() {
+        if (!chatUi || !chatUi->reward || !chatUi->reward->claimable() || chatUi->claiming)
+            return;
+
+        const std::string challengeId = chatUi->reward->id;
+        chatUi->setReward(chatUi->reward, true);
+        updateClaimAction();
+
+        std::weak_ptr<ChatUiState> weak = chatUi;
+        kick::claimDailyRewardAsync(
+            challengeId,
+            [this, weak](kick::ClaimedReward prize) {
+                auto state = weak.lock();
+                if (!state || !state->alive.load()) return;
+                auto reward = state->reward;
+                if (reward) {
+                    reward->status = "claimed";
+                    reward->progress = reward->threshold;
+                }
+                state->setReward(reward, false);
+                updateClaimAction();
+                // A new collectible emote shows up the next time the
+                // keyboard opens.
+                kick::forgetCachedEmotes();
+                if (watchSession) watchSession->refreshReward();
+                kicknx::showClaimedRewardDialog(prize);
+            },
+            [this, weak](const std::string& error) {
+                auto state = weak.lock();
+                if (!state || !state->alive.load()) return;
+                state->setReward(state->reward, false);
+                updateClaimAction();
+                if (watchSession) watchSession->refreshReward();
+                brls::Application::notify("kickNX: could not claim the reward: " + error);
+            });
+    }
+
     void stopChat() {
         chatClient.reset();
         if (chatUi) {
@@ -3500,6 +3680,10 @@ public:
             !chatDockedPanel)
             return;
 
+        // Turning "Count watch time" on or off restarts the viewer session.
+        if (watchSession && preferences.watchRewards != watchSessionCountsTime)
+            startWatchSession(preferences.watchRewards);
+
         currentChatPreferences = preferences;
 
         chatOverlayPanel->apply(preferences);
@@ -3597,6 +3781,9 @@ private:
     std::shared_ptr<ChatUiState> chatUi;
     std::shared_ptr<KickPlaybackRecoveryState> playbackRecovery;
     std::unique_ptr<kick::ChatClient> chatClient;
+    std::unique_ptr<kick::WatchSession> watchSession;
+    bool watchSessionCountsTime = false;
+    brls::ActionIdentifier claimAction = ACTION_NONE;
     kick::ChatPreferences currentChatPreferences;
     brls::ActionIdentifier chatSendAction = ACTION_NONE;
     brls::ActionIdentifier chatModeAction = ACTION_NONE;

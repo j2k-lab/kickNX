@@ -49,6 +49,7 @@ private:
     BRLS_BIND(brls::SelectorCell, btnKickChatFont, "setting/kick/chat_font");
     BRLS_BIND(brls::SelectorCell, btnKickChatOpacity, "setting/kick/chat_opacity");
     BRLS_BIND(brls::BooleanCell, btnKickChatTimestamps, "setting/kick/chat_timestamps");
+    BRLS_BIND(brls::BooleanCell, btnKickWatchRewards, "setting/kick/watch_rewards");
     BRLS_BIND(brls::SliderCell, btnSubsync, "setting/video/subsync");
     // equalizer setting
     BRLS_BIND(brls::RadioCell, btnEqualizerReset, "setting/equalizer/reset");
