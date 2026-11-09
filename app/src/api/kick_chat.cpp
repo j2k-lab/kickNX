@@ -19,6 +19,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <mutex>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -467,11 +469,25 @@ struct KickChatroomInfo {
     std::string pusherUrl = DEFAULT_KICK_PUSHER_URL;
 };
 
-KickChatroomInfo resolveKickChatroom(const std::string& channelSlug, HTTP::Cancel cancel = nullptr) {
-    const std::string slug = normalizeChannel(channelSlug);
-    if (slug.empty()) throw std::runtime_error("No Kick channel was specified");
+// A channel's IDs never change, so each slug is looked up once per launch.
+// Reconnecting chat and sending messages then skip that request (a new TLS
+// connection each time, which the Switch can run short of).
+struct KickChannelIds {
+    std::string channelId;
+    std::string chatroomId;
+};
 
-    HTTP::Header headers = {
+std::mutex channelIdCacheMutex;
+std::unordered_map<std::string, KickChannelIds> channelIdCache;
+
+KickChannelIds fetchChannelIds(const std::string& slug, HTTP::Cancel cancel) {
+    {
+        std::lock_guard<std::mutex> lock(channelIdCacheMutex);
+        const auto found = channelIdCache.find(slug);
+        if (found != channelIdCache.end()) return found->second;
+    }
+
+    const HTTP::Header headers = {
         "Accept: application/json",
         "x-app-platform: web",
         "Origin: https://kick.com",
@@ -494,17 +510,38 @@ KickChatroomInfo resolveKickChatroom(const std::string& channelSlug, HTTP::Cance
     }
 
     const json& data = (root.contains("data") && root["data"].is_object()) ? root["data"] : root;
-    KickChatroomInfo info;
-    info.channelId = jsonFieldToString(data, "id");
+    KickChannelIds ids;
+    ids.channelId = jsonFieldToString(data, "id");
     if (data.contains("chatroom") && data["chatroom"].is_object()) {
-        info.chatroomId = jsonFieldToString(data["chatroom"], "id");
+        ids.chatroomId = jsonFieldToString(data["chatroom"], "id");
     }
-    if (info.chatroomId.empty()) {
-        info.chatroomId = jsonFieldToString(data, "chatroom_id", info.channelId);
+    if (ids.chatroomId.empty()) {
+        ids.chatroomId = jsonFieldToString(data, "chatroom_id", ids.channelId);
     }
-    if (info.chatroomId.empty()) {
+    if (ids.chatroomId.empty()) {
         throw std::runtime_error("Kick channel returned no chatroom ID");
     }
+
+    std::lock_guard<std::mutex> lock(channelIdCacheMutex);
+    channelIdCache[slug] = ids;
+    return ids;
+}
+
+KickChatroomInfo resolveKickChatroom(const std::string& channelSlug, HTTP::Cancel cancel = nullptr) {
+    const std::string slug = normalizeChannel(channelSlug);
+    if (slug.empty()) throw std::runtime_error("No Kick channel was specified");
+
+    const HTTP::Header headers = {
+        "Accept: application/json",
+        "x-app-platform: web",
+        "Origin: https://kick.com",
+        "Referer: https://kick.com/",
+    };
+
+    const KickChannelIds ids = fetchChannelIds(slug, cancel);
+    KickChatroomInfo info;
+    info.channelId = ids.channelId;
+    info.chatroomId = ids.chatroomId;
 
     // Negotiate realtime connection provider (Centrifugo vs Pusher)
     if (!info.channelId.empty()) {
@@ -512,6 +549,16 @@ KickChatroomInfo resolveKickChatroom(const std::string& channelSlug, HTTP::Cance
         try {
             HTTP::Header postHeaders = headers;
             postHeaders.push_back("Content-Type: application/json");
+
+            // Both web.kick.com calls go through one handle, so the token
+            // request reuses the negotiation's connection instead of opening
+            // another. The cancel flag lasts one request, so it is set for each.
+            HTTP web;
+            HTTP::set_option(web, postHeaders, HTTP::Timeout{8000});
+            const auto webPost = [&](const std::string& url, const std::string& body) {
+                if (cancel) HTTP::set_option(web, cancel);
+                return web._post(url, body);
+            };
 
             const json reqBody = {
                 {"client", {{"id", clientId}, {"type", "web"}}},
@@ -522,20 +569,14 @@ KickChatroomInfo resolveKickChatroom(const std::string& channelSlug, HTTP::Cance
 
             std::string connResp;
             try {
-                connResp = HTTP::post(
+                connResp = webPost(
                     "https://web.kick.com/api/v1/realtime/channels/" +
                         percentEncode(info.channelId) + "/chat/connection",
-                    reqBody.dump(),
-                    postHeaders,
-                    HTTP::Timeout{8000},
-                    cancel);
+                    reqBody.dump());
             } catch (...) {
-                connResp = HTTP::post(
+                connResp = webPost(
                     "https://web.kick.com/api/v1/realtime/connection",
-                    reqBody.dump(),
-                    postHeaders,
-                    HTTP::Timeout{8000},
-                    cancel);
+                    reqBody.dump());
             }
 
             const json connRoot = json::parse(connResp);
@@ -557,12 +598,9 @@ KickChatroomInfo resolveKickChatroom(const std::string& channelSlug, HTTP::Cance
                         // Obtain Centrifugo connection token
                         try {
                             const json authBody = {{"client_id", clientId}};
-                            const std::string authResp = HTTP::post(
+                            const std::string authResp = webPost(
                                 "https://web.kick.com/api/v1/realtime/auth/connection",
-                                authBody.dump(),
-                                postHeaders,
-                                HTTP::Timeout{8000},
-                                cancel);
+                                authBody.dump());
                             const json authRoot = json::parse(authResp);
                             if (authRoot.contains("data") && authRoot["data"].is_object()) {
                                 const auto& inner = authRoot["data"];
@@ -1486,7 +1524,8 @@ void sendChatMessageAsync(
                     throw std::runtime_error(
                         "Sending Kick chat messages requires a Bearer token in oauth.json");
 
-                const KickChatroomInfo chatroom = resolveKickChatroom(normalized);
+                // Sending needs only the chatroom ID, not a chat connection.
+                const KickChannelIds chatroom = fetchChannelIds(normalized, nullptr);
                 const json body = {
                     {"content", message},
                     {"type", "message"},
@@ -1539,18 +1578,9 @@ int fetchActiveChattersCount(const std::string& channelIdOrSlug, HTTP::Cancel ca
     const bool isNumeric = !numericId.empty() && std::all_of(numericId.begin(), numericId.end(), ::isdigit);
     if (!isNumeric) {
         try {
-            const std::string chResp = HTTP::get(
-                "https://kick.com/api/v2/channels/" + percentEncode(channelIdOrSlug),
-                headers,
-                HTTP::Timeout{8000},
-                cancel);
-            const json chRoot = json::parse(chResp);
-            if (chRoot.contains("id") && chRoot["id"].is_number_integer()) {
-                numericId = std::to_string(chRoot["id"].get<long long>());
-            } else if (chRoot.contains("chatroom") && chRoot["chatroom"].is_object() &&
-                       chRoot["chatroom"].contains("channel_id") && chRoot["chatroom"]["channel_id"].is_number_integer()) {
-                numericId = std::to_string(chRoot["chatroom"]["channel_id"].get<long long>());
-            }
+            const KickChannelIds ids =
+                fetchChannelIds(normalizeChannel(channelIdOrSlug), cancel);
+            if (!ids.channelId.empty()) numericId = ids.channelId;
         } catch (...) {
         }
     }
