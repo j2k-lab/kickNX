@@ -522,6 +522,8 @@ KickChatComposer::KickChatComposer(
                     std::move(catalogue.emotes);
                 subscriptionPermissionGranted =
                     catalogue.subscriptionPermissionGranted;
+                lockedChannelEmotes =
+                    catalogue.lockedChannelEmotes;
                 loading = false;
 
                 if (!subscriptionPermissionGranted) {
@@ -765,7 +767,9 @@ void KickChatComposer::cycleTab(
 }
 
 bool KickChatComposer::tabAvailable(Tab value) const {
-    if (value == Tab::Channel || value == Tab::Collectible)
+    // Channel stays visible even when empty, so it can say why (usually
+    // that every channel emote is for subscribers).
+    if (value == Tab::Collectible)
         return !emotesInTab(value).empty();
     return true;
 }
@@ -904,8 +908,11 @@ void KickChatComposer::refreshGrid() {
             break;
         case Tab::Channel:
             focusedEmoteLabel->setText(
-                "No available emotes from "
-                "this channel");
+                lockedChannelEmotes > 0
+                    ? "This channel's " +
+                        std::to_string(lockedChannelEmotes) +
+                        " emotes are for subscribers"
+                    : std::string("This channel has no emotes"));
             break;
         case Tab::Collectible:
             focusedEmoteLabel->setText(

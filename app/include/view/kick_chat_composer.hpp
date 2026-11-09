@@ -65,6 +65,7 @@ private:
     bool loading = true;
     bool sending = false;
     bool subscriptionPermissionGranted = false;
+    size_t lockedChannelEmotes = 0;
     bool emotePanelVisible = false;
 
     brls::Label* statusLabel = nullptr;

@@ -1011,7 +1011,8 @@ private:
     // Channel and Collectibles show only when they have emotes; Recent and
     // Global always show.
     bool emoteTabAvailable(EmoteTab value) const {
-        if (value == EmoteTab::Channel || value == EmoteTab::Collectible)
+        // Channel stays visible even when empty, so it can say why.
+        if (value == EmoteTab::Collectible)
             return !emotesInTab(value).empty();
         return true;
     }
@@ -1029,9 +1030,12 @@ private:
         }
 
         const auto displayList = emotesInTab(emoteTab);
-        const char* emptyText = emoteTab == EmoteTab::Recent ? "No recent emotes"
-            : emoteTab == EmoteTab::Collectible              ? "No collectible emotes"
-                                                             : "No emotes available";
+        const std::string emptyText = emoteTab == EmoteTab::Recent ? "No recent emotes"
+            : emoteTab == EmoteTab::Collectible                    ? "No collectible emotes"
+            : emoteTab != EmoteTab::Channel                        ? "No emotes available"
+            : lockedChannelEmotes > 0
+                ? fmt::format("This channel's {} emotes are for subscribers", lockedChannelEmotes)
+                : "This channel has no emotes";
 
         if (emoteStatus) {
             emoteStatus->setText(
@@ -1062,6 +1066,7 @@ private:
             channel,
             [this](kick::UserEmoteCatalogue catalogue) {
                 emotes = std::move(catalogue.emotes);
+                lockedChannelEmotes = catalogue.lockedChannelEmotes;
                 loading = false;
                 refreshEmoteGrid();
                 refreshDraft();
@@ -1098,6 +1103,7 @@ private:
     }
 
     static constexpr size_t MAX_MESSAGE_BYTES = 500;
+    size_t lockedChannelEmotes = 0;
     std::string channel;
     SendCallback sendRequested;
     std::string draft;

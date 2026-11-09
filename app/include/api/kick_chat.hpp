@@ -109,6 +109,9 @@ struct UserEmoteCatalogue {
     std::vector<UserEmote> emotes;
     bool channelSubscribed = false;
     bool subscriptionPermissionGranted = false;
+    /// This channel's subscriber-only emotes that were left out because the
+    /// account is not (confirmed) subscribed.
+    size_t lockedChannelEmotes = 0;
 };
 
 using UserEmotesCallback =

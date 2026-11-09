@@ -68,6 +68,32 @@ std::string emoteCategory(const std::string& name, bool inChannelGroup) {
     return inChannelGroup ? "channel" : "global";
 }
 
+// Emote lists by channel and account, kept for the launch.
+struct CachedEmotes {
+    UserEmoteCatalogue catalogue;
+    std::chrono::steady_clock::time_point loadedAt;
+};
+constexpr auto EMOTE_CACHE_LIFETIME = std::chrono::minutes(10);
+std::mutex emoteCacheMutex;
+std::unordered_map<std::string, CachedEmotes> emoteCache;
+
+// GET /api/v2/channels/{slug}/me: "subscription" is an object while the
+// account is subscribed and null otherwise.
+bool isSubscribedResponse(const json& root) {
+    if (!root.is_object()) return false;
+    const json& data =
+        root.contains("data") && root["data"].is_object() ? root["data"] : root;
+    if (data.contains("subscription") &&
+        data["subscription"].is_object() &&
+        !data["subscription"].empty())
+        return true;
+    for (const char* key : {"is_subscribed", "subscribed"}) {
+        if (data.contains(key) && data[key].is_boolean() && data[key].get<bool>())
+            return true;
+    }
+    return false;
+}
+
 std::string utcTimestamp() {
     const auto now = std::time(nullptr);
     std::tm value{};
@@ -1430,14 +1456,70 @@ void loadUserEmotesAsync(
                     headers.push_back("Cookie: session_token=" + session.accessToken);
                 }
 
-                const std::string response = HTTP::get(
-                    "https://kick.com/emotes/" + percentEncode(slug),
-                    headers,
-                    HTTP::Timeout{15000});
+                // Reopening the keyboard on the same channel reuses the last
+                // list instead of asking Kick again.
+                const auto now = std::chrono::steady_clock::now();
+                const std::string cacheKey = slug + '\n' + session.accessToken;
+                std::optional<UserEmoteCatalogue> cached;
+                {
+                    std::lock_guard<std::mutex> lock(emoteCacheMutex);
+                    const auto found = emoteCache.find(cacheKey);
+                    if (found != emoteCache.end()) {
+                        if (now - found->second.loadedAt < EMOTE_CACHE_LIFETIME) {
+                            brls::sync(std::bind(success, found->second.catalogue));
+                            return;
+                        }
+                        cached = found->second.catalogue;
+                    }
+                }
+
+                // One handle for both requests, so the emote list reuses the
+                // subscription check's connection to kick.com.
+                HTTP http;
+                HTTP::set_option(http, headers, HTTP::Timeout{15000});
+
+                // Subscriber emotes are offered only when Kick confirms this
+                // account is subscribed; any failure here leaves them out.
+                bool subscribed = false;
+                if (!session.accessToken.empty()) {
+                    try {
+                        std::ostringstream body;
+                        http._get(
+                            "https://kick.com/api/v2/channels/" + percentEncode(slug) + "/me",
+                            &body);
+                        subscribed = isSubscribedResponse(json::parse(body.str()));
+                    } catch (...) {
+                    }
+                }
+
+                // Right after the Switch wakes, new TLS connections can fail
+                // for a few minutes. Try again a couple of times before giving
+                // up; Kick answering with an HTTP error is not retried.
+                std::string response;
+                for (int attempt = 1;; ++attempt) {
+                    try {
+                        std::ostringstream body;
+                        http._get("https://kick.com/emotes/" + percentEncode(slug), &body);
+                        response = body.str();
+                        break;
+                    } catch (const std::exception& exception) {
+                        const bool httpStatus =
+                            std::string(exception.what()).find("http status") != std::string::npos;
+                        if (httpStatus || attempt >= 3) {
+                            if (cached) {
+                                brls::sync(std::bind(success, *cached));
+                                return;
+                            }
+                            throw;
+                        }
+                        std::this_thread::sleep_for(std::chrono::seconds(2 * attempt));
+                    }
+                }
                 const json root = json::parse(response);
 
                 std::vector<UserEmote> emotes;
                 std::set<std::string> seen;
+                size_t lockedChannelEmotes = 0;
                 constexpr size_t MAX_EMOTES = 400;
 
                 if (root.is_array()) {
@@ -1460,7 +1542,10 @@ void loadUserEmotesAsync(
                         for (const auto& item : group["emotes"]) {
                             if (!item.is_object()) continue;
                             const bool subscribersOnly = item.value("subscribers_only", false);
-                            if (subscribersOnly) continue;
+                            if (subscribersOnly && !(subscribed && isChannelGroup)) {
+                                if (isChannelGroup) lockedChannelEmotes++;
+                                continue;
+                            }
 
                             UserEmote emote;
                             emote.id = jsonFieldToString(item, "id");
@@ -1484,8 +1569,20 @@ void loadUserEmotesAsync(
 
                 UserEmoteCatalogue catalogue;
                 catalogue.emotes = std::move(emotes);
-                catalogue.channelSubscribed = true;
+                catalogue.channelSubscribed = subscribed;
+                catalogue.lockedChannelEmotes = lockedChannelEmotes;
                 catalogue.subscriptionPermissionGranted = true;
+
+                // A list without channel emotes is not kept, so a reply that
+                // came back short is asked for again next time.
+                const bool hasChannelEmotes = std::any_of(
+                    catalogue.emotes.begin(), catalogue.emotes.end(),
+                    [](const UserEmote& emote) { return emote.emoteType == "channel"; });
+                if (hasChannelEmotes) {
+                    std::lock_guard<std::mutex> lock(emoteCacheMutex);
+                    if (emoteCache.size() >= 16) emoteCache.clear();
+                    emoteCache[cacheKey] = {catalogue, now};
+                }
 
                 brls::sync(std::bind(success, std::move(catalogue)));
             } catch (const std::exception& exception) {
