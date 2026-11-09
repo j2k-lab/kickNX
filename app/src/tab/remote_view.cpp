@@ -63,29 +63,89 @@ public:
         return *pool;
     }
 
-    brls::Image* get(const std::string& url) {
+    /// Returns the shared image for an emote and counts the caller as a user;
+    /// every non-null result must be handed back with release(). When the
+    /// pool is full, the least recently used emote that no message is showing
+    /// is dropped to make room, so new channels' emotes still get pictures.
+    brls::Image* acquire(const std::string& url) {
         if (url.empty()) return nullptr;
+        const auto now = std::chrono::steady_clock::now();
+
         auto found = entries.find(url);
-        if (found != entries.end()) return found->second;
-        if (entries.size() >= MAX_ENTRIES) {
+        if (found != entries.end()) {
+            Entry& entry = found->second;
+            // A download that failed (often right after the Switch wakes)
+            // is tried again once in a while instead of staying blank.
+            if (entry.image->getTexture() == 0 &&
+                now - entry.requestedAt > RETRY_AFTER) {
+                entry.requestedAt = now;
+                Image::with(entry.image, url);
+            }
+            entry.users++;
+            entry.lastUsed = now;
+            return entry.image;
+        }
+
+        if (entries.size() >= MAX_ENTRIES && !evictUnused()) {
             if (!capacityWarningShown) {
                 capacityWarningShown = true;
                 brls::Logger::warning(
-                    "kickNX: emote texture pool reached {} entries; new emotes use text fallback",
+                    "kickNX: emote texture pool reached {} entries in use; new emotes use text fallback",
                     MAX_ENTRIES);
             }
             return nullptr;
         }
+
         auto* image = new brls::Image();
         image->setFreeTexture(false);
-        entries.emplace(url, image);
+        Entry entry;
+        entry.image = image;
+        entry.users = 1;
+        entry.lastUsed = now;
+        entry.requestedAt = now;
+        entries.emplace(url, entry);
         Image::with(image, url);
         return image;
     }
 
+    void release(brls::Image* image) {
+        if (!image) return;
+        for (auto& [url, entry] : entries) {
+            if (entry.image != image) continue;
+            if (entry.users > 0) entry.users--;
+            return;
+        }
+    }
+
 private:
+    struct Entry {
+        brls::Image* image = nullptr;
+        size_t users = 0;
+        std::chrono::steady_clock::time_point lastUsed{};
+        std::chrono::steady_clock::time_point requestedAt{};
+    };
+
+    bool evictUnused() {
+        auto oldest = entries.end();
+        for (auto it = entries.begin(); it != entries.end(); ++it) {
+            if (it->second.users > 0) continue;
+            if (oldest == entries.end() ||
+                it->second.lastUsed < oldest->second.lastUsed)
+                oldest = it;
+        }
+        if (oldest == entries.end()) return false;
+
+        // Cancelling stops a pending download and drops this image's hold
+        // on the shared texture cache before the view is deleted.
+        Image::cancel(oldest->second.image);
+        delete oldest->second.image;
+        entries.erase(oldest);
+        return true;
+    }
+
     static constexpr size_t MAX_ENTRIES = 192;
-    std::unordered_map<std::string, brls::Image*> entries;
+    static constexpr auto RETRY_AFTER = std::chrono::seconds(20);
+    std::unordered_map<std::string, Entry> entries;
     bool capacityWarningShown = false;
 };
 
@@ -521,6 +581,8 @@ private:
     };
 
 public:
+    ~KickChatMessageView() override { clearEmotes(); }
+
     /// Docked chat follows the app theme; the overlay on top of the video
     /// keeps its light-on-dark colours.
     void setThemed(bool value) { themed = value; }
@@ -547,7 +609,7 @@ public:
             EmoteVisual visual;
             if (!fragment.emoteUrl.empty())
                 visual.staticImage =
-                    KickEmoteTexturePool::instance().get(
+                    KickEmoteTexturePool::instance().acquire(
                         fragment.emoteUrl);
 
             if (preferences.emoteMode ==
@@ -702,7 +764,9 @@ public:
 
 private:
     void clearEmotes() {
-        // Shared loader views remain alive in the bounded app-lifetime pool.
+        // The shared images stay in the pool; this message stops using them.
+        for (const auto& visual : emoteImages)
+            KickEmoteTexturePool::instance().release(visual.staticImage);
         emoteImages.clear();
     }
 
