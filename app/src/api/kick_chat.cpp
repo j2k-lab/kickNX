@@ -1290,12 +1290,31 @@ void sendChatMessageAsync(
                     "Referer: https://kick.com/",
                 };
 
-                const std::string response = HTTP::post(
-                    "https://kick.com/api/v2/messages/send/" +
-                        percentEncode(chatroom.chatroomId),
-                    body.dump(),
-                    headers,
-                    HTTP::Timeout{15000});
+                // A failed TLS connect means nothing reached Kick, so the
+                // send is retried (twice, a moment apart) without risking a
+                // duplicate message.
+                std::string response;
+                for (int attempt = 1;; ++attempt) {
+                    try {
+                        response = HTTP::post(
+                            "https://kick.com/api/v2/messages/send/" +
+                                percentEncode(chatroom.chatroomId),
+                            body.dump(),
+                            headers,
+                            HTTP::Timeout{15000});
+                        break;
+                    } catch (const std::exception& exception) {
+                        const std::string what = exception.what();
+                        const bool connectFailed =
+                            what.find("SSL connect") != std::string::npos ||
+                            what.find("Couldn't connect") != std::string::npos;
+                        if (!connectFailed || attempt >= 3) {
+                            if (connectFailed) noteConnectionTrouble();
+                            throw;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1500 * attempt));
+                    }
+                }
 
                 const json root = json::parse(response);
                 std::string messageId;

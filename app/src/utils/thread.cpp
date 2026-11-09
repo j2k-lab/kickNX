@@ -4,7 +4,12 @@
 #include "utils/config.hpp"
 #include "api/http.hpp"
 
+#include <memory>
+
 constexpr std::chrono::milliseconds max_idle_time{60000};
+// Thumbnails scrolling in still reuse a connection; a worker idle this long
+// lets its connection go.
+constexpr std::chrono::milliseconds idle_release_time{3000};
 
 #ifdef BOREALIS_USE_STD_THREAD
 size_t ThreadPool::max_thread_num = std::thread::hardware_concurrency();
@@ -36,30 +41,46 @@ void ThreadPool::start(size_t num) {
 
 void *ThreadPool::task_loop(void *ptr) {
     ThreadPool *p = reinterpret_cast<ThreadPool *>(ptr);
-    HTTP s;
-    s.set_pooled(true);
+    auto s = std::make_unique<HTTP>();
+    s->set_pooled(true);
+    bool holdsConnection = false;
     while (!p->isStop.load()) {
         Task task;
+        bool releaseConnection = false;
 
         {
             std::unique_lock<std::mutex> locker(p->taskMutex);
-            p->taskCond.wait_for(locker, std::chrono::milliseconds(max_idle_time),
+            // A worker that just ran a request waits only briefly: the
+            // Switch allows few TLS connections at once, and an idle handle
+            // keeps its last one open, which can leave chat, the viewer
+            // connection or a message send without one.
+            p->taskCond.wait_for(locker,
+                holdsConnection ? idle_release_time : max_idle_time,
                 [p]() { return p->isStop.load() || !p->tasks.empty(); });
 
             if (p->tasks.empty()) {
-                continue;
+                releaseConnection = holdsConnection;
+            } else {
+                task = std::move(p->tasks.front());
+                p->tasks.pop_front();
             }
+        }
 
-            task = std::move(p->tasks.front());
-            p->tasks.pop_front();
+        if (releaseConnection) {
+            // A fresh handle; the old one's cleanup closes its connection.
+            s = std::make_unique<HTTP>();
+            s->set_pooled(true);
+            holdsConnection = false;
+            continue;
         }
 
         if (task) {
             try {
-                task(s);
+                task(*s);
             } catch (const std::exception &ex) {
                 brls::Logger::error("error: pool task {}", ex.what());
             }
+            holdsConnection = true;
         }
     }
 
