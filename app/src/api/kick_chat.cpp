@@ -6,6 +6,7 @@
 #include "api/kick_rewards.hpp"
 #include "api/raw_websocket.hpp"
 #include "utils/misc.hpp"
+#include "utils/network_state.hpp"
 #include "utils/thread.hpp"
 
 #include <borealis.hpp>
@@ -1305,6 +1306,10 @@ void sendChatMessageAsync(
                 std::string response;
                 for (int attempt = 1;; ++attempt) {
                     try {
+                        // A short Wi-Fi drop delays the message rather than
+                        // losing it.
+                        if (!kicknx::network::waitUntilOnline(std::chrono::seconds(12)))
+                            throw std::runtime_error("No internet connection");
                         response = HTTP::post(
                             "https://kick.com/api/v2/messages/send/" +
                                 percentEncode(chatroom.chatroomId),
@@ -1534,6 +1539,7 @@ void ChatClient::chattersRun() {
 
         // The chatter count is optional; skip it while connections fail.
         if (!targetId.empty() &&
+            kicknx::network::online() &&
             !connectionTroubleWithin(std::chrono::seconds(60))) {
             const int count = fetchActiveChattersCount(targetId, cancelRequests);
             if (count > 0 && chattersCallback && !stopRequested.load()) {
@@ -1555,6 +1561,14 @@ void ChatClient::run() {
 
     while (!stopRequested.load()) {
         try {
+            // With no network every step fails at once. Wait for it, so a
+            // Wi-Fi drop is one reconnect instead of a burst of failures.
+            if (!kicknx::network::online()) {
+                if (statusCallback) statusCallback("Waiting for network…");
+                kicknx::network::waitUntilOnline(std::chrono::seconds(60), &stopRequested);
+                if (stopRequested.load()) break;
+                retrySeconds = 1;
+            }
             if (statusCallback) statusCallback("Connecting to Kick chat…");
 
             const KickChatroomInfo chatroom = resolveKickChatroom(channel, cancelRequests);
@@ -1603,6 +1617,7 @@ void ChatClient::run() {
 
         if (stopRequested.load()) break;
         // Waits in short steps so stop() is not held up by a retry delay.
+        const int retryTicks = kicknx::network::online() ? retrySeconds * 10 : 0;
         for (int tick = 0;
              tick < retryTicks && !stopRequested.load();
              ++tick)

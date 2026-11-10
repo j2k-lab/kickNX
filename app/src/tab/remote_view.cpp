@@ -1,5 +1,6 @@
 #include "tab/remote_view.hpp"
 #include "utils/debug_log.hpp"
+#include "utils/network_state.hpp"
 #include "view/recycling_grid.hpp"
 #include "view/svg_image.hpp"
 #include "view/video_view.hpp"
@@ -1686,6 +1687,10 @@ struct KickPlaybackRecoveryState {
     std::atomic_int decoderMode{
         static_cast<int>(kick::DecoderMode::Software)};
     std::atomic_int attempt{0};
+    // Recovery waits for the network rather than spending attempts on a
+    // Wi-Fi drop, where every request fails at once.
+    std::atomic_bool waitingForNetwork{false};
+    std::atomic_int networkWaitSeconds{0};
     std::atomic_int reconfigCount{0};
     std::atomic_uint restoreGeneration{0};
     std::chrono::steady_clock::time_point lastLoadedAt{};
@@ -1971,6 +1976,30 @@ void watchKickStreamOffline(
     });
 }
 
+// Long enough for the Wi-Fi to come back; after this the usual attempts run,
+// so the player cannot wait forever.
+constexpr int KICK_NETWORK_WAIT_SECONDS = 120;
+
+// True while there is no network and recovery will resume by itself once
+// there is, so the caller should stop here.
+bool waitForNetworkFirst(const std::shared_ptr<KickPlaybackRecoveryState>& state) {
+    if (kicknx::network::online()) {
+        state->networkWaitSeconds.store(0);
+        return false;
+    }
+    if (state->networkWaitSeconds.load() >= KICK_NETWORK_WAIT_SECONDS) return false;
+
+    bool expected = false;
+    if (!state->waitingForNetwork.compare_exchange_strong(expected, true)) return true;
+    brls::delay(1000, [state]() {
+        state->waitingForNetwork.store(false);
+        if (!state->alive.load() || !state->recovering.load()) return;
+        state->networkWaitSeconds.fetch_add(1);
+        performKickPlaybackRecovery(state, state->attempt.load());
+    });
+    return true;
+}
+
 void finishKickRecoveryFailure(
     const std::shared_ptr<KickPlaybackRecoveryState>& state,
     const std::string& error) {
@@ -1988,6 +2017,7 @@ void scheduleKickPlaybackRetry(
     const std::shared_ptr<KickPlaybackRecoveryState>& state,
     const std::string& error) {
     if (!state || !state->alive.load() || state->offlineHandled.load()) return;
+    if (waitForNetworkFirst(state)) return;
     checkKickStreamOffline(state);
 
     bool expected = false;
@@ -2124,6 +2154,7 @@ void performKickPlaybackRecovery(
     const std::shared_ptr<KickPlaybackRecoveryState>& state,
     int attempt) {
     if (!state || !state->alive.load() || state->offlineHandled.load()) return;
+    if (waitForNetworkFirst(state)) return;
 
     const kick::DecoderMode mode = kick::loadDecoderMode();
     state->decoderMode.store(static_cast<int>(mode));
@@ -2249,6 +2280,7 @@ bool requestKickPlaybackRecovery(
     bool expected = false;
     if (state->recovering.compare_exchange_strong(expected, true)) {
         state->attempt.store(0);
+        state->networkWaitSeconds.store(0);
         state->retryScheduled.store(false);
         state->restoreGeneration.fetch_add(1);
 

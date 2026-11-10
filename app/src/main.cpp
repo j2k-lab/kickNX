@@ -3,6 +3,7 @@
 #include "utils/config.hpp"
 #include "utils/thread.hpp"
 #include "utils/debug_log.hpp"
+#include "utils/network_state.hpp"
 #include "utils/orientation.hpp"
 #include "utils/theme.hpp"
 
@@ -48,6 +49,7 @@ int main(int argc, char* argv[]) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 #endif
+    kicknx::network::holdConnection();
     if (argc > 0) updater::setNroPath(argv[0]);
     std::vector<std::string> items;
     for (int i = 1; i < argc; i++) {

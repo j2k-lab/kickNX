@@ -5,6 +5,7 @@
 #include "api/kick_playlist.hpp"
 #include "api/raw_websocket.hpp"
 #include "utils/thread.hpp"
+#include "utils/network_state.hpp"
 
 #include <borealis.hpp>
 #include <nlohmann/json.hpp>
@@ -256,7 +257,7 @@ bool WatchSession::waitFor(std::chrono::seconds duration, bool wakeOnRefresh) {
 void WatchSession::checkReward(Clock::time_point& nextRewardCheck) {
     refreshRequested.store(false);
     const auto now = Clock::now();
-    if (connectionTroubleWithin(TROUBLE_WINDOW)) {
+    if (connectionTroubleWithin(TROUBLE_WINDOW) || !kicknx::network::online()) {
         nextRewardCheck = now + std::chrono::seconds(60);
         return;
     }
@@ -381,7 +382,7 @@ void WatchSession::watch(Clock::time_point& nextRewardCheck) {
     while (!stopRequested.load()) {
         const auto now = Clock::now();
         if (now >= nextReport) {
-            if (connectionTroubleWithin(TROUBLE_WINDOW)) {
+            if (connectionTroubleWithin(TROUBLE_WINDOW) || !kicknx::network::online()) {
                 setCounting(false);
                 nextReport = now + std::chrono::seconds(30);
             } else {
