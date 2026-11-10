@@ -7,9 +7,10 @@
 #include <memory>
 
 constexpr std::chrono::milliseconds max_idle_time{60000};
-// Thumbnails scrolling in still reuse a connection; a worker idle this long
-// lets its connection go.
-constexpr std::chrono::milliseconds idle_release_time{3000};
+// A worker idle this long lets its connection go. Long enough that chat
+// emotes arriving every few seconds reuse a connection, because each new one
+// costs a TLS handshake while the stream is playing.
+constexpr std::chrono::milliseconds idle_release_time{10000};
 
 #ifdef BOREALIS_USE_STD_THREAD
 size_t ThreadPool::max_thread_num = std::thread::hardware_concurrency();
@@ -44,6 +45,7 @@ void *ThreadPool::task_loop(void *ptr) {
     auto s = std::make_unique<HTTP>();
     s->set_pooled(true);
     bool holdsConnection = false;
+    uint64_t seenRelease = 0;
     while (!p->isStop.load()) {
         Task task;
         bool releaseConnection = false;
@@ -56,9 +58,16 @@ void *ThreadPool::task_loop(void *ptr) {
             // connection or a message send without one.
             p->taskCond.wait_for(locker,
                 holdsConnection ? idle_release_time : max_idle_time,
-                [p]() { return p->isStop.load() || !p->tasks.empty(); });
+                [p, seenRelease]() {
+                    return p->isStop.load() || !p->tasks.empty() ||
+                        p->releaseGeneration != seenRelease;
+                });
 
-            if (p->tasks.empty()) {
+            const bool releaseAsked = p->releaseGeneration != seenRelease;
+            seenRelease = p->releaseGeneration;
+            // A release comes before any waiting task, which the next pass
+            // picks up.
+            if (releaseAsked || p->tasks.empty()) {
                 releaseConnection = holdsConnection;
             } else {
                 task = std::move(p->tasks.front());

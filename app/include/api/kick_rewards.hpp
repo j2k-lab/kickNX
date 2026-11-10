@@ -34,7 +34,7 @@ struct DailyReward {
     int64_t resetsAt = 0;
 
     /// When Kick reported `progress`, and whether watch time has been
-    /// counting since (the viewer connection is open). Lets the display
+    /// counting since (watch reports are reaching Kick). Lets the display
     /// count up minute by minute between checks.
     std::chrono::steady_clock::time_point fetchedAt{};
     bool counting = false;
@@ -84,8 +84,9 @@ void noteConnectionTrouble();
 bool connectionTroubleWithin(std::chrono::seconds window);
 
 /// One background thread per live stream that, one request at a time:
-///  - keeps Kick's viewer connection open, so the watch time counts toward
-///    the Daily Reward (only when countWatchTime is set), and
+///  - reports watching to Kick every 2 minutes over a brief connection, so
+///    the time counts toward the Daily Reward (only when countWatchTime
+///    is set), and
 ///  - checks the Daily Reward every few minutes.
 /// It starts 25 seconds after the stream opens, after playback and chat.
 class WatchSession {
@@ -120,6 +121,7 @@ private:
     std::optional<DailyReward> lastReward;
     bool viewerConnected = false;
     void reportReward();
+    void setCounting(bool counting);
     std::shared_ptr<std::atomic_bool> cancelRequests =
         std::make_shared<std::atomic_bool>(false);
     std::mutex wakeMutex;

@@ -72,8 +72,7 @@ struct ChatPreferences {
     int dockedWidth = 330;
     int overlayWidth = 360;
     bool timestamps = false;
-    /// Keep Kick's viewer connection open so watching counts toward the
-    /// Daily Reward.
+    /// Report watching to Kick so it counts toward the Daily Reward.
     bool watchRewards = true;
 };
 

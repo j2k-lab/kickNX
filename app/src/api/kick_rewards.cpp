@@ -27,11 +27,8 @@ constexpr const char* VIEWER_TOKEN_URL = "https://websockets.kick.com/viewer/v1/
 constexpr const char* VIEWER_CONNECT_URL = "wss://websockets.kick.com/viewer/v1/connect";
 constexpr const char* CHALLENGES_URL = "https://web.kick.com/api/v1/gamification/challenges";
 
-// The timings kick.com uses: a channel check-in every 15 seconds, a ping every
-// 30, and a watch event every 120 (Kick's global settings give 120 for
+// How often kick.com reports watching (Kick's global settings give 120 for
 // "tracking.user.watch.livestream").
-constexpr auto HANDSHAKE_EVERY = std::chrono::seconds(15);
-constexpr auto PING_EVERY = std::chrono::seconds(30);
 constexpr auto WATCH_EVENT_EVERY = std::chrono::seconds(120);
 
 // Background work waits for the stream and chat to finish connecting.
@@ -299,6 +296,22 @@ void WatchSession::reportReward() {
     onReward(reward);
 }
 
+void WatchSession::setCounting(bool counting) {
+    if (viewerConnected == counting) return;
+    if (lastReward) {
+        DailyReward& reward = *lastReward;
+        if (!counting) {
+            // The estimate so far becomes the new starting point.
+            reward.counting = true;
+            reward.progress = reward.estimatedProgress();
+            reward.counting = false;
+        }
+        reward.fetchedAt = Clock::now();
+    }
+    viewerConnected = counting;
+    reportReward();
+}
+
 void WatchSession::watch(Clock::time_point& nextRewardCheck) {
     const OAuthSession session = loadOAuth();
     const HTTP::Header headers = kickHeaders(session.accessToken);
@@ -324,42 +337,7 @@ void WatchSession::watch(Clock::time_point& nextRewardCheck) {
 
     HTTP::Header tokenHeaders = headers;
     tokenHeaders.push_back(std::string("X-CLIENT-TOKEN: ") + VIEWER_CLIENT_TOKEN);
-    const json tokenRoot = json::parse(HTTP::get(
-        VIEWER_TOKEN_URL, tokenHeaders, HTTP::Timeout{10000}, cancelRequests));
-    const std::string token = jsonString(dataOf(tokenRoot), "token");
-    if (token.empty()) throw std::runtime_error("Kick sent no viewer token");
 
-    RawWebSocket socket(
-        std::string(VIEWER_CONNECT_URL) + "?token=" + percentEncode(token),
-        stopRequested);
-
-    // While connected, the display counts watch minutes itself. When the
-    // connection ends, the estimate so far becomes the new starting point.
-    struct ConnectedFlag {
-        WatchSession& session;
-        explicit ConnectedFlag(WatchSession& value) : session(value) {
-            session.viewerConnected = true;
-            if (session.lastReward) session.lastReward->fetchedAt = Clock::now();
-            session.reportReward();
-        }
-        ~ConnectedFlag() {
-            if (session.lastReward) {
-                DailyReward& reward = *session.lastReward;
-                reward.counting = true;
-                reward.progress = reward.estimatedProgress();
-                reward.counting = false;
-                reward.fetchedAt = Clock::now();
-            }
-            session.viewerConnected = false;
-            session.reportReward();
-        }
-    } connectedFlag(*this);
-
-    const auto send = [&socket](const char* type, const json& data) {
-        json message = {{"type", type}};
-        if (!data.is_null()) message["data"] = data;
-        socket.sendText(message.dump());
-    };
     const json channelMessage = {{"message", {{"channelId", channelIdText}}}};
     const json watchMessage = {{"message",
         {{"name", "tracking.user.watch.livestream"},
@@ -367,42 +345,73 @@ void WatchSession::watch(Clock::time_point& nextRewardCheck) {
          {"livestream_id", livestreamId},
          {"vod_id", vodId}}}};
 
-    send("channel_handshake", channelMessage);
-    send("user_event", watchMessage);
-    auto lastHandshake = Clock::now();
-    auto lastPing = lastHandshake;
-    auto lastWatchEvent = lastHandshake;
+    // A connection held open for the whole stream took one of the Switch's
+    // few TLS connections from chat and message sends. Instead, connect only
+    // long enough to report each watch event, then let it go.
+    const auto reportWatching = [&]() {
+        ThreadPool::instance().releaseIdleConnections();
 
-    const auto tick = [&]() {
-        const auto now = Clock::now();
-        if (now - lastHandshake >= HANDSHAKE_EVERY) {
-            send("channel_handshake", channelMessage);
-            lastHandshake = now;
-        }
-        if (now - lastPing >= PING_EVERY) {
-            send("ping", json());
-            lastPing = now;
-        }
-        if (now - lastWatchEvent >= WATCH_EVENT_EVERY) {
-            send("user_event", watchMessage);
-            lastWatchEvent = now;
-        }
-        // Reward checks share this thread, so at most one extra request is
-        // ever in flight next to the stream and chat.
-        if (refreshRequested.load() || now >= nextRewardCheck)
-            checkReward(nextRewardCheck);
-    };
+        const json tokenRoot = json::parse(HTTP::get(
+            VIEWER_TOKEN_URL, tokenHeaders, HTTP::Timeout{10000}, cancelRequests));
+        const std::string token = jsonString(dataOf(tokenRoot), "token");
+        if (token.empty()) throw std::runtime_error("Kick sent no viewer token");
 
-    std::string frame;
-    while (!stopRequested.load()) {
-        // Replies (pongs, acknowledgements) carry nothing kickNX needs.
-        if (!socket.nextText(frame, stopRequested, tick, std::chrono::seconds(1))) break;
-    }
-
-    try {
+        RawWebSocket socket(
+            std::string(VIEWER_CONNECT_URL) + "?token=" + percentEncode(token),
+            stopRequested);
+        const auto send = [&socket](const char* type, const json& data) {
+            socket.sendText(json({{"type", type}, {"data", data}}).dump());
+        };
+        send("channel_handshake", channelMessage);
+        send("user_event", watchMessage);
+        // Gives Kick a moment to take the event before the connection ends.
+        waitFor(std::chrono::seconds(2), false);
         send("channel_disconnect", channelMessage);
         socket.close();
-    } catch (...) {
+    };
+
+    // Whatever ends this, the display stops counting with it.
+    struct StopCounting {
+        WatchSession& session;
+        ~StopCounting() { session.setCounting(false); }
+    } stopCounting{*this};
+
+    auto nextReport = Clock::now();
+    int failures = 0;
+    while (!stopRequested.load()) {
+        const auto now = Clock::now();
+        if (now >= nextReport) {
+            if (connectionTroubleWithin(TROUBLE_WINDOW)) {
+                setCounting(false);
+                nextReport = now + std::chrono::seconds(30);
+            } else {
+                try {
+                    reportWatching();
+                    failures = 0;
+                    setCounting(true);
+                    nextReport = Clock::now() + WATCH_EVENT_EVERY;
+                } catch (const std::exception& exception) {
+                    if (stopRequested.load()) return;
+                    const std::string what = exception.what();
+                    if (what.find("SSL") != std::string::npos ||
+                        what.find("resolve") != std::string::npos)
+                        noteConnectionTrouble();
+                    brls::Logger::warning("kickNX: viewer check-in: {}", what);
+                    setCounting(false);
+                    failures = std::min(failures + 1, 4);
+                    nextReport = Clock::now() + std::chrono::seconds(60 * failures);
+                }
+            }
+        }
+
+        // Reward checks share this thread, so at most one extra request is
+        // ever in flight next to the stream and chat.
+        if (refreshRequested.load() || Clock::now() >= nextRewardCheck)
+            checkReward(nextRewardCheck);
+
+        const auto wake = std::min(nextReport, nextRewardCheck);
+        const auto left = std::chrono::duration_cast<std::chrono::seconds>(wake - Clock::now());
+        if (!waitFor(std::max(std::chrono::seconds(1), left))) return;
     }
 }
 
@@ -444,7 +453,8 @@ void WatchSession::run() {
             if (stopRequested.load()) break;
             const std::string what = exception.what();
             if (what.find("SSL") != std::string::npos ||
-                what.find("connect") != std::string::npos)
+                what.find("connect") != std::string::npos ||
+                what.find("resolve") != std::string::npos)
                 noteConnectionTrouble();
             brls::Logger::warning("kickNX: viewer connection: {}", what);
         } catch (...) {

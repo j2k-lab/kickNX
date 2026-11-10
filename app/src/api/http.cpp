@@ -2,8 +2,11 @@
 #include "utils/config.hpp"
 #include <borealis/core/logger.hpp>
 #include <curl/curl.h>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <thread>
 #if defined(BOREALIS_USE_GXM)
 #include <mbedtls/platform.h>
 #include <psp2/gxm.h>
@@ -128,7 +131,54 @@ TransferGate& imageTransfers() {
     return gate;
 }
 
+std::atomic_int priorityRequests{0};
+
+// Bounded, so a stuck send can never stop images for good.
+void waitForPriorityRequests(const HTTP::Cancel& cancel) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (priorityRequests.load() > 0 &&
+           std::chrono::steady_clock::now() < deadline &&
+           !(cancel && cancel->load()))
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+}
+
+std::mutex shareLocks[CURL_LOCK_DATA_LAST];
+
+void lockShare(CURL*, curl_lock_data data, curl_lock_access, void*) {
+    shareLocks[data].lock();
+}
+
+void unlockShare(CURL*, curl_lock_data data, void*) {
+    shareLocks[data].unlock();
+}
+
+// One DNS cache for every handle. API calls and chat connections each use a
+// brand-new handle, so with per-handle caches every one of them repeated the
+// lookup. Lives for the whole app, so handles can never outlast it.
+CURLSH* sharedDns() {
+    static CURLSH* share = []() {
+        CURLSH* created = curl_share_init();
+        if (created) {
+            curl_share_setopt(created, CURLSHOPT_LOCKFUNC, lockShare);
+            curl_share_setopt(created, CURLSHOPT_UNLOCKFUNC, unlockShare);
+            curl_share_setopt(created, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+        }
+        return created;
+    }();
+    return share;
+}
+
 }  // namespace
+
+HTTP::PriorityRequest::PriorityRequest() { priorityRequests.fetch_add(1); }
+HTTP::PriorityRequest::~PriorityRequest() { priorityRequests.fetch_sub(1); }
+
+void HTTP::shareDnsCache(void* easy) {
+    if (!easy) return;
+    if (CURLSH* share = sharedDns()) curl_easy_setopt(easy, CURLOPT_SHARE, share);
+    // Kick's hosts publish a 5 minute lifetime; libcurl's default is 1.
+    curl_easy_setopt(easy, CURLOPT_DNS_CACHE_TIMEOUT, 300L);
+}
 
 /// @brief curl context
 
@@ -142,11 +192,8 @@ HTTP::HTTP() : chunk(nullptr) {
             CURLcode rc = curl_global_init(CURL_GLOBAL_ALL);
             brls::Logger::debug("curl global init {}", std::to_string(rc));
 #endif
-            // Each ThreadPool worker owns one persistent easy handle. Keep its
-            // DNS cache private to that worker instead of sharing a CURLSH DNS
-            // cache across threads. libcurl requires explicit lock/unlock
-            // callbacks for cross-thread shared data; the old unlocked share
-            // could corrupt the host cache during concurrent image requests.
+            // Handles on different threads share one DNS cache; sharedDns()
+            // gives it the lock callbacks libcurl requires for that.
         }
         ~Global() {
             curl_global_cleanup();
@@ -160,6 +207,20 @@ HTTP::HTTP() : chunk(nullptr) {
     this->easy = curl_easy_init();
     global.init_lock.unlock();
 
+    configureHandle();
+}
+
+void HTTP::dropConnection() {
+    if (this->chunk != nullptr) curl_slist_free_all(this->chunk);
+    this->chunk = nullptr;
+    // Cleaning up the handle is what closes its kept-open connection.
+    if (this->easy != nullptr) curl_easy_cleanup(this->easy);
+    this->easy = curl_easy_init();
+    configureHandle();
+}
+
+void HTTP::configureHandle() {
+    shareDnsCache(this->easy);
     curl_easy_setopt(this->easy, CURLOPT_USERAGENT, user_agent.c_str());
     curl_easy_setopt(this->easy, CURLOPT_FOLLOWLOCATION, 1L);
     // enable all supported built-in compressions
@@ -235,6 +296,7 @@ int HTTP::perform(std::ostream* body) {
     curl_easy_setopt(this->easy, CURLOPT_PROXY, PROXY_STATUS ? PROXY.c_str() : nullptr);
 
     CURLcode res = CURLE_ABORTED_BY_CALLBACK;
+    if (pooled) waitForPriorityRequests(is_cancel);
     if (pooled) imageTransfers().acquire();
     allTransfers().acquire();
     // A thumbnail scrolled away while waiting for a slot is skipped.

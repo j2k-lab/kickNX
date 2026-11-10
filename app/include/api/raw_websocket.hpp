@@ -3,6 +3,8 @@
 // A minimal TLS WebSocket client over libcurl's CONNECT_ONLY mode, shared by
 // Kick chat and the viewer (watch time) connection.
 
+#include "api/http.hpp"
+
 #include <curl/curl.h>
 
 #include <array>
@@ -78,6 +80,7 @@ public:
 
         easy = curl_easy_init();
         if (!easy) throw std::runtime_error("Could not initialize chat transport");
+        HTTP::shareDnsCache(easy);
 
         // A constructor that throws never reaches the destructor, so free the
         // handle (and its TLS connection) here when connecting fails.
@@ -104,14 +107,13 @@ public:
     bool nextText(
         std::string& text,
         std::atomic_bool& stopRequested,
-        const std::function<void()>& onIdleTick = nullptr,
-        std::chrono::seconds tickEvery = std::chrono::seconds(50)) {
+        const std::function<void()>& onIdleTick = nullptr) {
         auto lastPingCheck = std::chrono::steady_clock::now();
         while (!stopRequested.load()) {
             if (parseFrames(text)) return true;
 
             const auto now = std::chrono::steady_clock::now();
-            if (onIdleTick && now - lastPingCheck >= tickEvery) {
+            if (onIdleTick && now - lastPingCheck >= std::chrono::seconds(50)) {
                 lastPingCheck = now;
                 onIdleTick();
             }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -29,6 +30,17 @@ public:
         this->taskCond.notify_one();
     }
 
+    /// Makes every worker close its kept-open connection now (a busy worker
+    /// does so when its current task ends), freeing TLS connections for a
+    /// request that must not fail.
+    void releaseIdleConnections() {
+        {
+            std::lock_guard<std::mutex> locker(this->taskMutex);
+            ++this->releaseGeneration;
+        }
+        this->taskCond.notify_all();
+    }
+
     /// @brief 创建线程
     void start(size_t num);
 
@@ -52,6 +64,7 @@ private:
     std::mutex threadMutex;
     std::list<Task> tasks;
     std::mutex taskMutex;
+    uint64_t releaseGeneration = 0;
     std::condition_variable taskCond;
     std::atomic_bool isStop;
 };

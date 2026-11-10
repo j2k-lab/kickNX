@@ -79,7 +79,8 @@ public:
             // A download that failed (often right after the Switch wakes)
             // is tried again once in a while instead of staying blank.
             if (entry.image->getTexture() == 0 &&
-                now - entry.requestedAt > RETRY_AFTER) {
+                now - entry.requestedAt > RETRY_AFTER &&
+                !kick::connectionTroubleWithin(std::chrono::seconds(60))) {
                 entry.requestedAt = now;
                 Image::with(entry.image, url);
             }
@@ -146,7 +147,7 @@ private:
     }
 
     static constexpr size_t MAX_ENTRIES = 192;
-    static constexpr auto RETRY_AFTER = std::chrono::seconds(20);
+    static constexpr auto RETRY_AFTER = std::chrono::seconds(60);
     std::unordered_map<std::string, Entry> entries;
     bool capacityWarningShown = false;
 };
@@ -2805,7 +2806,7 @@ public:
 
         if (chatUi) chatUi->alive.store(false);
         stopChat();
-        // Closes the viewer connection with the stream.
+        // Watch reports and reward checks end with the stream.
         watchSession.reset();
         resetPlayerVideoLayout();
 

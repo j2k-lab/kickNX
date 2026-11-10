@@ -1258,7 +1258,7 @@ void sendChatMessageAsync(
     ErrorCallback failure) {
     ThreadPool::instance().submit(
         [channel, message, success = std::move(success),
-            failure = std::move(failure)](HTTP&) mutable {
+            failure = std::move(failure)](HTTP& worker) mutable {
             try {
                 const std::string normalized = normalizeChannel(channel);
                 if (normalized.empty())
@@ -1273,6 +1273,15 @@ void sendChatMessageAsync(
                 if (session.accessToken.empty())
                     throw std::runtime_error(
                         "Sending Kick chat messages requires a Bearer token in oauth.json");
+
+                // Make room first: a send needs one new TLS connection, and
+                // with the Switch's few already taken it fails and can starve
+                // the stream too. Idle image connections close, and no new
+                // image downloads start until the message has gone.
+                const HTTP::PriorityRequest priority;
+                ThreadPool::instance().releaseIdleConnections();
+                worker.dropConnection();
+                std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
                 // Sending needs only the chatroom ID, not a chat connection.
                 const KickChannelIds chatroom = fetchChannelIds(normalized, nullptr);
@@ -1579,7 +1588,9 @@ void ChatClient::run() {
             if (stopRequested.load()) break;
             // Tells optional background work (rewards, watch time) to hold
             // off while connections are failing.
-            if (std::string(exception.what()).find("SSL") != std::string::npos)
+            const std::string what = exception.what();
+            if (what.find("SSL") != std::string::npos ||
+                what.find("resolve") != std::string::npos)
                 noteConnectionTrouble();
             if (statusCallback)
                 statusCallback(
@@ -1593,7 +1604,7 @@ void ChatClient::run() {
         if (stopRequested.load()) break;
         // Waits in short steps so stop() is not held up by a retry delay.
         for (int tick = 0;
-             tick < retrySeconds * 10 && !stopRequested.load();
+             tick < retryTicks && !stopRequested.load();
              ++tick)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         retrySeconds = std::min(retrySeconds * 2, 20);

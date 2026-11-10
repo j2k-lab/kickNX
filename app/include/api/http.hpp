@@ -33,6 +33,24 @@ public:
     HTTP(const HTTP& other) = delete;
     ~HTTP();
 
+    /// While one exists, background image downloads wait, so a request that
+    /// must not fail (sending a chat message) is not competing for a TLS
+    /// connection.
+    class PriorityRequest {
+    public:
+        PriorityRequest();
+        ~PriorityRequest();
+        PriorityRequest(const PriorityRequest&) = delete;
+        PriorityRequest& operator=(const PriorityRequest&) = delete;
+    };
+
+    /// Closes any connection this handle kept open.
+    void dropConnection();
+
+    /// Points a curl handle at the app-wide DNS cache, so a new connection
+    /// does not repeat a lookup another one just made.
+    static void shareDnsCache(void* easy);
+
     static std::string encode_form(const Form& form);
     void _get(const std::string& url, std::ostream* out);
     std::string _post(const std::string& url, const std::string& data);
@@ -84,6 +102,8 @@ public:
     inline static long TIMEOUT = 3000L;
 
 private:
+    void configureHandle();
+
     static size_t easy_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata);
     static int easy_progress_cb(
         void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);
