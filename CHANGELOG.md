@@ -23,6 +23,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 - **Daily Reward bar**: while you watch a live stream signed in, a bar above chat shows your progress toward Kick's daily watch reward (for example 38 / 60 min), counting up smoothly. When it is full, press the right stick to claim it, and a window shows the collectible you got (or that it was a duplicate). The bar hides once the day's reward is claimed.
 - **Gift button on Home**: when signed in, a gift icon in the Home banner opens a small window with your daily reward progress, a Claim button when it is ready, or the time until it resets.
 - **Count watch time for rewards**: a new Player Settings switch turns watch time reporting off.
+- **Stream thumbnails for followed channels**: live cards in Followed channels show the stream's thumbnail, like the other rows, instead of the streamer's profile picture. Kick's followed list has no thumbnails, so kickNX looks them up one by one in the background after Home loads, showing the kickNX placeholder until each arrives, and keeps them for 3 minutes.
 
 ### Changed
 - **Watch time check-ins**: kickNX tells Kick you are watching in a brief check-in every 2 minutes, instead of keeping a connection open for the whole stream.
@@ -35,6 +36,9 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 - **Emote pictures turning into text**: after watching several channels, new chat emotes showed as text because the picture pool never freed old entries.
 - **SSL errors when sending**: sending a message could fail with an SSL error, or make the stream buffer, when the Switch ran out of secure connections. Sends now make room first and retry if the connection could not be opened.
 - **Fewer DNS lookups**: all connections share one DNS cache.
+- **Stretched thumbnails**: stream and clip cards, and the Home banner, stretched 16:9 thumbnails across the card. They now keep their shape, trimming a little off the top and bottom like VOD cards.
+- **Blurry live event cards**: event cards used Kick's 64x64 event logo. They now show the event's 16:9 promo banner, at 640 pixels wide.
+- **Offline channel cards**: offline channels' square profile pictures were cropped and enlarged to fill the card. They now show whole, in a square box.
 
 ## [0.5.1]
 

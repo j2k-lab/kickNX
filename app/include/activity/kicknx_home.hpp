@@ -50,6 +50,11 @@ private:
     void openEvent(const kick::LiveEvent& event);
     void playChannel(const kick::Stream& stream);
     void updateHero(const kick::Stream& stream);
+    /// Fills in cached stream thumbnails and returns the live channels that
+    /// still need one looked up.
+    std::vector<std::string> useCachedThumbnails(std::vector<kick::Stream>& streams);
+    /// Looks up stream thumbnails for live followed cards in the background.
+    void loadFollowedThumbnails(std::vector<std::string> logins);
     void clearHero();
     void showHomeData(kick::HomeData data);
 
@@ -106,6 +111,9 @@ private:
     KickRow* searchRow = nullptr;
 
     HTTP::Cancel activeRequest;
+    HTTP::Cancel thumbnailRequest = std::make_shared<std::atomic_bool>(false);
+    std::shared_ptr<std::atomic_bool> alive = std::make_shared<std::atomic_bool>(true);
+    std::string heroLogin;
     uint64_t requestGeneration = 0;
 
     std::string followedCursor;

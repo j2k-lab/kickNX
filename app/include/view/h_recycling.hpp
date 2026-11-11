@@ -28,6 +28,8 @@ public:
     void reloadData();
     void notifyDataChanged();
     void selectRowAt(size_t index, bool animated);
+    /// Calls `visit` for each cell currently placed in the row.
+    void forEachCell(const std::function<void(RecyclingGridItem*)>& visit);
     float getWidthByCellIndex(size_t index, size_t start = 0);
 
     /// 导航到页面尾部时触发回调函数

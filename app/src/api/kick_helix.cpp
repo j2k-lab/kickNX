@@ -975,7 +975,16 @@ EventPage getEvents(
         event.categoryName = jsonString(jsonChild(item, "category"), "name");
 
         const json& assets = jsonChild(item, "assets");
-        event.thumbnailUrl = jsonString(assets, "thumbnail", jsonString(assets, "banner"));
+        // The event "thumbnail" is a 64x64 logo, too small for a card. The
+        // 16:9 promo banner fits the card; it is a 2 MB PNG at 1920x1080, so
+        // ask Kick's image server for a 640-wide copy (about 50 KB).
+        const std::string promoBanner = jsonString(assets, "promo_banner");
+        if (!promoBanner.empty()) {
+            event.thumbnailUrl = promoBanner +
+                (promoBanner.find('?') == std::string::npos ? "?width=640" : "&width=640");
+        } else {
+            event.thumbnailUrl = jsonString(assets, "thumbnail", jsonString(assets, "banner"));
+        }
         event.bannerUrl = jsonString(assets, "banner", event.thumbnailUrl);
 
         const json& organiser = jsonChild(item, "organiser");
@@ -2299,6 +2308,39 @@ void loadCategoryStreamsPageAsync(
         },
         std::move(success), std::move(failure), std::move(cancel),
         "Unknown category request error");
+}
+
+void loadLiveThumbnailsAsync(
+    const Config& config,
+    std::vector<std::string> logins,
+    std::function<void(const std::string& login, const std::string& url)> found,
+    HTTP::Cancel cancel) {
+    if (logins.empty()) return;
+    ThreadPool::instance().submit(
+        [config, logins = std::move(logins), found = std::move(found), cancel = std::move(cancel)](HTTP&) {
+            try {
+                OAuthSession session = ensureOAuth(config);
+                SharedConnection connection;
+                for (const auto& login : logins) {
+                    if (cancel && cancel->load()) return;
+                    try {
+                        const json root = json::parse(kickGet(config, session,
+                            "https://kick.com/api/v2/channels/" + percentEncode(login) + "/livestream", cancel));
+                        if (!root.contains("data") || !root["data"].is_object()) continue;
+                        const json& data = root["data"];
+                        if (!data.contains("thumbnail")) continue;
+                        const std::string url = jsonImageUrl(data["thumbnail"]);
+                        if (url.empty()) continue;
+                        brls::sync([found, login, url]() { found(login, url); });
+                    } catch (const std::exception& error) {
+                        if (cancel && cancel->load()) return;
+                        brls::Logger::warning("Kick live thumbnail for {} failed: {}", login, error.what());
+                    }
+                }
+            } catch (const std::exception& error) {
+                brls::Logger::warning("Kick live thumbnails failed: {}", error.what());
+            }
+        });
 }
 
 void loadFollowedPageAsync(

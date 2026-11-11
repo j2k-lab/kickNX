@@ -24,6 +24,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
+#include <unordered_map>
 #include <functional>
 #include <fmt/format.h>
 #include <memory>
@@ -380,6 +382,10 @@ public:
         picture = new brls::Image();
         picture->setHeight(142);
         picture->setWidthPercentage(100);
+        // FIT resizes the view to the picture's shape, but row cards keep a
+        // fixed size, so FIT stretched 16:9 thumbnails across the card. FILL
+        // keeps the shape and trims the top and bottom, like VOD cards.
+        picture->setScalingType(brls::ImageScalingType::FILL);
         picture->setImageFromRes("img/video-card-bg.png");
         this->addView(picture);
 
@@ -421,6 +427,19 @@ public:
     }
 
     ~StreamCell() override { Image::cancel(picture); }
+
+    /// Offline channels only have a square profile picture. Filling the wide
+    /// card with it crops and enlarges it, so it gets a square box at the
+    /// card's height instead, centred on the card.
+    void setSquarePicture(bool square) {
+        if (square) {
+            picture->setWidth(142);
+            picture->setAlignSelf(brls::AlignSelf::CENTER);
+        } else {
+            picture->setWidthPercentage(100);
+            picture->setAlignSelf(brls::AlignSelf::AUTO);
+        }
+    }
 
     void prepareForReuse() override {
         Image::cancel(picture);
@@ -553,8 +572,14 @@ public:
 
     RecyclingGridItem* cellForRow(RecyclingView* recycler, size_t index) override {
         auto* cell = dynamic_cast<StreamCell*>(recycler->dequeueReusableCell("Stream"));
+        fill(cell, index);
+        return cell;
+    }
+
+    void fill(StreamCell* cell, size_t index) {
         const auto& item = items.at(index);
         cell->upTarget = upTarget;
+        cell->setSquarePicture(!item.isLive);
         cell->title->setText(item.userName.empty() ? item.userLogin : item.userName);
         std::string game = item.gameName;
         if (!game.empty()) game += " ·";
@@ -574,7 +599,16 @@ public:
         cell->onFocused = [focusedItem, index, focusedCallback]() {
             if (focusedCallback) focusedCallback(focusedItem, index);
         };
-        return cell;
+    }
+
+    /// Returns the updated item's index, or the item count when none matched.
+    size_t setThumbnail(const std::string& login, const std::string& url) {
+        for (size_t index = 0; index < items.size(); ++index) {
+            if (items[index].userLogin != login) continue;
+            items[index].thumbnailUrl = url;
+            return index;
+        }
+        return items.size();
     }
 
     void onItemSelected(brls::Box*, size_t index) override {
@@ -707,6 +741,7 @@ public:
         auto* cell = dynamic_cast<StreamCell*>(recycler->dequeueReusableCell("Event"));
         const auto& item = items.at(index);
         cell->upTarget = upTarget;
+        cell->setSquarePicture(false);
         cell->title->setText(item.title);
         cell->subtitle->setParts(item.categoryName.empty() ? "Kick event" : item.categoryName);
         cell->setStats(eventStats(item));
@@ -944,6 +979,16 @@ public:
         eventSource = nullptr;
         recycler->setDataSource(categorySource);
         showResult(count > 0, emptyText);
+    }
+
+    void setStreamThumbnail(const std::string& login, const std::string& url) {
+        if (!streamSource) return;
+        const size_t index = streamSource->setThumbnail(login, url);
+        if (index >= count) return;
+        recycler->forEachCell([&](RecyclingGridItem* item) {
+            if (item->getIndex() != index) return;
+            if (auto* cell = dynamic_cast<StreamCell*>(item)) streamSource->fill(cell, index);
+        });
     }
 
     size_t appendStreams(std::vector<kick::Stream> items) {
@@ -1268,6 +1313,7 @@ KickNXHome::KickNXHome() {
     heroPreview = new brls::Image();
     heroPreview->setGrow(1.0f);
     heroPreview->setHeightPercentage(100);
+    heroPreview->setScalingType(brls::ImageScalingType::FILL);
     heroPreview->setImageFromRes("img/video-card-bg.png");
     heroBox->addView(heroPreview);
 
@@ -1374,12 +1420,15 @@ KickNXHome::KickNXHome() {
 KickNXHome::~KickNXHome() {
     if (instance == this) instance = nullptr;
     if (activeRequest) activeRequest->store(true);
+    alive->store(false);
+    thumbnailRequest->store(true);
     if (heroPreview) Image::cancel(heroPreview);
 }
 
 void KickNXHome::updateHero(const kick::Stream& stream) {
     if (!heroBox || !heroPreview) return;
 
+    heroLogin = stream.userLogin;
     Image::cancel(heroPreview);
     heroPreview->setImageFromRes("img/video-card-bg.png");
     if (!stream.thumbnailUrl.empty())
@@ -1399,6 +1448,56 @@ void KickNXHome::updateHero(const kick::Stream& stream) {
     }
     heroMetaLabel->setText(meta.empty() ? "Select a stream to watch" : meta);
     heroBox->setVisibility(brls::Visibility::VISIBLE);
+}
+
+namespace {
+// Live stream thumbnails found for followed channels, kept a few minutes so
+// coming back to Home shows them straight away instead of profile pictures.
+struct CachedThumbnail {
+    std::string url;
+    std::chrono::steady_clock::time_point found;
+};
+std::unordered_map<std::string, CachedThumbnail> liveThumbnails;
+constexpr auto LIVE_THUMBNAIL_LIFETIME = std::chrono::minutes(3);
+
+bool hasStreamThumbnail(const kick::Stream& stream) {
+    return stream.thumbnailUrl.find("/video_thumbnails/") != std::string::npos;
+}
+}  // namespace
+
+std::vector<std::string> KickNXHome::useCachedThumbnails(std::vector<kick::Stream>& streams) {
+    std::vector<std::string> missing;
+    const auto now = std::chrono::steady_clock::now();
+    for (auto& stream : streams) {
+        if (!stream.isLive || stream.userLogin.empty() || hasStreamThumbnail(stream)) continue;
+        // Until the stream thumbnail arrives, the card shows the kickNX
+        // placeholder rather than the channel's profile picture.
+        const auto cached = liveThumbnails.find(stream.userLogin);
+        if (cached != liveThumbnails.end()) {
+            stream.thumbnailUrl = cached->second.url;
+            if (now - cached->second.found < LIVE_THUMBNAIL_LIFETIME) continue;
+        } else {
+            stream.thumbnailUrl.clear();
+        }
+        missing.push_back(stream.userLogin);
+    }
+    return missing;
+}
+
+void KickNXHome::loadFollowedThumbnails(std::vector<std::string> logins) {
+    std::weak_ptr<std::atomic_bool> weakAlive = alive;
+    kick::loadLiveThumbnailsAsync(kick::loadConfig(), std::move(logins),
+        [this, weakAlive](const std::string& login, const std::string& url) {
+            liveThumbnails[login] = {url, std::chrono::steady_clock::now()};
+            const auto stillAlive = weakAlive.lock();
+            if (!stillAlive || !stillAlive->load()) return;
+            followedRow->setStreamThumbnail(login, url);
+            if (heroPreview && heroLogin == login) {
+                Image::cancel(heroPreview);
+                Image::with(heroPreview, kick::streamThumbnail(url, 820, 461));
+            }
+        },
+        thumbnailRequest);
 }
 
 void KickNXHome::clearHero() {
@@ -2314,6 +2413,9 @@ void KickNXHome::showHomeData(kick::HomeData data) {
     }
     auto play = [this](const kick::Stream& stream) { playChannel(stream); };
 
+    std::vector<std::string> followedThumbnails;
+    if (data.account.signedIn()) followedThumbnails = useCachedThumbnails(data.followed.items);
+
     if (!data.followed.items.empty()) updateHero(data.followed.items.front());
     else if (!data.popular.items.empty()) updateHero(data.popular.items.front());
     else clearHero();
@@ -2367,6 +2469,7 @@ void KickNXHome::showHomeData(kick::HomeData data) {
                 ? "None of your followed Kick channels are live right now."
                 : "Followed channels could not be loaded. Use Retry to try again.",
             followedUpTarget);
+        loadFollowedThumbnails(std::move(followedThumbnails));
         offlineFollowedRow->setStreams(std::move(data.offlineFollowed.items), play,
             data.offlineFollowedError.empty()
                 ? "No offline followed channels were returned."
@@ -2784,6 +2887,8 @@ void KickNXHome::showAbout() {
         "• Emote tabs: Channel, Global and Collectibles.\n"
         "• Subscriber emotes when you are subscribed.\n"
         "• Setting to turn watch time counting off.\n"
+        "• Stream thumbnails on live followed cards.\n"
+        "• Sharper event cards, unstretched thumbnails and whole offline profile pictures.\n"
         "• Chat and video wait out Wi-Fi drops instead of failing.\n"
         "• Fixed missing channel emotes and emotes turning into text.\n"
         "• Fixed SSL errors and buffering when sending messages.\n\n"
@@ -2971,7 +3076,9 @@ void KickNXHome::loadMoreFollowed() {
     kick::loadFollowedPageAsync(kick::loadConfig(), cursor,
         [this, requestId](kick::StreamPage page) {
             if (!finishBrowsingRequest(requestId)) return;
+            std::vector<std::string> thumbnails = useCachedThumbnails(page.items);
             const size_t added = followedRow->appendStreams(std::move(page.items));
+            loadFollowedThumbnails(std::move(thumbnails));
             followedCursor = page.cursor;
             followedRow->setHasMore(!followedCursor.empty());
             followedRow->onNextPage(!followedCursor.empty(), [this]() { loadMoreFollowed(); });

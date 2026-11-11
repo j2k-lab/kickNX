@@ -107,6 +107,10 @@ void HRecyclerFrame::clearData() {
     }
 }
 
+void HRecyclerFrame::forEachCell(const std::function<void(RecyclingGridItem*)>& visit) {
+    for (View* view : contentBox->getChildren()) visit(static_cast<RecyclingGridItem*>(view));
+}
+
 void HRecyclerFrame::reloadData() {
     if (!layouted) return;
 

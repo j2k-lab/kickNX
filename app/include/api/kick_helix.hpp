@@ -237,6 +237,15 @@ void loadHomeAsync(
     ErrorCallback failure,
     HTTP::Cancel cancel = nullptr);
 
+/// Kick's followed list has no stream thumbnails, so this looks each live
+/// channel up one after another on a single connection. `found` runs on the
+/// UI thread for each channel that has one.
+void loadLiveThumbnailsAsync(
+    const Config& config,
+    std::vector<std::string> logins,
+    std::function<void(const std::string& login, const std::string& url)> found,
+    HTTP::Cancel cancel = nullptr);
+
 void loadFollowedPageAsync(
     const Config& config,
     const std::string& cursor,
