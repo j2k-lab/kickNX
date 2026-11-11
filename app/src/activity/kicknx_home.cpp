@@ -2763,6 +2763,8 @@ void KickNXHome::showAbout() {
         "• Automatic portrait mode using attached Joy-Con motion sensors, with either rotation supported\n"
         "• Smartphone-style portrait player combining video, live Pusher chat, a persistent message draft, inline touch keyboard and emote sheet\n"
         "• Real-time Pusher WebSocket chat with static/animated Kick emotes and message composer\n"
+        "• Channel, Global and Collectibles emote tabs, with subscriber emotes when subscribed\n"
+        "• Daily Reward progress and claiming from the player or the Home gift button\n"
         "• Touch controls for switching between the portrait keyboard and emote sheet\n"
         "• Adjustable touch-keyboard haptics for portrait mode typing\n"
         "• Docked and overlay chat, compact mode and four-corner placement\n"
@@ -2776,7 +2778,16 @@ void KickNXHome::showAbout() {
 
     addSection("Changelog");
     addBody(
-        "0.5.1 (Current)\n"
+        "0.5.2 (Current)\n"
+        "• Daily Reward bar above chat; claim it with the right stick.\n"
+        "• Gift button on Home shows reward progress or the time until reset.\n"
+        "• Emote tabs: Channel, Global and Collectibles.\n"
+        "• Subscriber emotes when you are subscribed.\n"
+        "• Setting to turn watch time counting off.\n"
+        "• Chat and video wait out Wi-Fi drops instead of failing.\n"
+        "• Fixed missing channel emotes and emotes turning into text.\n"
+        "• Fixed SSL errors and buffering when sending messages.\n\n"
+        "0.5.1\n"
         "• Rewind a live stream to its start: long rewinds switch to the live VOD, "
         "with chat staying live.\n"
         "• Recent broadcasts show a still-live broadcast as a LIVE card.\n"

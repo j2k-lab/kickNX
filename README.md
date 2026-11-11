@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Release 0.5.1" src="https://img.shields.io/badge/release-0.5.1-green?logo=github&style=flat-square" height="20"></a>
+  <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Release 0.5.2" src="https://img.shields.io/badge/release-0.5.2-green?logo=github&style=flat-square" height="20"></a>
   <a href="https://github.com/j2k-lab/kickNX/releases"><img alt="Downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fj2k-lab%2FkickNX%2Fbadges%2Fdownloads.json&style=flat-square" height="20"></a>
   <img alt="Nintendo Switch" src="https://img.shields.io/badge/platform-Nintendo%20Switch-E60012?logo=nintendoswitch&logoColor=white&style=flat-square" height="20">
   <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=c%2B%2B&logoColor=white&style=flat-square" height="20">
@@ -25,6 +25,12 @@ Switch homebrew. It combines native playback, Kick browsing and interactive
 chat in an interface designed around Joy-Con, Pro Controller and touchscreen
 use in handheld, tabletop and television play.
 
+Version 0.5.2 adds Kick's Daily Reward: a progress bar above chat, claiming
+from the player or a gift button on Home, and a look at the collectible you
+got. Emotes are split into Channel, Global and Collectibles tabs, with
+subscriber emotes when you are subscribed. It also keeps chat and video
+steady through brief Wi-Fi drops, so Airplane mode is no longer needed to
+recover.
 Version 0.5.1 lets you rewind a live stream all the way back to its start,
 the way kick.com does, by switching to the live VOD. It also installs updates
 from the About page and restarts on its own, shows how to launch kickNX
@@ -123,7 +129,9 @@ chat, and Joy-Con portrait mode.
 - Kick username colors and formatted chat messages
 - Global, channel, subscriber and exclusive emotes
 - Static and animated Kick emotes
-- Message composer with a built-in on-screen keyboard (Caps Lock, symbols) and Recent, Channel and All emote tabs
+- Message composer with a built-in on-screen keyboard (Caps Lock, symbols) and Recent, Channel, Global and Collectibles emote tabs
+- Subscriber emotes in the Channel tab when you are subscribed
+- Daily Reward progress bar above chat, with claiming from the player or the Home gift button
 - Touch-accessible Send button in the full composer
 - Optional Nintendo system keyboard under Player Settings → Message composer
 - Multi-line message wrapping
@@ -216,6 +224,7 @@ Major milestones:
 - `0.4.0` - Channel follow/unfollow on streamer profiles, clickable user avatar, and Kick bright green UI theme, plus chat, playback and settings fixes
 - `0.5.0` - Colour themes with a Home pop-up picker, Kick-only cleanup, offline stream handling and playback fixes
 - `0.5.1` - Rewind live streams to their start through the live VOD, in-app updates with automatic restart, applet-mode launch help, and faster Home, chat and playback
+- `0.5.2` - Daily Reward progress and claiming, Channel, Global and Collectibles emote tabs with subscriber emotes, and steadier chat and video through Wi-Fi drops
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 

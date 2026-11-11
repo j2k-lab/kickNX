@@ -15,6 +15,27 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.5.2]
+
+### Added
+- **Emote tabs**: the emote picker has Recent, Channel, Global and Collectibles tabs in landscape and portrait. Channel holds the channel's own emotes, Global holds Kick's shared Global and Emoji sets, and Collectibles holds the emotes your account has collected. Animated collectible emotes now animate in chat and show a still preview in the picker.
+- **Subscriber emotes**: when Kick confirms you are subscribed to the channel, its subscriber emotes show in the Channel tab. If a channel's emotes are all for subscribers, or it has none, the Channel tab says so instead of disappearing.
+- **Daily Reward bar**: while you watch a live stream signed in, a bar above chat shows your progress toward Kick's daily watch reward (for example 38 / 60 min), counting up smoothly. When it is full, press the right stick to claim it, and a window shows the collectible you got (or that it was a duplicate). The bar hides once the day's reward is claimed.
+- **Gift button on Home**: when signed in, a gift icon in the Home banner opens a small window with your daily reward progress, a Claim button when it is ready, or the time until it resets.
+- **Count watch time for rewards**: a new Player Settings switch turns watch time reporting off.
+
+### Changed
+- **Watch time check-ins**: kickNX tells Kick you are watching in a brief check-in every 2 minutes, instead of keeping a connection open for the whole stream.
+- **Fewer connections for chat**: each channel's IDs are remembered for the launch, messages are sent without setting chat up again, and setup requests share one connection.
+- **Emote lists** are kept for ten minutes per channel, and failed loads retry.
+
+### Fixed
+- **Wi-Fi drops**: the Switch could drop Wi-Fi for several seconds at a time, which caused chat reconnect loops, buffering and "Couldn't resolve host" errors that often needed Airplane mode to clear. kickNX now asks the Switch to keep its internet connection while it runs, as games do. When the connection does drop, chat shows "Waiting for network…", video waits up to 2 minutes before giving up, and messages wait up to 12 seconds to send.
+- **Channel emotes missing**: channel emotes could fail to load after the Switch sat idle, or after switching channels, until Airplane mode was toggled.
+- **Emote pictures turning into text**: after watching several channels, new chat emotes showed as text because the picture pool never freed old entries.
+- **SSL errors when sending**: sending a message could fail with an SSL error, or make the stream buffer, when the Switch ran out of secure connections. Sends now make room first and retry if the connection could not be opened.
+- **Fewer DNS lookups**: all connections share one DNS cache.
+
 ## [0.5.1]
 
 ### Added
