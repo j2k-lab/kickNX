@@ -59,8 +59,8 @@ chat, and Joy-Con portrait mode.
 | Channel page | QR code sign-in |
 | <img src="images/chat-keyboard.jpg" alt="In-app chat keyboard" width="100%"> | <img src="images/chat-emotes.jpg" alt="Emote picker" width="100%"> |
 | In-app chat keyboard | Emote picker |
-| <img src="images/about.jpg" alt="About page" width="100%"> | |
-| About and update check | |
+| <img src="images/about.jpg" alt="About page" width="100%"> | <img src="images/daily-reward.jpg" alt="Daily Reward window" width="100%"> |
+| About and update check | Daily Reward |
 
 <p align="center">
   <img src="images/portrait-keyboard.jpg" alt="Portrait mode keyboard" width="32%">
